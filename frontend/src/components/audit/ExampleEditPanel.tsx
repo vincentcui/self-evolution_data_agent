@@ -48,14 +48,20 @@ export default function ExampleEditPanel({ value, onChange }: Props) {
         />
       </Form.Item>
 
-      <Form.Item label="结果摘要">
+      <Form.Item
+        label="结果摘要"
+        validateStatus={value.result_summary.length > 120 ? "error" : ""}
+        help={value.result_summary.length > 120
+          ? `已超出 ${value.result_summary.length - 120} 字，请缩减至 120 字以内再保存`
+          : ""}
+      >
         <Input.TextArea
           aria-label="结果摘要"
           value={value.result_summary}
           onChange={(e) => update({ result_summary: e.target.value })}
           rows={2}
-          maxLength={120}
-          showCount
+          showCount={{ formatter: ({ count }) => `${count} / 120` }}
+          status={value.result_summary.length > 120 ? "error" : ""}
         />
       </Form.Item>
 

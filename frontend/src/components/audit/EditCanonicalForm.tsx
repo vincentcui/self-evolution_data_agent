@@ -127,6 +127,11 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
           setSubmitting(false);
           return;
         }
+        if (examplePayload.result_summary.length > 120) {
+          message.warning(`结果摘要不能超过 120 字（当前 ${examplePayload.result_summary.length} 字）`);
+          setSubmitting(false);
+          return;
+        }
         await editKnowledge(entry.id, {
           payload: examplePayload, content: q, tier, reason,
         });
