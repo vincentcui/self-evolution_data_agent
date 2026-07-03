@@ -435,13 +435,13 @@ function ExampleFields({
           placeholder='{"steps": [{"db_type": "mysql", ...}]}'
         />
       </Form.Item>
-      <Form.Item label="结果摘要 (可选，最多 120 字)">
+      <Form.Item label="结果摘要 (可选，最多 300 字)">
         <Input.TextArea
           aria-label="result_summary"
           rows={2}
           value={value.result_summary}
           onChange={(e) => onChange({ ...value, result_summary: e.target.value })}
-          maxLength={120}
+          maxLength={300}
           showCount
         />
       </Form.Item>
