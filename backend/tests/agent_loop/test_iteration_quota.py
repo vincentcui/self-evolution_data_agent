@@ -1,5 +1,6 @@
 """3 桶配额 + 开关行为."""
 from __future__ import annotations
+
 import asyncio
 import logging
 
