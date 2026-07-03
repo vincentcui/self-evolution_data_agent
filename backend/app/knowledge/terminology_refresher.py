@@ -153,10 +153,8 @@ async def _upsert_terminology_ke(
             await s.commit()
 
             if ke is None:
-                log.warning(
-                    "[refresh_terms] term=%r 闸门 reject (validation/db_type/conflict)",
-                    t.term,
-                )
+                # 具体子因已由闸门内各步骤各自记录（validation/db_type/conflict），此处不重复
+                log.debug("[refresh_terms] term=%r 闸门 reject，见上游日志", t.term)
                 return "failed"
             if ke.id in existing_ids_before:
                 # 命中既有活跃 KE — 闸门内合并 synonyms, 但本次未新建

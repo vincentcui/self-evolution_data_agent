@@ -272,5 +272,9 @@ async def upsert_terminology_with_validation(
         if ke is not None:
             return ke
         # canonical 拒绝合并 → 落 conflict
+    log.warning(
+        "[terminology_intake] term=%r 冲突落 conflict 表，未写 KE (source=%s)",
+        parsed.term, source,
+    )
     await _record_conflict(db, ns_id, existing, existing_payload, parsed, source, repo_id)
     return None

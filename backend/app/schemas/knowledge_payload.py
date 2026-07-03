@@ -44,16 +44,22 @@ class TerminologyPayload(BaseModel):
     @field_validator("synonyms")
     @classmethod
     def _synonyms_shape_check(cls, v: list[str]) -> list[str]:
-        max_len = settings.terminology_term_max_len
+        import logging
+        _log = logging.getLogger(__name__)
+        # synonym 用独立上限（释义性短语比 term 长，英文术语天然超 20 字）
+        max_len = settings.terminology_synonym_max_len
         out: list[str] = []
-        for idx, s in enumerate(v):
+        for s in v:
             s_strip = s.strip() if s else ""
             if not s_strip:
-                raise ValueError(f"synonym 不能为空白: 索引 {idx}")
+                continue  # 空白项静默跳过
             if len(s_strip) > max_len:
-                raise ValueError(f"synonym 超长: {s_strip!r}")
+                _log.warning("[terminology] synonym 超长，已跳过: %r (len=%d > %d)",
+                             s_strip, len(s_strip), max_len)
+                continue  # 单个超长项 drop，不连累整条 term
             if "\n" in s_strip or "。" in s_strip:
-                raise ValueError(f"synonym 不应含换行/句号: {s_strip!r}")
+                _log.warning("[terminology] synonym 含非法字符，已跳过: %r", s_strip)
+                continue  # 同上
             out.append(s_strip)
         return out
 
@@ -67,6 +73,16 @@ class ExamplePayload(BaseModel):
     target_database: str | None = None
     query_json: dict
     result_summary: str = ""
+
+    @field_validator("result_summary")
+    @classmethod
+    def _result_summary_len_check(cls, v: str) -> str:
+        max_len = settings.example_result_summary_max_len
+        if len(v) > max_len:
+            raise ValueError(
+                f"result_summary 超过字数上限 {max_len}（当前 {len(v)} 字）"
+            )
+        return v
     source_query_history_id: int | None = None
     schema_hash: str | None = None
 

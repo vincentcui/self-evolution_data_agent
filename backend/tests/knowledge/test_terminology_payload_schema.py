@@ -71,19 +71,28 @@ def test_db_type_invalid_value():
         TerminologyPayload(**{**VALID, "db_type": "postgresql"})
 
 
-def test_synonyms_too_long_rejected():
-    with pytest.raises(ValidationError):
-        TerminologyPayload(**{**VALID, "synonyms": ["货品" * 21]})
+def test_synonyms_too_long_dropped_not_rejected():
+    """超长 synonym 单独跳过，不连累整条 term 入库."""
+    p = TerminologyPayload(**{**VALID, "synonyms": ["货品", "货" * 51, "存货"]})
+    assert "货品" in p.synonyms and "存货" in p.synonyms
+    assert "货" * 51 not in p.synonyms  # 超长项被 drop
+
+    # 英文短语不受 20 字旧限制，≤50 字的英文 synonym 应保留
+    p2 = TerminologyPayload(**{**VALID, "synonyms": ["supplementary agreement"]})
+    assert "supplementary agreement" in p2.synonyms
 
 
-def test_synonyms_with_newline_rejected():
-    with pytest.raises(ValidationError):
-        TerminologyPayload(**{**VALID, "synonyms": ["货品\n标"]})
+def test_synonyms_with_newline_dropped_not_rejected():
+    """含换行/句号的 synonym 单独跳过，保留其余合法项."""
+    p = TerminologyPayload(**{**VALID, "synonyms": ["货品", "货品\n标", "存货"]})
+    assert "货品" in p.synonyms and "存货" in p.synonyms
+    assert "货品\n标" not in p.synonyms
 
 
-def test_synonyms_blank_element_rejected():
-    with pytest.raises(ValidationError, match="空白"):
-        TerminologyPayload(**{**VALID, "synonyms": ["货品", "  ", "存货"]})
+def test_synonyms_blank_element_dropped():
+    """空白 synonym 静默跳过，保留合法项."""
+    p = TerminologyPayload(**{**VALID, "synonyms": ["货品", "  ", "存货"]})
+    assert p.synonyms == ["货品", "存货"]
 
 
 def test_extra_field_forbidden():

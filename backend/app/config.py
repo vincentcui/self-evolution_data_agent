@@ -118,7 +118,13 @@ class Settings(BaseSettings):
 
     # ── Phase 1 Terminology Intake ───────────────────────
     terminology_term_max_len: int = 20
-    """terminology term/synonym 字数上限, env: IS_TERMINOLOGY_TERM_MAX_LEN"""
+    """terminology term 字数上限（中文业务名词，通常 ≤10 字），env: IS_TERMINOLOGY_TERM_MAX_LEN"""
+
+    terminology_synonym_max_len: int = 50
+    """terminology synonym 字数上限（释义性短语，英文术语天然更长），env: IS_TERMINOLOGY_SYNONYM_MAX_LEN"""
+
+    example_result_summary_max_len: int = 300
+    """示例查询知识 result_summary 字数上限（前端/后端/LLM prompt 统一真相源），env: IS_EXAMPLE_RESULT_SUMMARY_MAX_LEN"""
 
     # ── Phase 1 schema-knowledge-onboarding 配置 ─────────
     promote_batch_size: int = 200

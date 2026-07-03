@@ -140,9 +140,10 @@ _REFERENCEABLE_TOOLS: frozenset[str] = frozenset({"execute_query", "execute_plan
 class AgentResult:
     final_answer: str
     iterations: int
-    # stop_reason 取值: "end_turn" | "max_exploratory_calls" | "max_decisive_calls"
-    #   | "max_total_iterations" | "dead_loop" | "cancelled"
+    # stop_reason 取值: "end_turn" | "max_total_iterations" | "dead_loop" | "cancelled"
     #   | "forced_clarify_timeout" | "forced_clarify_exhausted"
+    # 已废弃（降级为 warning log，不再硬停）：
+    #   "max_exploratory_calls" | "max_decisive_calls"
     stop_reason: str
     tool_trace: list[dict] = field(default_factory=list)
     usage_total: dict = field(default_factory=dict)
@@ -325,36 +326,19 @@ async def run_agent_loop(
                 elif cat == "decisive":
                     next_decisive += 1
 
+            # ── 桶配额：降级为可观测指标，不再硬停 ──
+            # decisive/exploratory 计数无法区分"复杂查询的合法深探"与"无进展空转"，
+            # count-based 上限会误杀差一步出结果的复杂查询。
+            # 终止权交给：dead_loop（停滞精确特例）+ max_total_iterations（成本后墙）。
             if exploratory_count + next_explore > cap_explore:
-                stop_reason = "max_exploratory_calls"
-                await sse_emit({"event": "agent_finished", "data": {
-                    "ended_at": _now_iso(),
-                    "total_iterations": iteration,
-                    "total_tool_calls": len(tool_trace),
-                    "stop_reason": stop_reason,
-                }})
-                return AgentResult(
-                    final_answer=f"(已达探索类工具调用上限 {cap_explore}, 当前进展见 tool_trace)",
-                    iterations=iteration,
-                    stop_reason=stop_reason,
-                    tool_trace=tool_trace,
-                    usage_total=usage_total,
+                log.warning(
+                    "[agent_loop] 探索类工具调用超软上限 %d (当前=%d)，继续执行",
+                    cap_explore, exploratory_count + next_explore,
                 )
-
             if decisive_count + next_decisive > cap_decisive:
-                stop_reason = "max_decisive_calls"
-                await sse_emit({"event": "agent_finished", "data": {
-                    "ended_at": _now_iso(),
-                    "total_iterations": iteration,
-                    "total_tool_calls": len(tool_trace),
-                    "stop_reason": stop_reason,
-                }})
-                return AgentResult(
-                    final_answer=f"(已达决策类工具调用上限 {cap_decisive}, 当前进展见 tool_trace)",
-                    iterations=iteration,
-                    stop_reason=stop_reason,
-                    tool_trace=tool_trace,
-                    usage_total=usage_total,
+                log.warning(
+                    "[agent_loop] 决策类工具调用超软上限 %d (当前=%d)，继续执行",
+                    cap_decisive, decisive_count + next_decisive,
                 )
 
             # ── 推 tool_use 事件 ──
