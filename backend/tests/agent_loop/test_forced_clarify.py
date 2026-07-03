@@ -306,13 +306,15 @@ def _clarify_capture(sink: list):
     return _clarify
 
 
-# Feature: mongo-flavor-capabilities-and-error-clarify, Property 23: 保留三桶配额终止语义
+# Feature: mongo-flavor-capabilities-and-error-clarify, Property 23: 桶配额降级为软告警，成本后墙终止
 @pytest.mark.asyncio
-async def test_property_23_quota_terminates(monkeypatch):
+async def test_property_23_quota_soft_limit(monkeypatch):
+    """decisive 软上限超后不硬停，继续到 total_iterations 成本后墙."""
     monkeypatch.setattr(al, "_resolve_caps_for_error", _noop_caps)
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 1)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    # total_iterations 作唯一计数型后墙
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 4)
     monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 100)
     monkeypatch.setattr(al.settings, "agent_loop_error_class_window_size", 5)
     monkeypatch.setattr(al.settings, "agent_loop_error_class_threshold", 2)
@@ -320,15 +322,15 @@ async def test_property_23_quota_terminates(monkeypatch):
     async def _ok(**kw):
         return {"rows": [{"x": 1}], "row_count": 1}
 
-    # execute_query 是 decisive; cap=1 → 第二次 decisive 触顶
-    llm = FakeLLM(responses=[_resp([_tc("execute_query", {"q": i})]) for i in range(5)])
+    # decisive cap=1，但软上限不硬停；由 total_iterations=4 终止
+    llm = FakeLLM(responses=[_resp([_tc("execute_query", {"q": i})]) for i in range(10)])
     events, emit = _sse()
     result = await run_agent_loop(
         trace_id="t", question="q",
         tools_registry={"execute_query": _ok, "clarify_with_user": _clarify_stub()},
         tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
     )
-    assert result.stop_reason == "max_decisive_calls"
+    assert result.stop_reason == "max_total_iterations"
 
 
 # Feature: mongo-flavor-capabilities-and-error-clarify, Property 24: 澄清为 interactive 且不计任何配额桶

@@ -331,12 +331,12 @@ async def run_agent_loop(
             # count-based 上限会误杀差一步出结果的复杂查询。
             # 终止权交给：dead_loop（停滞精确特例）+ max_total_iterations（成本后墙）。
             if exploratory_count + next_explore > cap_explore:
-                log.warning(
+                logger.warning(
                     "[agent_loop] 探索类工具调用超软上限 %d (当前=%d)，继续执行",
                     cap_explore, exploratory_count + next_explore,
                 )
             if decisive_count + next_decisive > cap_decisive:
-                log.warning(
+                logger.warning(
                     "[agent_loop] 决策类工具调用超软上限 %d (当前=%d)，继续执行",
                     cap_decisive, decisive_count + next_decisive,
                 )

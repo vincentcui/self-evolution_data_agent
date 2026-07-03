@@ -1,6 +1,7 @@
 """3 桶配额 + 开关行为."""
 from __future__ import annotations
 import asyncio
+import logging
 
 import pytest
 
@@ -39,12 +40,13 @@ def _make_tool(name, output):
 
 
 @pytest.mark.asyncio
-async def test_max_exploratory_calls_triggers(monkeypatch):
-    """exploratory 配额耗尽触发 max_exploratory_calls."""
+async def test_max_exploratory_calls_soft_limit(monkeypatch, caplog):
+    """exploratory 超软上限只记 warning，不硬停；继续到 total_iterations."""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 3)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    # total_iterations 作真正的成本后墙
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 6)
 
     responses = [
         _tuc(calls=[ToolCall(id=f"c{i}", name="lookup_knowledge",
@@ -54,40 +56,48 @@ async def test_max_exploratory_calls_triggers(monkeypatch):
     llm = FakeLLM(responses=responses)
     events, emit = _sse_sink()
 
-    result = await run_agent_loop(
-        trace_id="t-explore-cap", question="q",
-        tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", [])},
-        tool_specs=[], sse_emit=emit,
-        user_correction_queue=asyncio.Queue(),
-        llm=llm, system_prompt="",
-    )
-    assert result.stop_reason == "max_exploratory_calls"
+    with caplog.at_level(logging.WARNING, logger="app.engine.agent_loop"):
+        result = await run_agent_loop(
+            trace_id="t-explore-soft", question="q",
+            tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", [])},
+            tool_specs=[], sse_emit=emit,
+            user_correction_queue=asyncio.Queue(),
+            llm=llm, system_prompt="",
+        )
+
+    # 软上限：不硬停，由 total_iterations 成本后墙终止
+    assert result.stop_reason == "max_total_iterations"
+    # 超软上限时记了 warning
+    assert any("超软上限" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_max_decisive_calls_triggers(monkeypatch):
-    """decisive 配额耗尽触发 max_decisive_calls."""
+async def test_max_decisive_calls_soft_limit(monkeypatch, caplog):
+    """decisive 超软上限只记 warning，不硬停；继续到 total_iterations."""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 2)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 5)
 
     responses = [
         _tuc(calls=[ToolCall(id=f"c{i}", name="execute_plan",
                               input={"plan_id": i})], stop="tool_use")
-        for i in range(5)
+        for i in range(10)
     ]
     llm = FakeLLM(responses=responses)
     events, emit = _sse_sink()
 
-    result = await run_agent_loop(
-        trace_id="t-decisive-cap", question="q",
-        tools_registry={"execute_plan": _make_tool("execute_plan", {"ok": True})},
-        tool_specs=[], sse_emit=emit,
-        user_correction_queue=asyncio.Queue(),
-        llm=llm, system_prompt="",
-    )
-    assert result.stop_reason == "max_decisive_calls"
+    with caplog.at_level(logging.WARNING, logger="app.engine.agent_loop"):
+        result = await run_agent_loop(
+            trace_id="t-decisive-soft", question="q",
+            tools_registry={"execute_plan": _make_tool("execute_plan", {"ok": True})},
+            tool_specs=[], sse_emit=emit,
+            user_correction_queue=asyncio.Queue(),
+            llm=llm, system_prompt="",
+        )
+
+    assert result.stop_reason == "max_total_iterations"
+    assert any("超软上限" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
