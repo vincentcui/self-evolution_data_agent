@@ -590,6 +590,10 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_model_config_audit_logs_table(engine)
     # migration_026 (P0 对话体验优化): sessions 表 — 对话会话持久化
     await _create_sessions_table(engine)
+    # migration_027 (P0 对话体验优化): query_history.feedback_rating 列 — 答案反馈
+    await _add_missing(engine, "query_history", [
+        ("feedback_rating", "VARCHAR(10)"),
+    ])
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:

@@ -26,6 +26,9 @@ from app.api import (
     enum_dictionary as enum_dictionary_api,
 )
 from app.api import (
+    feedback as feedback_api,
+)
+from app.api import (
     extraction_failure as extraction_failure_api,
 )
 from app.api import (
@@ -483,6 +486,9 @@ app.include_router(profile_api.router)
 
 # model-management: 模型配置 CRUD + 激活 + 测试连接
 app.include_router(model_config_api.router)
+
+# P0 对话体验: 答案反馈
+app.include_router(feedback_api.router)
 
 
 @app.get("/api/health")

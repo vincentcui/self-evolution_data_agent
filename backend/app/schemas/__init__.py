@@ -622,6 +622,15 @@ from app.schemas.query_stream import (  # noqa: E402
 
 
 # ════════════════════════════════════════════
+#  P0 对话体验 — Feedback
+# ════════════════════════════════════════════
+
+class FeedbackCreate(BaseModel):
+    history_id: int
+    rating: str  # 'like' | 'dislike'
+
+
+# ════════════════════════════════════════════
 #  P0 对话体验 — Readiness
 # ════════════════════════════════════════════
 
