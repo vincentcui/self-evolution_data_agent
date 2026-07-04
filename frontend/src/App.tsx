@@ -17,6 +17,7 @@ import AgentTracesPage from "./pages/AgentTracesPage";
 import ProfilePage from "./pages/ProfilePage";
 import ProfileManagement from "./pages/ProfileManagement";
 import ModelManagement from "./pages/ModelManagement";
+import WorkspacePage from "./pages/WorkspacePage";
 import { roleAtLeast } from "@/utils/role";
 
 /* ── 认证守卫 ── */
@@ -47,6 +48,7 @@ const App: React.FC = () => (
 
           {/* 管理员专属路由 */}
           <Route element={<RequireAdmin />}>
+            <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/namespaces" element={<NamespacePage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/profiles" element={<ProfileManagement />} />

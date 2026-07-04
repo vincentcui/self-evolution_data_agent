@@ -6,15 +6,9 @@
 
 import React from "react";
 import {
-  BarChartOutlined,
-  DatabaseOutlined,
-  BookOutlined,
   UserOutlined,
   LogoutOutlined,
-  RobotOutlined,
-  ShareAltOutlined,
-  ExperimentOutlined,
-  SettingOutlined,
+  AppstoreOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { Button } from "antd";
@@ -25,17 +19,6 @@ import { useSessions } from "@/hooks/useSessions";
 import { readLastNamespaceId } from "@/hooks/useLastNamespaceId";
 import SessionList from "@/components/SessionList";
 import styles from "@/styles/layout.module.css";
-
-const adminNavItems = [
-  { path: "/", icon: <BarChartOutlined />, label: "智能查询" },
-  { path: "/namespaces", icon: <DatabaseOutlined />, label: "命名空间" },
-  { path: "/model-management", icon: <RobotOutlined />, label: "模型管理" },
-  { path: "/knowledge", icon: <BookOutlined />, label: "知识库" },
-  { path: "/profiles", icon: <SettingOutlined />, label: "Profile 管理" },
-  { path: "/admin/agent-traces", icon: <ExperimentOutlined />, label: "Trace 提炼" },
-  { path: "/users", icon: <UserOutlined />, label: "用户管理" },
-  { path: "/shares", icon: <ShareAltOutlined />, label: "分享管理" },
-];
 
 const Layout: React.FC = () => {
   const { user, logout } = useAuth();
@@ -118,45 +101,34 @@ const Layout: React.FC = () => {
           </div>
         </div>
 
-        {/* SessionList: 首页对话页展示 */}
-        {location.pathname === "/" && (
-          <SessionList
-            namespaceId={nsId}
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            loading={sessionsLoading}
-            onCreate={createSession}
-            onSelect={(id) => {
-              setActiveSessionId(id);
-              navigate("/");
-            }}
-            onRename={renameSession}
-            onDelete={deleteSession}
-          />
-        )}
-
-        <nav className={styles.navList}>
-          {adminNavItems.map((item) => (
-            <button
-              key={item.path}
-              className={
-                location.pathname === item.path
-                  ? styles.navItemActive
-                  : styles.navItem
-              }
-              onClick={() => navigate(item.path)}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        {/* 会话列表 — 始终展示 */}
+        <SessionList
+          namespaceId={nsId}
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          loading={sessionsLoading}
+          onCreate={createSession}
+          onSelect={(id) => {
+            setActiveSessionId(id);
+            navigate("/");
+          }}
+          onRename={renameSession}
+          onDelete={deleteSession}
+        />
 
         <div className={styles.userArea}>
           <div className={styles.userInfo}>
             <UserOutlined />
             <span>{user?.username}</span>
           </div>
+          <Button
+            type="text"
+            size="small"
+            icon={<AppstoreOutlined />}
+            onClick={() => navigate("/workspace")}
+          >
+            工作台
+          </Button>
           <Button
             type="text"
             size="small"
