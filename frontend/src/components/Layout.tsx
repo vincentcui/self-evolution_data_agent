@@ -4,10 +4,11 @@
  *  user:  顶栏 + 全屏内容区
  * ════════════════════════════════════════════ */
 
-import React from "react";
+import React, { useState } from "react";
 import {
   UserOutlined,
   LogoutOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { Button } from "antd";
@@ -17,6 +18,7 @@ import { roleAtLeast } from "@/utils/role";
 import { useSessions } from "@/hooks/useSessions";
 import { readLastNamespaceId } from "@/hooks/useLastNamespaceId";
 import SessionList from "@/components/SessionList";
+import WorkspaceModal from "@/components/WorkspaceModal";
 import styles from "@/styles/layout.module.css";
 
 const Layout: React.FC = () => {
@@ -46,6 +48,8 @@ const Layout: React.FC = () => {
     refresh,
   };
 
+  const [wsOpen, setWsOpen] = useState(false);
+
   const handleLogout = () => {
     logout();
     navigate("/login");
@@ -62,6 +66,14 @@ const Layout: React.FC = () => {
           </div>
           <div className={styles.userMenu}>
             <span className={styles.username}>{user?.username}</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<SettingOutlined />}
+              onClick={() => setWsOpen(true)}
+            >
+              设置
+            </Button>
             <Button
               type="text"
               size="small"
@@ -82,6 +94,7 @@ const Layout: React.FC = () => {
         <div className={styles.fullContent}>
           <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
         </div>
+        <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} />
       </div>
     );
   }
@@ -123,6 +136,14 @@ const Layout: React.FC = () => {
           <Button
             type="text"
             size="small"
+            icon={<SettingOutlined />}
+            onClick={() => setWsOpen(true)}
+          >
+            设置
+          </Button>
+          <Button
+            type="text"
+            size="small"
             icon={<LogoutOutlined />}
             onClick={handleLogout}
           >
@@ -130,6 +151,8 @@ const Layout: React.FC = () => {
           </Button>
         </div>
       </aside>
+
+      <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} />
 
       {/* ── 内容区 ── */}
       <main className={styles.mainContent}>

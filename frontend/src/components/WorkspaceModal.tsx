@@ -1,11 +1,10 @@
 /* ════════════════════════════════════════════
- *  WorkspacePage — 工作台
- *  显示管理功能入口卡片
+ *  WorkspaceModal — 设置浮窗，毛玻璃背景
  * ════════════════════════════════════════════ */
 
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Row, Col, Typography } from "antd";
+import { Card, Row, Col, Modal, Typography } from "antd";
 import {
   BarChartOutlined,
   DatabaseOutlined,
@@ -30,30 +29,60 @@ const workspaceItems = [
   { path: "/shares", icon: <ShareAltOutlined />, label: "分享管理", desc: "管理分享链接" },
 ];
 
-const WorkspacePage: React.FC = () => {
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+const WorkspaceModal: React.FC<Props> = ({ open, onClose }) => {
   const navigate = useNavigate();
 
+  const handleClick = (path: string) => {
+    navigate(path);
+    onClose();
+  };
+
   return (
-    <div style={{ padding: 32, maxWidth: 960, margin: "0 auto" }}>
-      <Title level={3} style={{ marginBottom: 24 }}>工作台</Title>
-      <Row gutter={[16, 16]}>
+    <Modal
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={720}
+      title={null}
+      closable={false}
+      styles={{
+        body: { padding: 32 },
+        mask: {
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          background: "rgba(0, 0, 0, 0.15)",
+        },
+      }}
+      style={{ top: 40 }}
+    >
+      <Title level={4} style={{ marginBottom: 24 }}>工作台</Title>
+      <Row gutter={[12, 12]}>
         {workspaceItems.map((item) => (
-          <Col key={item.path} xs={24} sm={12} md={8} lg={6}>
+          <Col key={item.path} xs={12} sm={8} md={6}>
             <Card
               hoverable
-              onClick={() => navigate(item.path)}
+              size="small"
+              onClick={() => handleClick(item.path)}
               style={{ textAlign: "center" }}
             >
-              <div style={{ fontSize: 32, marginBottom: 8, color: "#1677ff" }}>
+              <div style={{ fontSize: 28, marginBottom: 4, color: "#1677ff" }}>
                 {item.icon}
               </div>
-              <Card.Meta title={item.label} description={item.desc} />
+              <Card.Meta
+                title={<span style={{ fontSize: 13 }}>{item.label}</span>}
+                description={<span style={{ fontSize: 11 }}>{item.desc}</span>}
+              />
             </Card>
           </Col>
         ))}
       </Row>
-    </div>
+    </Modal>
   );
 };
 
-export default WorkspacePage;
+export default WorkspaceModal;
