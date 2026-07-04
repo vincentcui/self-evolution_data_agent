@@ -22,7 +22,7 @@ interface Props {
   sessions: Session[];
   activeSessionId: string | null;
   loading: boolean;
-  onCreate: (nsId: number) => Promise<void>;
+  onCreate: (nsId: number) => Promise<Session>;
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;

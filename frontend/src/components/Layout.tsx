@@ -20,6 +20,9 @@ import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { Button } from "antd";
 import { useAuth } from "@/context/AuthContext";
 import { roleAtLeast } from "@/utils/role";
+import { useSessions } from "@/hooks/useSessions";
+import { readLastNamespaceId } from "@/hooks/useLastNamespaceId";
+import SessionList from "@/components/SessionList";
 import styles from "@/styles/layout.module.css";
 
 const adminNavItems = [
@@ -37,6 +40,15 @@ const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const nsId = readLastNamespaceId() ?? null;
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSessionId,
+    createSession,
+    renameSession,
+    deleteSession,
+  } = useSessions(nsId);
 
   const handleLogout = () => {
     logout();
@@ -91,6 +103,23 @@ const Layout: React.FC = () => {
             Data Agent
           </div>
         </div>
+
+        {/* SessionList: 首页对话页展示 */}
+        {location.pathname === "/" && (
+          <SessionList
+            namespaceId={nsId}
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            loading={false}
+            onCreate={createSession}
+            onSelect={(id) => {
+              setActiveSessionId(id);
+              navigate("/");
+            }}
+            onRename={renameSession}
+            onDelete={deleteSession}
+          />
+        )}
 
         <nav className={styles.navList}>
           {adminNavItems.map((item) => (
