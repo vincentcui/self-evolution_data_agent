@@ -622,6 +622,24 @@ from app.schemas.query_stream import (  # noqa: E402
 
 
 # ════════════════════════════════════════════
+#  P0 对话体验 — Readiness
+# ════════════════════════════════════════════
+
+class BlockerOut(BaseModel):
+    type: str  # no_datasource | no_api_key | no_schema | no_access
+    message: str
+    admin_action: str
+    admin_route: str = ""
+    user_action: str
+
+
+class ReadinessOut(BaseModel):
+    ready: bool
+    checks: dict[str, bool]
+    blockers: list[BlockerOut]
+
+
+# ════════════════════════════════════════════
 #  P0 对话体验 — Session
 # ════════════════════════════════════════════
 
