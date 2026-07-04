@@ -9,8 +9,9 @@
  * ════════════════════════════════════════════ */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Alert } from "antd";
+import { Link, useNavigate } from "react-router-dom";
+import { Alert, Button } from "antd";
+import { AppstoreOutlined } from "@ant-design/icons";
 import NamespaceSelector from "@/components/NamespaceSelector";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
@@ -30,6 +31,7 @@ const FOLLOW_THRESHOLD_PX = 64;
 const QueryPage: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = roleAtLeast(user?.role, "admin");
+  const navigate = useNavigate();
   const [nsId, setNsId] = useState<number>();
   const { ready, blockers } = useReadiness(nsId ?? null);
   const { activeSessionId, sessions, renameSession } = useSessionContext();
@@ -138,13 +140,27 @@ const QueryPage: React.FC = () => {
     </div>
   );
 
+  const wsBtn = isAdmin && (
+    <Button
+      type="text"
+      icon={<AppstoreOutlined />}
+      onClick={() => navigate("/workspace")}
+      style={{ marginLeft: 12 }}
+    >
+      工作台
+    </Button>
+  );
+
   if (isIdle) {
     return (
       <div className={`${styles.pageContainer} ${styles.pageIdle}`}>
-        <NamespaceSelector
-          value={nsId}
-          onChange={(id) => setNsId(id)}
-        />
+        <div style={{ position: "absolute", top: 20, right: 24, display: "flex", alignItems: "center" }}>
+          <NamespaceSelector
+            value={nsId}
+            onChange={(id) => setNsId(id)}
+          />
+          {wsBtn}
+        </div>
         <div className={styles.idleWrapper}>
           <div className={styles.logo}>NL2QL</div>
           <ChatInput onSend={handleSend} loading={inputDisabled} />
@@ -161,6 +177,7 @@ const QueryPage: React.FC = () => {
           value={nsId}
           onChange={(id) => setNsId(id)}
         />
+        {wsBtn}
       </div>
       <div
         className={styles.chatScroll}

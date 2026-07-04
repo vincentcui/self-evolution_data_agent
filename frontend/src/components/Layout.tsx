@@ -8,7 +8,6 @@ import React from "react";
 import {
   UserOutlined,
   LogoutOutlined,
-  AppstoreOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { Button } from "antd";
@@ -121,14 +120,6 @@ const Layout: React.FC = () => {
             <UserOutlined />
             <span>{user?.username}</span>
           </div>
-          <Button
-            type="text"
-            size="small"
-            icon={<AppstoreOutlined />}
-            onClick={() => navigate("/workspace")}
-          >
-            工作台
-          </Button>
           <Button
             type="text"
             size="small"
