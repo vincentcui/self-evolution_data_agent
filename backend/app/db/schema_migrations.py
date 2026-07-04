@@ -588,6 +588,27 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_model_config_protocol_column(engine)
     # migration_025 (model-management): model_config_audit_logs 审计日志表
     await _ensure_model_config_audit_logs_table(engine)
+    # migration_026 (P0 对话体验优化): sessions 表 — 对话会话持久化
+    await _create_sessions_table(engine)
+
+
+async def _create_sessions_table(engine: AsyncEngine) -> None:
+    """migration_026: sessions 表 — 会话 CRUD, 绑定命名空间, 软删不实施."""
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            "    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),"
+            "    namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,"
+            "    title VARCHAR(255) NOT NULL DEFAULT '新会话',"
+            "    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "    created_at TIMESTAMP NOT NULL DEFAULT now(),"
+            "    updated_at TIMESTAMP"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_namespace_updated"
+            "    ON sessions(namespace_id, updated_at DESC)"
+        ))
 
 
 async def _migrate_rbac_three_tier(engine: AsyncEngine) -> None:
