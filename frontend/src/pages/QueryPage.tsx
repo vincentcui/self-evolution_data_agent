@@ -120,17 +120,22 @@ const QueryPage: React.FC = () => {
   const isIdle = state.status === "idle" && turns.length === 0;
 
   const blockerAlert = nsId != null && blockers.length > 0 && (
-    <Alert
-      type="warning"
-      showIcon
-      style={{ marginTop: 12, maxWidth: 600, textAlign: "left" }}
-      message={blockers[0].message}
-      description={
-        isAdmin && blockers[0].admin_route
-          ? <Link to={blockers[0].admin_route}>{blockers[0].admin_action}</Link>
-          : blockers[0].user_action
-      }
-    />
+    <div style={{ marginTop: 12, maxWidth: 600, textAlign: "left" }}>
+      {blockers.map((b, i) => (
+        <Alert
+          key={b.type}
+          type="warning"
+          showIcon
+          style={{ marginBottom: i < blockers.length - 1 ? 8 : 0 }}
+          message={b.message}
+          description={
+            isAdmin && b.admin_route
+              ? <Link to={b.admin_route}>{b.admin_action}</Link>
+              : b.user_action
+          }
+        />
+      ))}
+    </div>
   );
 
   if (isIdle) {
