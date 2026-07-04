@@ -146,4 +146,6 @@ async def test_readiness_namespace_not_found(make_client, db):
     """命名空间不存在 → 404."""
     client = await make_client(role="super_admin")
     resp = await client.get("/api/namespaces/99999/readiness")
-    assert resp.status_code in (404, 200)
+    # assert_ns_access 对不存在/无权 namespace 抛 403，readiness 端点 catch 后返回 200 + no_access
+    assert resp.status_code == 200
+    assert resp.json()["ready"] is False

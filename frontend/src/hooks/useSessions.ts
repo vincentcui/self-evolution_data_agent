@@ -5,7 +5,7 @@
  *  创建/重命名/删除后自动刷新列表.
  * ════════════════════════════════════════════ */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   createSession,
   deleteSession,
@@ -18,6 +18,8 @@ export function useSessions(namespaceId: number | null) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const sessionsRef = useRef<Session[]>(sessions);
+  sessionsRef.current = sessions;
 
   const refresh = useCallback(async () => {
     if (namespaceId == null) {
@@ -35,12 +37,16 @@ export function useSessions(namespaceId: number | null) {
     }
   }, [namespaceId]);
 
+  // 初始化：无活跃会话时自动选最近会话
   useEffect(() => {
-    refresh().then(() => {
-      // 初始化：无活跃会话时自动选最近会话
-      setActiveSessionId((prev) => prev ?? (sessions.length > 0 ? sessions[0].id : null));
-    });
-  }, [refresh]);  // eslint-disable-line react-hooks/exhaustive-deps
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    setActiveSessionId((prev) =>
+      prev ?? (sessions.length > 0 ? sessions[0].id : null)
+    );
+  }, [sessions]);
 
   const create = useCallback(
     async (nsId: number) => {
@@ -63,15 +69,19 @@ export function useSessions(namespaceId: number | null) {
   const remove = useCallback(
     async (id: string) => {
       await deleteSession(id);
+      // 保存删除前的列表用于替换逻辑
+      const prevSessions = sessionsRef.current;
       await refresh();
       setActiveSessionId((prev) => {
         if (prev === id) {
-          return sessions.length > 1 ? sessions.find((s) => s.id !== id)?.id ?? null : null;
+          return prevSessions.length > 1
+            ? prevSessions.find((s) => s.id !== id)?.id ?? null
+            : null;
         }
         return prev;
       });
     },
-    [refresh, sessions],
+    [refresh],
   );
 
   return {

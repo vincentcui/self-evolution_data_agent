@@ -606,7 +606,7 @@ async def _create_sessions_table(engine: AsyncEngine) -> None:
             "    title VARCHAR(255) NOT NULL DEFAULT '新会话',"
             "    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
             "    created_at TIMESTAMP NOT NULL DEFAULT now(),"
-            "    updated_at TIMESTAMP"
+            "    updated_at TIMESTAMP DEFAULT now()"
             ")"
         ))
         await conn.execute(text(

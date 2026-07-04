@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_ns_access, get_current_user
 from app.db.metadata import get_db
 from app.models.session import Session
 from app.models.user import User
@@ -20,6 +20,7 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
 ):
     """创建会话，标题默认为'新会话'."""
+    await assert_ns_access(db, user, body.namespace_id)
     session = Session(
         namespace_id=body.namespace_id,
         created_by=user.id,

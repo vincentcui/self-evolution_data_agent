@@ -14,7 +14,7 @@ import { Alert } from "antd";
 import NamespaceSelector from "@/components/NamespaceSelector";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
-import { useAgentStream, type AgentStreamState } from "@/hooks/useAgentStream";
+import { useAgentStream, initialAgentStreamState, type AgentStreamState } from "@/hooks/useAgentStream";
 import { useReadiness } from "@/hooks/useReadiness";
 import { useSessions } from "@/hooks/useSessions";
 import { useAuth } from "@/context/AuthContext";
@@ -31,10 +31,34 @@ const QueryPage: React.FC = () => {
   const isAdmin = roleAtLeast(user?.role, "admin");
   const [nsId, setNsId] = useState<number>();
   const { ready, blockers } = useReadiness(nsId ?? null);
-  const { activeSessionId } = useSessions(nsId ?? null);
+  const { activeSessionId, sessions, renameSession } = useSessions(nsId ?? null);
   const { state, start, stop } = useAgentStream();
   // 已归档的历史轮次 (已完成/已取消) — 新一轮开始前把当前轮快照推入, 防被 reset 清空
   const [turns, setTurns] = useState<AgentStreamState[]>([]);
+  // 历史问答加载 (会话切换时)
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  // 会话切换时加载历史
+  useEffect(() => {
+    if (!activeSessionId || !nsId) return;
+    setHistoryLoaded(false);
+    import("@/api").then(({ http }) => {
+      http.get(`/namespaces/${nsId}/history`, { params: { session_id: activeSessionId, limit: 100 } })
+        .then((r) => {
+          const histories = r.data;
+          if (histories.length > 0) {
+            setTurns(histories.map((h: any) => ({
+              ...initialAgentStreamState(),
+              status: "finished" as const,
+              finalAnswer: { content: h.content, historyId: h.id },
+              question: h.role === "user" ? h.content : "",
+            })));
+          }
+          setHistoryLoaded(true);
+        })
+        .catch(() => setHistoryLoaded(true));
+    });
+  }, [activeSessionId, nsId]);
 
   // ── 有礼貌的自动跟随 ──────────────────────────────────
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -64,6 +88,13 @@ const QueryPage: React.FC = () => {
     }
     const sid = activeSessionId ?? "";
     await start({ namespace_id: nsId, question, session_id: sid });
+    // 首次提问后自动更新会话标题
+    const activeSession = sessions.find((s) => s.id === activeSessionId);
+    if (activeSession && activeSession.title === "新会话") {
+      try {
+        await renameSession(activeSession.id, question.slice(0, 30));
+      } catch { /* 静默失败 */ }
+    }
   };
 
   const handleStop = async () => {
