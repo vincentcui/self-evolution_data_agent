@@ -9,11 +9,16 @@
  * ════════════════════════════════════════════ */
 
 import React, { useEffect, useRef, useState } from "react";
-import { v4 as uuidv4 } from "uuid";
+import { Link } from "react-router-dom";
+import { Alert } from "antd";
 import NamespaceSelector from "@/components/NamespaceSelector";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
 import { useAgentStream, type AgentStreamState } from "@/hooks/useAgentStream";
+import { useReadiness } from "@/hooks/useReadiness";
+import { useSessions } from "@/hooks/useSessions";
+import { useAuth } from "@/context/AuthContext";
+import { roleAtLeast } from "@/utils/role";
 import { submitCorrection, submitClarifyResponse, cancelStream } from "@/api/correction";
 import type { CorrectionAction } from "@/api/correction";
 import styles from "@/styles/query.module.css";
@@ -22,8 +27,11 @@ import styles from "@/styles/query.module.css";
 const FOLLOW_THRESHOLD_PX = 64;
 
 const QueryPage: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = roleAtLeast(user?.role, "admin");
   const [nsId, setNsId] = useState<number>();
-  const [sessionId] = useState<string>(uuidv4());
+  const { ready, blockers } = useReadiness(nsId ?? null);
+  const { activeSessionId } = useSessions(nsId ?? null);
   const { state, start, stop } = useAgentStream();
   // 已归档的历史轮次 (已完成/已取消) — 新一轮开始前把当前轮快照推入, 防被 reset 清空
   const [turns, setTurns] = useState<AgentStreamState[]>([]);
@@ -54,7 +62,8 @@ const QueryPage: React.FC = () => {
     if (state.status !== "idle") {
       setTurns((prev) => [...prev, state]);
     }
-    await start({ namespace_id: nsId, question, session_id: sessionId });
+    const sid = activeSessionId ?? "";
+    await start({ namespace_id: nsId, question, session_id: sid });
   };
 
   const handleStop = async () => {
@@ -76,7 +85,22 @@ const QueryPage: React.FC = () => {
   };
 
   const running = state.status === "running";
+  const inputDisabled = running || !nsId || (nsId != null && !ready);
   const isIdle = state.status === "idle" && turns.length === 0;
+
+  const blockerAlert = nsId != null && blockers.length > 0 && (
+    <Alert
+      type="warning"
+      showIcon
+      style={{ marginTop: 12, maxWidth: 600, textAlign: "left" }}
+      message={blockers[0].message}
+      description={
+        isAdmin && blockers[0].admin_route
+          ? <Link to={blockers[0].admin_route}>{blockers[0].admin_action}</Link>
+          : blockers[0].user_action
+      }
+    />
+  );
 
   if (isIdle) {
     return (
@@ -87,7 +111,8 @@ const QueryPage: React.FC = () => {
         />
         <div className={styles.idleWrapper}>
           <div className={styles.logo}>NL2QL</div>
-          <ChatInput onSend={handleSend} loading={running || !nsId} />
+          <ChatInput onSend={handleSend} loading={inputDisabled} />
+          {blockerAlert}
         </div>
       </div>
     );
@@ -124,11 +149,13 @@ const QueryPage: React.FC = () => {
             onStop={handleStop}
             onClarifyAnswer={handleClarifyAnswer}
             onCorrect={handleCorrect}
+            onSendQuestion={handleSend}
           />
         )}
       </div>
       <div className={styles.chatFooter}>
-        <ChatInput onSend={handleSend} loading={running || !nsId} />
+        <ChatInput onSend={handleSend} loading={inputDisabled} />
+        {blockerAlert}
       </div>
     </div>
   );
