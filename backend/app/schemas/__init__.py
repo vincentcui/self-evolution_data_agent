@@ -652,6 +652,9 @@ class ReadinessOut(BaseModel):
 #  P0 对话体验 — Session
 # ════════════════════════════════════════════
 
+from datetime import datetime  # noqa: E402
+from uuid import UUID  # noqa: E402
+
 from pydantic import BaseModel, Field  # noqa: E402
 
 class SessionCreate(BaseModel):
@@ -663,12 +666,12 @@ class SessionUpdate(BaseModel):
 
 
 class SessionOut(BaseModel):
-    id: str  # UUID
+    id: UUID  # Pydantic auto-serializes to str in JSON
     namespace_id: int
     title: str
     created_by: int
-    created_at: str
-    updated_at: str | None
+    created_at: datetime
+    updated_at: datetime | None
 
     model_config = {"from_attributes": True}
 

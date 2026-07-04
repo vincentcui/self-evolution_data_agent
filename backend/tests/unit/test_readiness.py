@@ -9,33 +9,56 @@ from app.models.schema_canonical_object import SchemaCanonicalObject
 from app.models.user import UserNamespaceAccess
 
 
-@pytest.mark.asyncio
-async def test_readiness_all_ready(make_client, db):
-    """四条件全满足 → ready=true, blockers=[]."""
-    # 创建命名空间
-    db.add(Namespace(id=10, name="ready1", slug="ready1"))
-    # 添加数据源
-    db.add(DataSource(
-        id=1, namespace_id=10, db_type="mysql",
+async def _setup_ns(db, name: str, slug: str) -> int:
+    ns = Namespace(name=name, slug=slug)
+    db.add(ns)
+    await db.commit()
+    await db.refresh(ns)
+    return ns.id
+
+
+async def _add_datasource(db, ns_id: int, ds_id: int = 0):
+    ds = DataSource(
+        namespace_id=ns_id, db_type="mysql",
         host="localhost", port=3306, database="test",
         username="root", password="",
-    ))
-    # 激活 CHAT 配置
-    db.add(ModelConfig(
+    )
+    if ds_id:
+        ds.id = ds_id
+    db.add(ds)
+    await db.commit()
+
+
+async def _add_active_chat_config(db):
+    cfg = ModelConfig(
         provider="openai", protocol="openai",
         base_url="https://example.invalid/v1", api_key="test-key",
         model_name="test-chat", model_type="CHAT",
         is_active=True, is_deleted=False,
-    ))
-    # Schema
-    db.add(SchemaCanonicalObject(
-        namespace_id=10, db_type="mysql", database="test",
-        target="users", field_path="id", field_type="int",
-    ))
+    )
+    db.add(cfg)
     await db.commit()
 
+
+async def _add_schema(db, ns_id: int):
+    sco = SchemaCanonicalObject(
+        namespace_id=ns_id, db_type="mysql", database="test",
+        target="users", fields_json='[{"name":"id","type":"int"}]',
+    )
+    db.add(sco)
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_readiness_all_ready(make_client, db):
+    """四条件全满足 → ready=true, blockers=[]."""
+    ns_id = await _setup_ns(db, "r1", "r1")
+    await _add_datasource(db, ns_id)
+    await _add_active_chat_config(db)
+    await _add_schema(db, ns_id)
+
     client = await make_client(role="super_admin")
-    resp = await client.get("/api/namespaces/10/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ready"] is True
@@ -45,21 +68,12 @@ async def test_readiness_all_ready(make_client, db):
 @pytest.mark.asyncio
 async def test_readiness_no_datasource(make_client, db):
     """无数据源 → ready=false + blocker no_datasource."""
-    db.add(Namespace(id=11, name="ready2", slug="ready2"))
-    db.add(ModelConfig(
-        provider="openai", protocol="openai",
-        base_url="https://example.invalid/v1", api_key="test-key",
-        model_name="test-chat", model_type="CHAT",
-        is_active=True, is_deleted=False,
-    ))
-    db.add(SchemaCanonicalObject(
-        namespace_id=11, db_type="mysql", database="test",
-        target="t", field_path="id", field_type="int",
-    ))
-    await db.commit()
+    ns_id = await _setup_ns(db, "r2", "r2")
+    await _add_active_chat_config(db)
+    await _add_schema(db, ns_id)
 
     client = await make_client(role="super_admin")
-    resp = await client.get("/api/namespaces/11/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ready"] is False
@@ -69,20 +83,12 @@ async def test_readiness_no_datasource(make_client, db):
 @pytest.mark.asyncio
 async def test_readiness_no_api_key(make_client, db):
     """无 API Key → ready=false + blocker no_api_key."""
-    db.add(Namespace(id=12, name="ready3", slug="ready3"))
-    db.add(DataSource(
-        id=2, namespace_id=12, db_type="mysql",
-        host="localhost", port=3306, database="test",
-        username="root", password="",
-    ))
-    db.add(SchemaCanonicalObject(
-        namespace_id=12, db_type="mysql", database="test",
-        target="t", field_path="id", field_type="int",
-    ))
-    await db.commit()
+    ns_id = await _setup_ns(db, "r3", "r3")
+    await _add_datasource(db, ns_id)
+    await _add_schema(db, ns_id)
 
     client = await make_client(role="super_admin")
-    resp = await client.get("/api/namespaces/12/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ready"] is False
@@ -92,22 +98,12 @@ async def test_readiness_no_api_key(make_client, db):
 @pytest.mark.asyncio
 async def test_readiness_no_schema(make_client, db):
     """无 Schema → ready=false + blocker no_schema."""
-    db.add(Namespace(id=13, name="ready4", slug="ready4"))
-    db.add(DataSource(
-        id=3, namespace_id=13, db_type="mysql",
-        host="localhost", port=3306, database="test",
-        username="root", password="",
-    ))
-    db.add(ModelConfig(
-        provider="openai", protocol="openai",
-        base_url="https://example.invalid/v1", api_key="test-key",
-        model_name="test-chat", model_type="CHAT",
-        is_active=True, is_deleted=False,
-    ))
-    await db.commit()
+    ns_id = await _setup_ns(db, "r4", "r4")
+    await _add_datasource(db, ns_id)
+    await _add_active_chat_config(db)
 
     client = await make_client(role="super_admin")
-    resp = await client.get("/api/namespaces/13/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ready"] is False
@@ -117,12 +113,10 @@ async def test_readiness_no_schema(make_client, db):
 @pytest.mark.asyncio
 async def test_readiness_no_access(make_client, db):
     """无权限 → ready=false + blocker no_access."""
-    db.add(Namespace(id=14, name="ready5", slug="ready5"))
-    await db.commit()
+    ns_id = await _setup_ns(db, "r5", "r5")
 
-    # 以另一个用户身份访问（无该空间权限）
     client = await make_client(role="user", user_id=99, username="nobody")
-    resp = await client.get("/api/namespaces/14/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ready"] is False
@@ -132,16 +126,16 @@ async def test_readiness_no_access(make_client, db):
 @pytest.mark.asyncio
 async def test_readiness_non_admin_sees_user_action(make_client, db):
     """普通用户调用 → 200, 返回 user_action 文案."""
-    db.add(Namespace(id=15, name="ready6", slug="ready6"))
-    # 给 user 赋予访问权限
-    db.add(UserNamespaceAccess(user_id=99, namespace_id=15, granted_by=1))
+    ns_id = await _setup_ns(db, "r6", "r6")
+    # 先创建用户（make_client 在 db 中创建 user）
+    client = await make_client(role="user", user_id=99, username="user1")
+    # 再授权
+    db.add(UserNamespaceAccess(user_id=99, namespace_id=ns_id))
     await db.commit()
 
-    client = await make_client(role="user", user_id=99, username="user1")
-    resp = await client.get("/api/namespaces/15/readiness")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
     assert resp.status_code == 200
     data = resp.json()
-    # 即使 ready=false, user_action 字段仍存在
     for b in data["blockers"]:
         assert "user_action" in b
         assert "admin_action" in b
@@ -152,5 +146,4 @@ async def test_readiness_namespace_not_found(make_client, db):
     """命名空间不存在 → 404."""
     client = await make_client(role="super_admin")
     resp = await client.get("/api/namespaces/99999/readiness")
-    # assert_ns_access 对不存在的空间抛 404
-    assert resp.status_code == 404 or resp.status_code == 200
+    assert resp.status_code in (404, 200)
