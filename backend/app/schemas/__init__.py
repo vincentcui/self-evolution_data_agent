@@ -622,5 +622,30 @@ from app.schemas.query_stream import (  # noqa: E402
 
 
 # ════════════════════════════════════════════
+#  P0 对话体验 — Session
+# ════════════════════════════════════════════
+
+from pydantic import BaseModel, Field  # noqa: E402
+
+class SessionCreate(BaseModel):
+    namespace_id: int
+
+
+class SessionUpdate(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class SessionOut(BaseModel):
+    id: str  # UUID
+    namespace_id: int
+    title: str
+    created_by: int
+    created_at: str
+    updated_at: str | None
+
+    model_config = {"from_attributes": True}
+
+
+# ════════════════════════════════════════════
 #  查询（最后一个占位符，保留模块空白尾部）
 # ════════════════════════════════════════════

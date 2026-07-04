@@ -33,6 +33,7 @@ from app.api import (
     knowledge,
     namespace,
     query,
+    session,
     share,
 )
 from app.api import (
@@ -455,6 +456,7 @@ app.include_router(query.router)
 app.include_router(namespace.router)
 app.include_router(knowledge.router)
 app.include_router(history.router)
+app.include_router(session.router)
 app.include_router(share.router)
 app.include_router(audit_api.router)
 app.include_router(terminology_conflict_api.router)
