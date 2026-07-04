@@ -5,8 +5,8 @@ Self-Evolution Data Agent — 配置中心
 
 from pathlib import Path
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
-from pydantic import model_validator
 
 # pydantic-settings env_file 相对 CWD 解析 — 固化为 config.py 所在目录的 ../.env
 # (backend/app/config.py → backend/.env), 无论从项目根还是 backend/ 启动行为一致
@@ -21,6 +21,18 @@ class Settings(BaseSettings):
     metadata_pool_size: int = 20
     metadata_pool_max_overflow: int = 30
     metadata_pool_timeout_secs: int = 60
+
+    # ── 时区 ──
+    app_timezone: str = "Asia/Shanghai"  # IS_APP_TIMEZONE env
+
+    @field_validator("app_timezone")
+    @classmethod
+    def _app_timezone_is_valid_iana(cls, v: str) -> str:
+        from zoneinfo import available_timezones
+
+        if v not in available_timezones():
+            raise ValueError(f"非法 IANA 时区名: {v!r}")
+        return v
 
     # ── ChromaDB ──
     chroma_persist_dir: str = "./data/chroma"

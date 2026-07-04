@@ -79,6 +79,14 @@ export const deleteNamespace = async (id: number) => {
 export const addDataSource = (nsId: number, data: Record<string, any>) =>
   http.post<DataSource>(`/namespaces/${nsId}/datasources`, data).then((r) => r.data);
 
+export const probeDatasource = (nsId: number, data: Record<string, any>) =>
+  http
+    .post<{ connected: boolean; detected_timezone: string | null; failure_reason: string | null }>(
+      `/namespaces/${nsId}/datasources/probe`,
+      data,
+    )
+    .then((r) => r.data);
+
 export const fetchDataSources = (nsId: number) =>
   http.get<DataSource[]>(`/namespaces/${nsId}/datasources`).then((r) => r.data);
 

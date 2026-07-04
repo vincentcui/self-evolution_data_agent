@@ -16,6 +16,7 @@ fetch_schema / inspect_values / estimate_cost / execute_query
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.engine.drivers import get_driver
 from app.engine.drivers._exceptions import DriverError
+from app.engine.tools._db_profile_projector import _project_schema_caps
 from app.engine.tools._resolve_ds import resolve_ds
 from app.knowledge.prompt_loader import load_prompt
 
@@ -61,27 +63,6 @@ def _ds_not_found_error(namespace_id: int, db_type: str, database: str) -> dict:
 
 def _error_from_driver(e: DriverError) -> dict:
     return e.to_dict()
-
-
-# ════════════════════════════════════════════
-#  server_capabilities merge helper
-# ════════════════════════════════════════════
-
-async def _attach_server_capabilities(
-    result: dict, driver: Any, ds: Any,
-) -> dict:
-    """Attach driver.get_server_capabilities() to result if non-None.
-
-    Failure-safe: any exception → no field added (never block primary path).
-    None → field omitted entirely (clean shape, not None placeholder).
-    """
-    try:
-        caps = await driver.get_server_capabilities(ds)
-    except Exception:  # noqa: BLE001 — capability probe must never block primary path
-        return result
-    if caps is not None:
-        result["server_capabilities"] = caps
-    return result
 
 
 # ════════════════════════════════════════════
@@ -153,14 +134,13 @@ async def fetch_schema(
 
     # Stage 2: 优先读 SchemaCanonicalObject (用户校对版)
     from app.knowledge.schema_canonical import get_schema_canonical
-    import json as _json
 
     canonical = await get_schema_canonical(db, namespace_id, db_type, database, target)
     if canonical:
         try:
-            fields = _json.loads(canonical.fields_json or "[]")
-            indexes = _json.loads(canonical.indexes_json or "[]")
-        except _json.JSONDecodeError:
+            fields = json.loads(canonical.fields_json or "[]")
+            indexes = json.loads(canonical.indexes_json or "[]")
+        except json.JSONDecodeError:
             fields, indexes = [], []
         fields = [_project_field_for_llm(f) for f in fields]
         result = {
@@ -172,13 +152,16 @@ async def fetch_schema(
             "indexes": indexes,
             "relationships": [
                 _project_relationship_for_llm(r)
-                for r in _json.loads(canonical.relationships_json or "[]")
+                for r in json.loads(canonical.relationships_json or "[]")
             ],
             "sample_count": canonical.sample_count,
             "source": "canonical",
         }
-        driver = get_driver(db_type)
-        return await _attach_server_capabilities(result, driver, ds)
+        result["timezone"] = ds.timezone
+        result["db_profile"] = _project_schema_caps(
+            json.loads(ds.db_profile_json or "{}")
+        )
+        return result
 
     # Fallback: driver 实时 introspect
     try:
@@ -188,7 +171,11 @@ async def fetch_schema(
             return {"error": "invalid_target", "message": "target 不能为空"}
         result: dict[str, Any] = {**schema, "relationships": [], "source": "introspect"}
         result["fields"] = [_project_field_for_llm(f) for f in result.get("fields", [])]
-        return await _attach_server_capabilities(result, driver, ds)
+        result["timezone"] = ds.timezone
+        result["db_profile"] = _project_schema_caps(
+            json.loads(ds.db_profile_json or "{}")
+        )
+        return result
     except DriverError as e:
         return _error_from_driver(e)
 
@@ -243,7 +230,12 @@ async def estimate_cost(
     try:
         driver = get_driver(db_type)
         cost = await driver.estimate_cost(ds, target, query)
-        return await _attach_server_capabilities(dict(cost), driver, ds)
+        result = dict(cost)
+        result["timezone"] = ds.timezone
+        result["db_profile"] = _project_schema_caps(
+            json.loads(ds.db_profile_json or "{}")
+        )
+        return result
     except DriverError as e:
         return _error_from_driver(e)
 

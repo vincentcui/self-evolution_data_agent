@@ -48,6 +48,7 @@ class DataSource(Base):
     password: Mapped[str] = mapped_column(EncryptedString)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     db_profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=LOCAL_NOW, default=local_now,
     )

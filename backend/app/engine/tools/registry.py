@@ -195,35 +195,18 @@ TOOL_SPECS: list[dict] = [
     {
         "name": "fetch_schema",
         "description": (
-            "拉取目标表/集合的完整 schema 真相源. "
-            "Use when: 需要确认字段名/嵌套层级/索引/枚举值/外键关系, 或确认目标存在. "
-            "Do not use when: 此前 fetch_schema 已拉过同一 target, 上下文已含 schema. "
-            "输入 (db_type, database, target) 三件套, db_type 从锚点读. "
-            "返回 {target, description, fields, indexes, relationships, source}. "
-            "fields[] 含 {name, type, description, nullable, enum_values: [{name, db_value, description}]}; "
-            "字段语义看 description, 枚举值看 enum_values, 不要凭字段名猜值. "
-            "indexes[] 含已建索引, 决定 WHERE 子句性能. "
-            "relationships[] 含 {from_target, from_field, to_db_type, to_database, "
-            "to_target, to_field, relation_type}, "
-            "relation_type ∈ {many_to_one, one_to_many, one_to_one}. "
-            "是从 DB 外键约束 / 代码 (JPA / MyBatis JOIN / DBRef) 抽出的实际使用关联, "
-            "命中项可信. "
-            "但这是 best-effort 抽取, 不等于完整声明 — 业务实际可能存在更多关联但未在代码中显式表达. "
-            "关联推理决策: 判断本次查询所需的关联是否被 relationships[] 覆盖: "
-            "覆盖→直接采纳, 不再补查; "
-            "部分覆盖 (主路径在但中间跳缺失) 或完全未覆盖→视为信息不足. "
-            "信息不足时, 不要凭 fields[] 字段名猜测 (例如看到 user_id 就默认指向 t_user 是错的), "
-            "也不要直接断定无关联. 改去 lookup_knowledge 二次召回业务沉淀; "
-            "仍无答案再 clarify_with_user."
-            " 输出还含 server_capabilities: {version, flavor, unsupported_ops, "
-            "unsupported_stage_variants, syntax_constraints, equivalent_hints}. "
-            "构造 aggregate pipeline 前必须三项全比对: "
-            "(1) 用到的算子是否在 unsupported_ops; "
-            "(2) 用到的 stage 形态是否在 unsupported_stage_variants "
-            "(例如 $lookup 的 let/pipeline 子查询形态); "
-            "(3) 写法是否触犯 syntax_constraints (例如 $project 内 $ 前缀 fieldpath). "
-            "命中任一项时, 在 equivalent_hints 里按 restriction 找对应 suggestion, "
-            "改用其给出的等效写法; 无对应 hint 时改用不命中该限制的等价表达."
+            "获取指定数据源某表/集合的 schema (字段/类型/索引/关系). "
+            "返回 {target, description, fields, indexes, relationships, "
+            "source, timezone, db_profile}. "
+            "timezone 是数据源数据的 IANA 时区名 (如 Asia/Shanghai); "
+            "查日期范围 (如'X年X月') 时按此时区算 [月初00:00, 下月初00:00) 边界, "
+            "生成带时区偏移的日期字面量 (document 系用 Extended JSON "
+            "{\"$date\":\"2026-06-01T00:00:00+08:00\"}, "
+            "relational 系用 SQL 日期字面量), 勿用 UTC 零点. "
+            "db_profile 含 version/charset(字符串字段编码)/flavor(mongo/documentdb 操作差异) + 能力限制 (unsupported_ops/unsupported_stage_variants/syntax_constraints/equivalent_hints). "
+            "Use when: 已知目标库名, 需字段结构/索引/关系/时区/库画像. "
+            "Do not use when: 仅需库名列表 (用 list_databases). "
+            "Input example: {\"db_type\":\"mysql\",\"database\":\"shop_db\",\"target\":\"orders\"}"
         ),
         "input_schema": {
             "type": "object",
@@ -261,11 +244,11 @@ TOOL_SPECS: list[dict] = [
             "预估查询扫描行数与风险等级. "
             "Use when: 大表查询前自评. "
             "Do not use when: 目标明显是小表. "
-            "返回 {estimated_rows, warning_level: ok|high|blocked}."
-            " 输出还含 server_capabilities: {version, flavor, unsupported_ops, "
-            "unsupported_stage_variants, syntax_constraints, equivalent_hints}, "
-            "与 fetch_schema 同义, 任一处获取即可; "
-            "构造 pipeline 前三类限制全比对, 命中按 equivalent_hints 改用等效写法."
+            "返回 {estimated_rows, warning_level: ok|high|blocked, timezone, db_profile}. "
+            "timezone 是数据源 IANA 时区名 (同 fetch_schema). "
+            "db_profile 含 version/charset/flavor + 能力限制 (unsupported_ops/unsupported_stage_variants/syntax_constraints/equivalent_hints); "
+            "构造 aggregate pipeline 前三类限制全比对, 命中按 equivalent_hints 改用等效写法. "
+            "Input example: {\"db_type\":\"mysql\",\"database\":\"shop_db\",\"target\":\"orders\",\"query\":{\"sql\":\"SELECT * FROM orders WHERE id=1\"}}"
         ),
         "input_schema": {
             "type": "object",
@@ -326,10 +309,13 @@ TOOL_SPECS: list[dict] = [
         "name": "list_databases",
         "description": (
             "列出当前所有已配置的数据源 (db_type / 数据库名 / 用户填写的用途描述 / "
-            "库级画像 version/charset/object_count). "
-            "Use when: 不清楚有哪些库可查, 或已有知识中无匹配的库. "
+            "库级画像 version/charset/flavor/object_count / 数据源时区 timezone). "
+            "Use when: 不清楚有哪些库可查, 或已有知识中无匹配的库, 或需确认数据源时区. "
             "Do not use when: 已有知识 (术语/schema/规则) 足以确定目标库名. "
-            "返回 {databases: [{db_type, database, description, db_profile}], count}."
+            "返回 {databases: [{db_type, database, description, timezone, db_profile}], count}. "
+            "timezone 是数据源数据的 IANA 时区名 (如 Asia/Shanghai); "
+            "查日期范围 (如'X年X月') 时按此 timezone 算边界偏移, 生成带偏移字面量, 勿默认 UTC. "
+            "Input example: {} (无入参, namespace 由上下文绑定)."
         ),
         "input_schema": {
             "type": "object",
@@ -525,7 +511,7 @@ chart_spec.chart_type 选型: card=单值/指标卡; line=随时间或有序维�
 pie=少数分类占比; bar=分类对比; table=多维或无法用上述表达. \
 对比多个对象 (如多地区/多类别) 时用 series_by 指定分组列, 渲染出多条系列.
 8. **能力兼容**: 构造 aggregate pipeline 前, 比对 fetch_schema / estimate_cost 返回的 \
-server_capabilities 三类限制 (unsupported_ops / unsupported_stage_variants / syntax_constraints). \
+db_profile 里的能力限制 (unsupported_ops / unsupported_stage_variants / syntax_constraints). \
 命中任一项时按 equivalent_hints 改用等效写法; 无 hint 时改用不命中该限制的等价表达.
 
 # 数据源协议

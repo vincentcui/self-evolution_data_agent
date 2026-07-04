@@ -760,15 +760,19 @@ async def _resolve_caps_for_error(
     tool_trace: list[dict],
     fired_class: str,
 ) -> dict | None:
-    """解析触发 fired_class 的那次失败调用所对应数据源的 ServerCapabilities (A9.1 / R5.7).
+    """解析触发 fired_class 的那次失败调用所对应数据源的能力限制 (A9.1 / R5.7).
 
     管线: tool_trace 中最近一条归一化后 == fired_class 的失败调用 → 取其 input.db_type/database
-          → resolve_ds → get_driver().get_server_capabilities(ds)
+          → resolve_ds → db_profile caps 投影
     任一步失败/缺失/非 mongo → 返回 None (不阻断澄清)。
     """
     if db is None or namespace_id is None:
         return None
     try:
+        import json as _json
+
+        from app.engine.tools._db_profile_projector import _project_db_profile
+        from app.engine.tools._resolve_ds import resolve_ds
         from app.engine.tools.error_class import normalize_error_class
 
         target_call = None
@@ -786,15 +790,12 @@ async def _resolve_caps_for_error(
         if not db_type or not database:
             return None
 
-        from app.engine.drivers import get_driver
-        from app.engine.tools._resolve_ds import resolve_ds
-
         ds = await resolve_ds(db, namespace_id, db_type, database)
         if ds is None:
             return None
-        driver = get_driver(db_type)
-        caps = await driver.get_server_capabilities(ds)
-        return dict(caps) if caps is not None else None
+        profile = _json.loads(ds.db_profile_json or "{}")
+        caps = _project_db_profile(profile, "caps")
+        return dict(caps) if caps else None
     except Exception as e:  # noqa: BLE001 — caps 仅用于丰富文案, 失败不阻断澄清
         logger.warning("_resolve_caps_for_error 失败 fired_class=%s: %s", fired_class, e)
         return None

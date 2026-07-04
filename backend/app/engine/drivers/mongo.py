@@ -20,8 +20,8 @@ from app.engine.drivers.base import (
     ExecuteMode,
     ExecuteResult,
     FieldDef,
+    ProbeResult,
     SchemaSnapshot,
-    ServerCapabilities,
 )
 from app.models import DataSource
 from app.models.base import local_now
@@ -162,7 +162,6 @@ class MongoDriver:
 
     def __init__(self) -> None:
         self._clients: dict[int, AsyncIOMotorClient] = {}
-        self._caps_cache: dict[int, ServerCapabilities] = {}
 
     def _get_client(self, ds: DataSource) -> AsyncIOMotorClient:
         """获取或创建 ds 对应的 motor client."""
@@ -463,35 +462,6 @@ class MongoDriver:
         client = self._get_client(ds)
         return sorted(await client[ds.database].list_collection_names())
 
-    # ── get_server_capabilities ──────────────────────────
-
-    async def get_server_capabilities(
-        self, ds: DataSource,
-    ) -> ServerCapabilities | None:
-        """Return server version + flavor-aware capability restrictions.
-
-        Cached per-ds (driver lifetime). buildInfo failure → None
-        (never block primary read/write paths, 不缓存 None).
-        flavor 探测 + 三类能力计算下沉到 mongo_flavor.build_capabilities (失败安全)。
-        """
-        cached = self._caps_cache.get(ds.id)
-        if cached is not None:
-            return cached
-        try:
-            client = self._get_client(ds)
-            info = await client.admin.command("buildInfo")
-        except Exception as exc:  # noqa: BLE001 — buildInfo 失败不阻业务
-            log.warning("[mongo_driver] buildInfo failed ds=%d: %s", ds.id, exc)
-            return None  # 不缓存 None (R3.6)
-        version = info.get("version", "")
-        if not version:
-            return None  # 无版本 → 不缓存 (与现状一致)
-        # flavor 探测 + 能力计算 (失败安全, 内部回退原生)
-        from app.engine.drivers.mongo_flavor import build_capabilities
-        caps = build_capabilities(dict(info), version)
-        self._caps_cache[ds.id] = caps  # 仅缓存成功结果 (R3.2)
-        return caps
-
     # ── fetch_foreign_keys ─────────────────────────────────
 
     async def fetch_foreign_keys(
@@ -533,6 +503,12 @@ class MongoDriver:
                     from app.engine.drivers.mongo_flavor import build_capabilities
                     caps = build_capabilities(dict(info), version)
                     profile["flavor"] = caps["flavor"]
+                    profile["unsupported_ops"] = caps.get("unsupported_ops", [])
+                    profile["unsupported_stage_variants"] = caps.get(
+                        "unsupported_stage_variants", []
+                    )
+                    profile["syntax_constraints"] = caps.get("syntax_constraints", [])
+                    profile["equivalent_hints"] = caps.get("equivalent_hints", [])
             except Exception:  # noqa: BLE001 — 降级
                 pass
             # 对象数量 (collection 数, 只要数字不要清单)
@@ -548,18 +524,36 @@ class MongoDriver:
                 client.close()
         return profile
 
+    # ── probe_connectivity ───────────────────────────────
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """一次性临时连接: 探测连通. MongoDB 不暴露时区设置, detected_timezone 始终 None."""
+        client = None
+        try:
+            client = AsyncIOMotorClient(
+                host=ds.host, port=ds.port,
+                username=ds.username, password=ds.password,
+                authSource=ds.database,
+                serverSelectionTimeoutMS=settings.mongo_connect_timeout_ms,
+            )
+            await client[ds.database].command("ping")
+            return ProbeResult(connected=True, detected_timezone=None)
+        except Exception as exc:
+            return ProbeResult(connected=False, failure_reason=str(exc)[:300])
+        finally:
+            if client:
+                client.close()
+
     # ── lifecycle ────────────────────────────────────────
 
     async def invalidate_client(self, ds_id: int) -> None:
-        """关闭并移除指定 ds 的 motor client + caps 缓存 (DataSource 删除/变更时调用)."""
+        """关闭并移除指定 ds 的 motor client (DataSource 删除/变更时调用)."""
         client = self._clients.pop(ds_id, None)
         if client is not None:
             client.close()
-        self._caps_cache.pop(ds_id, None)
 
     async def close_all(self) -> None:
         """关闭所有 motor client."""
         for client in self._clients.values():
             client.close()
         self._clients.clear()
-        self._caps_cache.clear()

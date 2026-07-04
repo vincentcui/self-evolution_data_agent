@@ -27,7 +27,7 @@ async def test_post_datasource_response_contract(make_client, db):
             f"/api/namespaces/{ns.id}/datasources",
             json={"db_type": "mysql", "host": "h", "port": 3306,
                   "database": "d", "username": "u", "password": "p",
-                  "description": "契约测试库"},
+                  "description": "契约测试库", "timezone": "Asia/Shanghai"},
         )
     assert resp.status_code == 201, resp.text
     data = resp.json()
@@ -49,6 +49,7 @@ async def test_get_datasources_response_contract(make_client, db):
         namespace_id=ns.id, db_type="mysql", host="h", port=3306,
         database="d", username="u", password="p", description="列表库",
         db_profile_json=json.dumps({"version": "8.0", "object_count": 3}),
+        timezone="Asia/Shanghai",
     ))
     await db.flush()
     client = await make_client(role="super_admin", user_id=1)
@@ -72,6 +73,7 @@ async def test_refresh_schema_updates_db_profile(make_client, db):
         namespace_id=ns.id, db_type="mysql", host="h", port=3306,
         database="d", username="u", password="p", description="x",
         db_profile_json=json.dumps({"version": "8.0", "object_count": 1}),
+        timezone="Asia/Shanghai",
     )
     db.add(ds)
     await db.flush()
@@ -107,6 +109,7 @@ async def test_refresh_schema_mongodb_still_refreshes_profile(make_client, db):
         namespace_id=ns.id, db_type="mongodb", host="h", port=27017,
         database="d", username="u", password="p", description="x",
         db_profile_json=json.dumps({"version": "5.0", "object_count": 2}),
+        timezone="Asia/Shanghai",
     )
     db.add(ds)
     await db.flush()

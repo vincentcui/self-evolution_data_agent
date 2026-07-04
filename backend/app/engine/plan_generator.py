@@ -315,7 +315,7 @@ def _format_collections(
     """渲染本次涉及的 (db_type, database, collection) 列表, 对携带能力限制的集合
     在其下追加一个【能力限制】runtime-data block (resolved from datasource).
 
-    capabilities_by_target: 每集合解析出的 server_capabilities; key 为
+    capabilities_by_target: 每集合解析出的 db_profile caps 投影; key 为
     "[db_type] database.collection". system prompt 不含任何限制内容, 全部 runtime 注入.
     """
     if not collections:
@@ -395,7 +395,7 @@ def generate_plan_sync(
 ) -> QueryPlan:
     """同步入口 — 供 asyncio.to_thread 包裹.
 
-    capabilities_by_target: 每集合解析出的 server_capabilities (runtime data),
+    capabilities_by_target: 每集合解析出的 db_profile caps 投影 (runtime data),
     仅用于 user-message 渲染; system prompt 保持稳定常量. (Task 4/5 接入渲染)
     """
     knowledge = knowledge or []

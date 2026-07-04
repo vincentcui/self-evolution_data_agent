@@ -14,6 +14,7 @@ from langfuse import observe
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engine.tools._db_profile_projector import _project_db_profile
 from app.knowledge.schema_canonical import list_schema_canonicals
 from app.models import DataSource
 
@@ -35,7 +36,8 @@ async def list_databases(*, db: AsyncSession, namespace_id: int) -> dict:
             "db_type": ds.db_type,
             "database": ds.database,
             "description": ds.description or "",
-            "db_profile": profile,
+            "timezone": ds.timezone,
+            "db_profile": _project_db_profile(profile, "overview"),
         })
     return {"databases": databases, "count": len(databases)}
 
