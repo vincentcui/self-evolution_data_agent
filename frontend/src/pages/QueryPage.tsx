@@ -14,9 +14,10 @@ import { Alert } from "antd";
 import NamespaceSelector from "@/components/NamespaceSelector";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
+import { http } from "@/api";
 import { useAgentStream, initialAgentStreamState, type AgentStreamState } from "@/hooks/useAgentStream";
 import { useReadiness } from "@/hooks/useReadiness";
-import { useSessions } from "@/hooks/useSessions";
+import { useSessionContext } from "@/context/SessionContext";
 import { useAuth } from "@/context/AuthContext";
 import { roleAtLeast } from "@/utils/role";
 import { submitCorrection, submitClarifyResponse, cancelStream } from "@/api/correction";
@@ -31,33 +32,32 @@ const QueryPage: React.FC = () => {
   const isAdmin = roleAtLeast(user?.role, "admin");
   const [nsId, setNsId] = useState<number>();
   const { ready, blockers } = useReadiness(nsId ?? null);
-  const { activeSessionId, sessions, renameSession } = useSessions(nsId ?? null);
+  const { activeSessionId, sessions, renameSession } = useSessionContext();
   const { state, start, stop } = useAgentStream();
   // 已归档的历史轮次 (已完成/已取消) — 新一轮开始前把当前轮快照推入, 防被 reset 清空
   const [turns, setTurns] = useState<AgentStreamState[]>([]);
-  // 历史问答加载 (会话切换时)
-  const [historyLoaded, setHistoryLoaded] = useState(false);
-
-  // 会话切换时加载历史
+  // 会话切换时加载历史: 按 Q&A 对分组, 只渲染 assistant 回答
   useEffect(() => {
     if (!activeSessionId || !nsId) return;
-    setHistoryLoaded(false);
-    import("@/api").then(({ http }) => {
-      http.get(`/namespaces/${nsId}/history`, { params: { session_id: activeSessionId, limit: 100 } })
-        .then((r) => {
-          const histories = r.data;
-          if (histories.length > 0) {
-            setTurns(histories.map((h: any) => ({
-              ...initialAgentStreamState(),
-              status: "finished" as const,
-              finalAnswer: { content: h.content, historyId: h.id },
-              question: h.role === "user" ? h.content : "",
-            })));
-          }
-          setHistoryLoaded(true);
-        })
-        .catch(() => setHistoryLoaded(true));
-    });
+    http.get(`/namespaces/${nsId}/history`, { params: { session_id: activeSessionId, limit: 100 } })
+      .then((r) => {
+        const histories: any[] = r.data;
+        if (histories.length === 0) return;
+        const pairedTurns: AgentStreamState[] = [];
+        for (let i = 0; i < histories.length; i++) {
+          if (histories[i].role !== "assistant") continue;
+          const question = i > 0 && histories[i - 1].role === "user"
+            ? histories[i - 1].content : "";
+          pairedTurns.push({
+            ...initialAgentStreamState(),
+            status: "finished" as const,
+            finalAnswer: { content: histories[i].content, historyId: histories[i].id },
+            question,
+          });
+        }
+        if (pairedTurns.length > 0) setTurns(pairedTurns);
+      })
+      .catch(() => { /* 静默失败 */ });
   }, [activeSessionId, nsId]);
 
   // ── 有礼貌的自动跟随 ──────────────────────────────────

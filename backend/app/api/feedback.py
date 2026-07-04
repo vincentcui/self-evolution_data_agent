@@ -20,9 +20,6 @@ async def submit_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     """提交答案反馈。重复调用 → UPDATE 不重复创建."""
-    if body.rating not in ("like", "dislike"):
-        raise HTTPException(status_code=422, detail="rating 必须为 'like' 或 'dislike'")
-
     result = await db.execute(
         select(QueryHistory).where(QueryHistory.id == body.history_id)
     )

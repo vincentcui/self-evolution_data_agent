@@ -477,39 +477,39 @@ async def get_readiness(
 
     ready = has_access and has_datasource and has_global_api_key and has_valid_schema
 
-    blockers: list[dict] = []
+    blockers: list[BlockerOut] = []
     if not has_access:
-        blockers.append({
-            "type": "no_access",
-            "message": "无权访问该空间",
-            "admin_action": "",
-            "admin_route": "",
-            "user_action": "请联系管理员获取空间访问权限",
-        })
+        blockers.append(BlockerOut(
+            type="no_access",
+            message="无权访问该空间",
+            admin_action="",
+            admin_route="",
+            user_action="请联系管理员获取空间访问权限",
+        ))
     if not has_datasource:
-        blockers.append({
-            "type": "no_datasource",
-            "message": "空间没有可用的数据源",
-            "admin_action": "去添加数据源",
-            "admin_route": f"/namespaces/{namespace_id}",
-            "user_action": "请联系管理员配置数据源",
-        })
+        blockers.append(BlockerOut(
+            type="no_datasource",
+            message="空间没有可用的数据源",
+            admin_action="去添加数据源",
+            admin_route=f"/namespaces/{namespace_id}",
+            user_action="请联系管理员配置数据源",
+        ))
     if not has_global_api_key:
-        blockers.append({
-            "type": "no_api_key",
-            "message": "未配置全局默认 API Key",
-            "admin_action": "去配置 API Key",
-            "admin_route": "/model-management",
-            "user_action": "请联系管理员配置模型凭证",
-        })
+        blockers.append(BlockerOut(
+            type="no_api_key",
+            message="未配置全局默认 API Key",
+            admin_action="去配置 API Key",
+            admin_route="/model-management",
+            user_action="请联系管理员配置模型凭证",
+        ))
     if not has_valid_schema:
-        blockers.append({
-            "type": "no_schema",
-            "message": "Schema 尚未采集",
-            "admin_action": "去采集 Schema",
-            "admin_route": f"/namespaces/{namespace_id}",
-            "user_action": "请联系管理员完成 Schema 采集",
-        })
+        blockers.append(BlockerOut(
+            type="no_schema",
+            message="Schema 尚未采集",
+            admin_action="去采集 Schema",
+            admin_route=f"/namespaces/{namespace_id}",
+            user_action="请联系管理员完成 Schema 采集",
+        ))
 
     return ReadinessOut(
         ready=ready,

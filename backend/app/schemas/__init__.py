@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re as _re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -627,7 +627,7 @@ from app.schemas.query_stream import (  # noqa: E402
 
 class FeedbackCreate(BaseModel):
     history_id: int
-    rating: str  # 'like' | 'dislike'
+    rating: Literal["like", "dislike"]
 
 
 # ════════════════════════════════════════════

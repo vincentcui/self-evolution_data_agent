@@ -19,6 +19,7 @@ import {
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { Button } from "antd";
 import { useAuth } from "@/context/AuthContext";
+import { SessionContext } from "@/context/SessionContext";
 import { roleAtLeast } from "@/utils/role";
 import { useSessions } from "@/hooks/useSessions";
 import { readLastNamespaceId } from "@/hooks/useLastNamespaceId";
@@ -48,7 +49,20 @@ const Layout: React.FC = () => {
     createSession,
     renameSession,
     deleteSession,
+    loading: sessionsLoading,
+    refresh,
   } = useSessions(nsId);
+
+  const sessionCtx = {
+    sessions,
+    activeSessionId,
+    setActiveSessionId,
+    createSession,
+    renameSession,
+    deleteSession,
+    loading: sessionsLoading,
+    refresh,
+  };
 
   const handleLogout = () => {
     logout();
@@ -84,7 +98,7 @@ const Layout: React.FC = () => {
           </div>
         </div>
         <div className={styles.fullContent}>
-          <Outlet />
+          <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
         </div>
       </div>
     );
@@ -110,7 +124,7 @@ const Layout: React.FC = () => {
             namespaceId={nsId}
             sessions={sessions}
             activeSessionId={activeSessionId}
-            loading={false}
+            loading={sessionsLoading}
             onCreate={createSession}
             onSelect={(id) => {
               setActiveSessionId(id);
@@ -156,7 +170,7 @@ const Layout: React.FC = () => {
 
       {/* ── 内容区 ── */}
       <main className={styles.mainContent}>
-        <Outlet />
+        <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
       </main>
     </div>
   );
