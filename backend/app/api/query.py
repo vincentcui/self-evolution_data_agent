@@ -196,8 +196,9 @@ async def cancel_agent_loop(
 
     P1-19 A2: 通过公共函数 cancel_agent 发 cancel, 不直读 _active_agent_workers.
 
-    404: trace_id 未注册或已结束 (run_agent_loop finally 块已 pop).
-    200: task.cancel() 已发, 等待 grace_secs 让 worker 跑完 finally 清理.
+    task 仍在 _active_agent_workers 中: task.cancel() + 等待 grace_secs → 200.
+    task 已结束 (run_agent_loop finally 已 pop): _cancel_reason 上文已设置作为闸门
+    标志, _run_and_finalize() 检查后中止成功写入 → 仍返回 200.
     """
     # ── P0-4: 标记来源 user_abort, agent_loop except 块 pop 后日志区分 ──
     _cancel_reason[trace_id] = "user_abort"
@@ -205,6 +206,17 @@ async def cancel_agent_loop(
 
     cancelled, task = cancel_agent(trace_id)
     if not cancelled:
+        # 区分两种情况:
+        # 1. SSE 会话仍存活 → _run_and_finalize() 还在运行 (盲区),
+        #    _cancel_reason 作为闸门标志让检查点中止成功写入 → 200
+        # 2. SSE 会话已注销 → trace_id 从未存在过 → 清理标志, 404
+        if get_event_queue(trace_id) is not None:
+            log.info(
+                "agent cancel flag-only (task already finished, SSE alive) trace=%s",
+                trace_id,
+            )
+            return {"cancelled": True, "trace_id": trace_id, "note": "flag_set"}
+        _cancel_reason.pop(trace_id, None)
         raise HTTPException(404, f"trace_id {trace_id} 不存在或已结束")
 
     if task is not None:
@@ -275,6 +287,14 @@ async def query_stream(
                 namespace_id=ns.id,
                 session_id=session_id,
             )
+            # ── Cancel 盲区守卫 ──
+            # _cancel_reason 可能在 run_agent_loop() 返回后 (已从 _active_agent_workers
+            # 移除自身) 被 cancel 端点设置。pop-and-check 将迟到的 cancel 转为
+            # CancelledError，让已有 except 块走 _write_cancelled_history。
+            if _cancel_reason.pop(trace_id, None) == "user_abort":
+                raise asyncio.CancelledError(
+                    "user cancelled (flag detected after agent loop completed)"
+                )
             # Phase 7: end_turn 异步抽取 (fire-and-forget, 不阻断主链路)
             asyncio.create_task(_async_extract_after_end_turn(
                 ns_id=ns.id, ns_slug=ns.slug, question=body.question,
@@ -285,6 +305,7 @@ async def query_stream(
                 session_id=session_id,
                 question=body.question,
                 result=result,
+                trace_id=trace_id,
             )
             final_data: dict = {
                 "content": result.final_answer,
@@ -338,6 +359,7 @@ async def query_stream(
                 "data": {"code": "internal_error", "message": str(exc), "recoverable": False},
             })
         finally:
+            _cancel_reason.pop(trace_id, None)  # 兜底清理，防止泄漏
             await event_q.put(None)  # sentinel → generator 退出
 
     agent_task = asyncio.create_task(_run_and_finalize())
@@ -446,8 +468,13 @@ async def _write_query_history(
     session_id: str,
     question: str,
     result: "AgentResult",
+    trace_id: str = "",
 ) -> int:
-    """写 QueryHistory。使用独立 session 避免与 request scoped db 生命周期冲突。"""
+    """写 QueryHistory。使用独立 session 避免与 request scoped db 生命周期冲突。
+
+    trace_id 用于 commit 前最后一次取消检查 — 若用户在此期间点了取消,
+    则 raise CancelledError 让上层 except 块写取消记录。
+    """
     generated_query = ""
     row_count = 0
     for tr in reversed(result.tool_trace):
@@ -517,6 +544,11 @@ async def _write_query_history(
             }, ensure_ascii=False, default=str),
         )
         db.add(entry)
+        # ── 提交前最后一次取消检查 (commit 之后无法回滚) ──
+        if trace_id and _cancel_reason.pop(trace_id, None) == "user_abort":
+            raise asyncio.CancelledError(
+                "user cancelled (flag detected before history commit)"
+            )
         await db.commit()
         await db.refresh(entry)
         return entry.id
@@ -529,39 +561,51 @@ async def _write_cancelled_history(
     session_id: str,
     question: str,
 ) -> int | None:
-    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程."""
+    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程.
+
+    AgentTrace 不存在时 (db commit 尚未对其他 session 可见) 仍写入最小记录,
+    确保前端不会因找不到任何历史而显示"暂无对话记录".
+    """
     from sqlalchemy import select as sa_select
 
     from app.models.agent_trace import AgentTrace
 
     import json as _json
 
+    tool_trace: list[dict] = []
+    generated_query = ""
+    row_count = 0
+    rows_data: list[dict] = []
+    columns_data: list[str] = []
+
     async with _new_db_session() as new_db:
         result = await new_db.execute(
             sa_select(AgentTrace).where(AgentTrace.trace_id == trace_id)
         )
         trace_row = result.scalar_one_or_none()
-        if trace_row is None:
-            return None
+        if trace_row is not None:
+            trace_data = _json.loads(trace_row.trace_json or "{}")
+            tool_trace = trace_data.get("tool_trace", [])
 
-        trace_data = _json.loads(trace_row.trace_json or "{}")
-        tool_trace = trace_data.get("tool_trace", [])
-
-        # 提取最后一条成功执行的 SQL
-        generated_query = ""
-        row_count = 0
-        rows_data = []
-        columns_data = []
-        for tr in reversed(tool_trace):
-            if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
-                generated_query = _json.dumps(tr.get("input", {}), ensure_ascii=False, default=str)
-                out = tr.get("output") or {}
-                row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
-                rows_data = out.get("rows", [])
-                columns_data = out.get("columns", [])
-                if not columns_data and rows_data and isinstance(rows_data[0], dict):
-                    columns_data = list(rows_data[0].keys())
-                break
+            # 提取最后一条成功执行的 SQL
+            for tr in reversed(tool_trace):
+                if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
+                    generated_query = _json.dumps(
+                        tr.get("input", {}), ensure_ascii=False, default=str,
+                    )
+                    out = tr.get("output") or {}
+                    row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
+                    rows_data = out.get("rows", [])
+                    columns_data = out.get("columns", [])
+                    if not columns_data and rows_data and isinstance(rows_data[0], dict):
+                        columns_data = list(rows_data[0].keys())
+                    break
+        else:
+            log.warning(
+                "_write_cancelled_history AgentTrace not found trace=%s — "
+                "writing minimal cancelled record",
+                trace_id,
+            )
 
         entry = QueryHistory(
             namespace_id=namespace_id,
@@ -599,6 +643,10 @@ async def _write_cancelled_history(
         new_db.add(entry)
         await new_db.commit()
         await new_db.refresh(entry)
+        log.info(
+            "_write_cancelled_history done trace=%s history_id=%s tools=%d",
+            trace_id, entry.id, len(tool_trace),
+        )
         return entry.id
 
 

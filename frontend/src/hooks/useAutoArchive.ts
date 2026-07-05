@@ -23,8 +23,7 @@ export function useAutoArchive(
   const archivedRef = useRef(false);
 
   useEffect(() => {
-    // cancelled / error：立即归档（可能没有 finalAnswer）
-    if (state.status === "cancelled" || state.status === "error") {
+    const doArchive = () => {
       if (archivedRef.current) return;
       archivedRef.current = true;
       const latestState = stateRef.current;
@@ -35,20 +34,16 @@ export function useAutoArchive(
       }
       resetAgent();
       runningSessionRef.current = null;
+    };
+
+    // cancelled / error：立即归档（可能没有 finalAnswer）
+    if (state.status === "cancelled" || state.status === "error") {
+      doArchive();
       return;
     }
     // finished：等 finalAnswer 就绪后归档
     if (state.status === "finished" && state.finalAnswer) {
-      if (archivedRef.current) return;
-      archivedRef.current = true;
-      const latestState = stateRef.current;
-      const ownerSid = runningSessionRef.current;
-      setTurns((prevTurns) => [...prevTurns, latestState]);
-      if (ownerSid) {
-        turnsBySession.current[ownerSid] = [...turnsRef.current, latestState];
-      }
-      resetAgent();
-      runningSessionRef.current = null;
+      doArchive();
     }
   }, [state.status, state.finalAnswer]);
 

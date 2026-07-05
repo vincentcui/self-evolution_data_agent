@@ -7,11 +7,11 @@
  *  user 顶栏: 品牌 + 用户名 + 修改密码 + 退出（pre-P0 原始）
  * ════════════════════════════════════════════ */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   UserOutlined, LogoutOutlined, AppstoreOutlined, EditOutlined,
 } from "@ant-design/icons";
-import { useNavigate, Outlet } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button, Modal } from "antd";
 import { useAuth } from "@/context/AuthContext";
 import { SessionContext } from "@/context/SessionContext";
@@ -23,6 +23,8 @@ import { cancelStream } from "@/api/correction";
 import { getGlobalStop } from "@/hooks/useAgentStream";
 import SessionList from "@/components/SessionList";
 import WorkspaceModal from "@/components/WorkspaceModal";
+import AdminLayout from "@/components/AdminLayout";
+import UserLayout from "@/components/UserLayout";
 import styles from "@/styles/layout.module.css";
 
 const Layout: React.FC = () => {
@@ -42,6 +44,9 @@ const Layout: React.FC = () => {
   const [resetKey, setResetKey] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [runningTraceId, setRunningTraceId] = useState<string | null>(null);
+  // ref 持有最新 traceId，避免 newChat 闭包陈旧导致 cancelStream 漏调
+  const runningTraceIdRef = useRef(runningTraceId);
+  runningTraceIdRef.current = runningTraceId;
 
   const newChat = useCallback(() => {
     if (isRunning) {
@@ -51,7 +56,8 @@ const Layout: React.FC = () => {
         okText: "停止并新建", cancelText: "取消",
         onOk: async () => {
           getGlobalStop()?.();
-          if (runningTraceId) await cancelStream(runningTraceId).catch(() => {});
+          const tid = runningTraceIdRef.current;
+          if (tid) await cancelStream(tid).catch(() => {});
           setResetKey((k) => k + 1); setActiveSessionId(null); setIsRunning(false);
         },
       });
@@ -154,50 +160,32 @@ const Layout: React.FC = () => {
     </div>
   );
 
-  /* ── User 布局: 侧边栏(logo + P0 会话管理) + 顶栏(仅用户菜单,品牌已移入侧边栏) + 内容区 ── */
+  /* 工作台弹窗 — 作为 ReactNode 传入 AdminLayout */
+  const workspaceModalNode = (
+    <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} initialPage={wsPage} />
+  );
+
   if (!isAdmin) {
     return (
-      <>
-        <aside className={styles.sidebar}>
-          {sidebarLogo}
-          {sidebarSessionMgmt}
-        </aside>
-
-        <div className={styles.fullScreen} style={{ marginLeft: 200 }}>
-          <div className={styles.topBar}>
-            <div />
-            <div className={styles.userMenu}>
-              <span className={styles.username}>{user?.username}</span>
-              <Button type="text" size="small" onClick={() => navigate("/profile")}>
-                修改密码
-              </Button>
-              <Button type="text" size="small" icon={<LogoutOutlined />} onClick={handleLogout}>
-                退出
-              </Button>
-            </div>
-          </div>
-          <div className={styles.fullContent}>
-            <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
-          </div>
-        </div>
-      </>
+      <UserLayout
+        sidebarLogo={sidebarLogo}
+        sidebarSessionMgmt={sidebarSessionMgmt}
+        username={user?.username ?? ""}
+        onLogout={handleLogout}
+        onNavigateProfile={() => navigate("/profile")}
+        sessionCtx={sessionCtx}
+      />
     );
   }
 
-  /* ── Admin 布局: 侧边栏(logo + P0 + 用户区) + 内容区 ── */
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside className={styles.sidebar}>
-        {sidebarLogo}
-        {sidebarSessionMgmt}
-        <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} initialPage={wsPage} />
-        {sidebarUserArea}
-      </aside>
-
-      <main className={styles.mainContent}>
-        <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
-      </main>
-    </div>
+    <AdminLayout
+      sidebarLogo={sidebarLogo}
+      sidebarSessionMgmt={sidebarSessionMgmt}
+      sidebarUserArea={sidebarUserArea}
+      workspaceModal={workspaceModalNode}
+      sessionCtx={sessionCtx}
+    />
   );
 };
 
