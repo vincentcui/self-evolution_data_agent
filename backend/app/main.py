@@ -216,7 +216,7 @@ async def lifespan(_app: FastAPI):
         decay_loop(), name="knowledge_decay",
     )
 
-    log.info("服务启动完成 port=8001")
+    log.info("服务启动完成 port=8001")  # noqa: hardcode
     yield
     # ── 关闭 ──
     log.info("服务关闭中...")
@@ -279,8 +279,8 @@ _QUIET_PATHS = {"/api/health"}
 _QUIET_SUFFIXES = ("/progress",)
 
 # Body / Response 截断上限 (字符) - 仅日志格式, 非业务阈值
-_MAX_BODY_LOG = 1024
-_MAX_RESP_LOG = 512
+_MAX_BODY_LOG = 1024  # noqa: hardcode
+_MAX_RESP_LOG = 512  # noqa: hardcode
 _SENSITIVE_LOG_FIELDS = {
     "api_key",
     "password",

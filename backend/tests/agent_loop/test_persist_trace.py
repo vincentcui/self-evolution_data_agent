@@ -133,3 +133,97 @@ async def test_datetime_and_decimal_in_reflection_serializes(db_session):
     assert row.status == "completed"
     assert "0.85" in row.reflection_log_json
     assert "2026-05-26" in row.reflection_log_json
+
+
+# ════════════════════════════════════════════
+#  A2: trace_json 结构裁剪, 永远合法 JSON (不再 [:200000] 硬切)
+# ════════════════════════════════════════════
+
+def _big_execute_query_trace() -> list[dict]:
+    """464 行 execute_query (复刻 trace 56ac6b9f iter21 场景)."""
+    return [{
+        "id": "tc_21",
+        "name": "execute_query",
+        "status": "ok",
+        "input": {"target": "orders", "query": {"sql": "SELECT * FROM orders"}, "mode": "single"},
+        "output": {
+            "rows": [{"id": i, "agreement_execution": f"x{i}"} for i in range(464)],
+            "row_count": 464,
+            "truncated": False,
+            "columns": ["id", "agreement_execution"],
+        },
+    }]
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_big_rows_produces_valid_json(db_session, monkeypatch):
+    """464 行落库后 trace_json 可 json.loads, 不再被 [:200000] 腰斩.
+
+    464 行 execute_query 序列化后仅约 20KB, 低于默认 200_000 字节预算线不会
+    触发结构裁剪; 调小 agent_trace_max_json_bytes 强制走裁剪分支, 复刻生产
+    大 trace (schema/多轮结果累积后) 实际触发场景.
+    """
+    import json as _json
+
+    from app.engine import agent_loop as al
+    monkeypatch.setattr(al.settings, "agent_trace_max_json_bytes", 200)
+
+    await _persist_trace(
+        db=db_session,
+        trace_id="test-trace-big-rows",
+        namespace_id=None,
+        user_query="big rows test",
+        tool_trace=_big_execute_query_trace(),
+        reflection_log=[],
+        status="completed",
+    )
+    row = (await db_session.execute(
+        select(AgentTrace).where(AgentTrace.trace_id == "test-trace-big-rows")
+    )).scalar_one()
+    # 核心断言: 不再 JSONDecodeError
+    parsed = _json.loads(row.trace_json)
+    tt = parsed["tool_trace"]
+    assert len(tt) == 1
+    assert tt[0]["output"]["trace_rows_truncated"] is True
+    assert tt[0]["output"]["trace_rows_kept"] == 20
+    assert tt[0]["output"]["row_count"] == 464
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_small_trace_full_rows(db_session):
+    """小 trace 不触发裁剪, rows 完整保留."""
+    import json as _json
+
+    small_trace = [{
+        "id": "tc_1", "name": "execute_query", "status": "ok",
+        "input": {}, "output": {"rows": [{"id": 1}, {"id": 2}], "row_count": 2},
+    }]
+    await _persist_trace(
+        db=db_session, trace_id="test-trace-small",
+        namespace_id=None, user_query="small",
+        tool_trace=small_trace, reflection_log=[], status="completed",
+    )
+    row = (await db_session.execute(
+        select(AgentTrace).where(AgentTrace.trace_id == "test-trace-small")
+    )).scalar_one()
+    parsed = _json.loads(row.trace_json)
+    assert len(parsed["tool_trace"][0]["output"]["rows"]) == 2
+    assert "trace_rows_truncated" not in parsed["tool_trace"][0]["output"]
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_reflection_not_sliced(db_session):
+    """reflection_log_json 不再 [:N] 硬切, 原样序列化."""
+    import json as _json
+
+    big_reflection = [{"iter": i, "confidence": 0.5, "reason": "x" * 200} for i in range(500)]
+    await _persist_trace(
+        db=db_session, trace_id="test-trace-refl",
+        namespace_id=None, user_query="refl",
+        tool_trace=[], reflection_log=big_reflection, status="completed",
+    )
+    row = (await db_session.execute(
+        select(AgentTrace).where(AgentTrace.trace_id == "test-trace-refl")
+    )).scalar_one()
+    parsed = _json.loads(row.reflection_log_json)
+    assert len(parsed) == 500  # 没被腰斩

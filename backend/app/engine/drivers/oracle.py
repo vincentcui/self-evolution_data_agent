@@ -475,7 +475,7 @@ class OracleDriver:
         target: str,
         query: dict,
         mode: ExecuteMode = "single",
-        batch_size: int = 1000,
+        batch_size: int = 1000,  # noqa: hardcode
     ) -> ExecuteResult:
         """Thick/Thin 统一走 executor + sync pool, 消除双份实现。"""
         log.info(

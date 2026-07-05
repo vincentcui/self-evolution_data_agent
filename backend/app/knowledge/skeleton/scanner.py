@@ -25,7 +25,7 @@ def _extract_class_names_from_file(file_path: Path, cfg) -> list[str]:
         parse_file,
     )
     root, src_bytes = parse_file(str(file_path), cfg.tree_sitter_lang)
-    if root is None:
+    if root is None or src_bytes is None:
         return []
     entity_types = set(cfg.entity_node_types)
     names: list[str] = []

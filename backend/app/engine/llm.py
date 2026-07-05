@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 import anthropic
+import httpx
 import openai
 from langfuse import observe
 from openai import OpenAI
@@ -32,6 +33,18 @@ from app.engine.json_parser import parse_llm_json
 from app.tracing import get_client as _lf_client
 
 logger = logging.getLogger(__name__)
+
+# ── LLM 超时异常族 (单一真相源) ──────────────────────────────────────────
+# provider SDK 各自把底层 httpx.TimeoutException 吞掉后 re-raise 自有 APITimeoutError
+# (anthropic._base_client / openai 皆如此), 二者互不为子类, 必须逐一显式列.
+# 主循环 (agent_loop) 引用此 tuple 做超时降级 — 新增 provider 只在此处补一行,
+# 不在调用方硬编码 SDK 异常类 (防 provider 耦合泄漏 + 漏列一个即整链炸).
+LLM_TIMEOUT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    asyncio.TimeoutError,
+    httpx.TimeoutException,
+    openai.APITimeoutError,
+    anthropic.APITimeoutError,
+)
 
 
 class EmptyLLMResponseError(RuntimeError):
@@ -116,7 +129,7 @@ from app.engine.llm_client_factory import build_anthropic_client, build_openai_c
 
 def build_chat_client(
     api_key: str, base_url: str, protocol: str = "openai", *,
-    timeout: float = 15, proxy_url: str | None = None,
+    timeout: float, proxy_url: str | None = None,
 ) -> "OpenAI | anthropic.Anthropic":
     """临时 LLM 客户端工厂 (不缓存, 不读 settings, 用于连接测试等一次性场景).
 
@@ -260,7 +273,7 @@ def _openai_chat(messages: list[dict], cfg: dict[str, Any],
     client = _get_openai_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
 
     # ── L3 extra_body 退化: 代理不支持时移除重试 (如 thinking:disabled 被拒) ──
     try:
@@ -360,7 +373,7 @@ def _claude_chat(messages: list[dict], cfg: dict[str, Any],
     client = _get_claude_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
 
     # 提取 system message (Claude API 要求独立传)
     system_text = ""
@@ -569,7 +582,7 @@ def _openai_chat_checked(
     client = _get_openai_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
     resp = client.chat.completions.create(
         model=model,
         messages=messages,  # type: ignore[arg-type]
@@ -596,7 +609,7 @@ def _claude_chat_checked(
     client = _get_claude_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
 
     system_text = ""
     user_messages = []
@@ -800,7 +813,7 @@ def _openai_tool_use(
     client = _get_openai_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
     openai_tools = [
         {
             "type": "function",
@@ -866,7 +879,7 @@ def _claude_tool_use(
     client = _get_claude_client(cfg)
     model = cfg["model_name"]
     temp = temperature if temperature is not None else cfg.get("temperature", 0.1)
-    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 12288)
+    mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", settings.llm_max_tokens_default)
 
     system_text = ""
     user_messages: list[dict] = []
@@ -999,7 +1012,7 @@ def _safe_json_loads(raw: str | None) -> tuple[dict, str | None]:
         return (parsed if isinstance(parsed, dict) else {}, None)
     except json.JSONDecodeError as e:
         logger.warning("OpenAI-compatible tool arguments not valid JSON: %r", raw[:200])
-        threshold = 280
+        threshold = 280  # noqa: hardcode
         if len(raw) > threshold:
             snippet = (
                 f"↓ 参数头部 (前 200 字符):\n{raw[:200]}\n"

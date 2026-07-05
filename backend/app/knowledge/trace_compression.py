@@ -444,3 +444,71 @@ def summarize_trace_for_llm(
         "known_facts": extract_known_facts(compact_steps, critical_rule_contents),
         "inflection_points": detect_inflection_points(compact_steps),
     }
+
+
+# ════════════════════════════════════════════
+#  落库前结构裁剪 (与读侧 compact_tool_call 职责不同)
+# ════════════════════════════════════════════
+
+def compact_tool_trace_for_storage(
+    tool_trace: list[dict],
+    *,
+    max_bytes: int,
+    row_cap: int,
+) -> list[dict]:
+    """落库前结构裁剪: 保证产出可 json.dumps 出合法 JSON 且体积可控.
+
+    策略 (按预算线触发, 不硬切):
+    1. 先尝试原样序列化测体积; len(s.encode()) <= max_bytes → 原样返回 (零拷贝).
+    2. 超预算: 对三类大数组裁到 row_cap 行, 加 trace_*_truncated 标记, 保留行数/签名.
+       - execute_query.output.rows (含 mongo count/data-reads)
+       - inspect_values.output.values
+       - lookup_knowledge.output (本身是 list[dict])
+       其余工具原样保留. 裁后不再 [:N] 硬切 — 极端情况下 PG TEXT ~1GB, 读端合法 JSON 不炸.
+
+    不 mutate 入参 tool_trace (live loop 已 emit 给前端). 触发条目浅拷 + 替换数组键.
+    """
+    import json as _json
+
+    # ── 1. 测体积 (default=str 兜 BSON Timestamp / Decimal 等非原生类型) ──
+    try:
+        probe = _json.dumps(
+            {"tool_trace": tool_trace}, ensure_ascii=False, default=str,
+        )
+    except (TypeError, ValueError):
+        return tool_trace  # 理论不会 (default=str 兜底); 兜底绝不阻塞落库
+    if len(probe.encode("utf-8")) <= max_bytes:
+        return tool_trace  # 零拷贝快路径
+
+    # ── 2. 超预算 → 裁三类 ──
+    return [_compact_one_for_storage(c, row_cap) for c in tool_trace]
+
+
+def _compact_one_for_storage(call: dict, row_cap: int) -> dict:
+    """单条 tool_call 落库裁剪. 非三类工具或未超 row_cap 原样返回 (同对象)."""
+    if not isinstance(call, dict):
+        return call
+    name = call.get("name")
+    out = call.get("output")
+    if name == "execute_query" and isinstance(out, dict):
+        rows = out.get("rows")
+        if isinstance(rows, list) and len(rows) > row_cap:
+            new_out = {**out}
+            new_out["rows"] = rows[:row_cap]
+            new_out["trace_rows_truncated"] = True
+            new_out["trace_rows_kept"] = row_cap
+            return {**call, "output": new_out}
+    elif name == "inspect_values" and isinstance(out, dict):
+        values = out.get("values")
+        if isinstance(values, list) and len(values) > row_cap:
+            new_out = {**out}
+            new_out["values"] = values[:row_cap]
+            new_out["trace_values_truncated"] = True
+            new_out["trace_values_kept"] = row_cap
+            new_out["trace_values_total"] = len(values)
+            return {**call, "output": new_out}
+    elif name == "lookup_knowledge" and isinstance(out, list):
+        if len(out) > row_cap:
+            # list 顶层无法塞标记; 截到前 row_cap 条, 每条原样保留 (content/payload 是提炼关键语义)
+            return {**call, "output": out[:row_cap]}
+    return call

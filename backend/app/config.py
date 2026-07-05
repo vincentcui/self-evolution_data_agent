@@ -207,10 +207,32 @@ class Settings(BaseSettings):
     """单次批量提炼上限."""
     agent_trace_refine_llm_timeout_secs: int = 60
     """批量提炼单次 LLM 调用超时."""
+    llm_client_timeout_secs: int = 120  # noqa: hardcode
+    """LLM HTTP 客户端超时 (主链路 chat_completion_with_tools). env: IS_LLM_CLIENT_TIMEOUT_SECS.
+    默认 120s: 多轮查询上下文累积 (schema + 多次结果行) 后 LLM 响应远超旧 15s 硬编码."""
+
+    llm_connect_test_timeout_secs: int = 15  # noqa: hardcode
+    """LLM 连接测试 (model_config 测试连接按钮, 一次性 Hello ping) 超时.
+    env: IS_LLM_CONNECT_TEST_TIMEOUT_SECS.
+    默认 15s: ping 性质短超时, 与主链路 120s 区分, 死库不被拖 120s."""
+
+    agent_trace_compact_row_cap: int = 20  # noqa: hardcode
+    """落库 trace_json 结构裁剪时, 单工具大数组保留行数上限. env: IS_AGENT_TRACE_COMPACT_ROW_CAP.
+    触发条件: 序列化后字节数 > agent_trace_max_json_bytes. 裁 execute_query.rows /
+    inspect_values.values / lookup_knowledge 三类大数组."""
+
     agent_trace_max_json_bytes: int = 200_000  # noqa: hardcode
-    """_persist_trace trace_json 截断上限."""
-    agent_trace_max_reflection_bytes: int = 50_000  # noqa: hardcode
-    """_persist_trace reflection_log_json 截断上限."""
+    """trace_json 落库体积预算线 (字节). env: IS_AGENT_TRACE_MAX_JSON_BYTES.
+    序列化后 len(s.encode()) > 此值 → 触发 compact_tool_trace_for_storage 结构裁剪
+    (三类大数组截到 agent_trace_compact_row_cap 行), 裁后不再 [:N] 硬切, 保证产出合法 JSON."""
+
+    llm_max_tokens_default: int = 12288  # noqa: hardcode
+    """LLM 单次响应 max_tokens 统一兜底默认 (Web UI 未按模型显式设值时使用).
+    env: IS_LLM_MAX_TOKENS_DEFAULT. model_registry 构建 chat 参数时 row.max_tokens or 此值."""
+
+    enum_extract_max_tokens: int = 4096  # noqa: hardcode
+    """enum 类专精解析单次 LLM 调用 max_tokens. env: IS_ENUM_EXTRACT_MAX_TOKENS.
+    enum 定义体积有界, 独立于主链路 max_tokens 默认."""
 
     # ── Stage 2 抓手 B: 召回反馈环 + 衰减 ──────────────
     kb_decay_recall_threshold: int = 10
@@ -480,7 +502,7 @@ class Settings(BaseSettings):
         if self.llm_claude_thinking_budget_tokens < 1024:
             raise ValueError(
                 f"IS_LLM_CLAUDE_THINKING_BUDGET_TOKENS ({self.llm_claude_thinking_budget_tokens}) "
-                "必须 >= 1024（Anthropic 最小值）"
+                "必须 >= 1024（Anthropic 最小值）"  # noqa: hardcode
             )
         return self
 

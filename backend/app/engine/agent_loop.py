@@ -33,7 +33,13 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from langfuse import observe
 
 from app.config import settings
-from app.engine.llm import ToolCall, ToolUseResponse, build_assistant_message, chat_completion_with_tools
+from app.engine.llm import (
+    LLM_TIMEOUT_EXCEPTIONS,
+    ToolCall,
+    ToolUseResponse,
+    build_assistant_message,
+    chat_completion_with_tools,
+)
 from app.logging_config import trace_id_var
 
 if TYPE_CHECKING:
@@ -142,7 +148,7 @@ class AgentResult:
     iterations: int
     # stop_reason 取值: "end_turn" | "max_exploratory_calls" | "max_decisive_calls"
     #   | "max_total_iterations" | "dead_loop" | "cancelled"
-    #   | "forced_clarify_timeout" | "forced_clarify_exhausted"
+    #   | "forced_clarify_timeout" | "forced_clarify_exhausted" | "llm_timeout"
     stop_reason: str
     tool_trace: list[dict] = field(default_factory=list)
     usage_total: dict = field(default_factory=dict)
@@ -272,9 +278,36 @@ async def run_agent_loop(
 
             # ── LLM ──
             logger.info("[agent_loop] trace=%s iteration=%d 开始调用 LLM", trace_id, iteration)
-            response = await llm_fn(
-                messages=messages, tools=tool_specs, stream_callback=None,
-            )
+            # ── A1 降级: LLM 超时族 (LLM_TIMEOUT_EXCEPTIONS) 不整链炸 ──
+            # 超时异常族真相源在 llm.py — provider SDK 各自的 APITimeoutError 互不为
+            # 子类, 逐一显式列, 主循环只引 tuple 不硬编码 SDK 类.
+            # 超时已是 SDK 重试耗尽后的最终态, 不重试不喂回 LLM.
+            # 收尾模式与 dead_loop / max_total_iterations 同构: emit agent_finished +
+            # return AgentResult; 不发 error 事件 (其契约是 {code,message,recoverable},
+            # 复用会违契约 + 与 _run_and_finalize 的 final_answer 双终态歧义).
+            try:
+                response = await llm_fn(
+                    messages=messages, tools=tool_specs, stream_callback=None,
+                )
+            except LLM_TIMEOUT_EXCEPTIONS as e:
+                logger.warning(
+                    "[agent_loop] trace=%s iteration=%d LLM 超时, 降级收尾: %s",
+                    trace_id, iteration, e,
+                )
+                final_status = "failed"
+                await sse_emit({"event": "agent_finished", "data": {
+                    "stop_reason": "llm_timeout",
+                    "total_iterations": iteration - 1,
+                    "total_tool_calls": len(tool_trace),
+                    "ended_at": _now_iso(),
+                }})
+                return AgentResult(
+                    final_answer="(LLM 响应超时, 已保留已执行的工具结果, 详见 tool_trace)",
+                    iterations=iteration - 1,
+                    stop_reason="llm_timeout",
+                    tool_trace=tool_trace,
+                    usage_total=usage_total,
+                )
             logger.info("[agent_loop] trace=%s iteration=%d LLM 调用完成, tool_calls=%d",
                      trace_id, iteration, len(response.tool_calls))
             _accumulate_usage(usage_total, response.usage)
@@ -382,7 +415,7 @@ async def run_agent_loop(
             for tc, res in zip(response.tool_calls, results):
                 logger.info("[agent_loop] trace=%s iteration=%d tool=%s status=%s output=%s",
                          trace_id, iteration, tc.name, res["status"],
-                         _summarize(res["output"], limit=500))
+                         _summarize(res.get("output", {}), limit=500))
 
             # ── 累加桶计数 (执行成功/失败一律计入) ──
             exploratory_count += next_explore
@@ -404,18 +437,18 @@ async def run_agent_loop(
                 if tc.name in _REFERENCEABLE_TOOLS and isinstance(res.get("output"), dict):
                     res["output"].setdefault("result_ref", tc.id)
                 tool_trace.append({"id": tc.id, "name": tc.name, "input": tc.input,
-                                    "output": res["output"], "status": res["status"]})
+                                    "output": res.get("output", {}), "status": res["status"]})
                 await sse_emit({
                     "event": "tool_result",
                     "data": {"tool_call_id": tc.id, "name": tc.name,
-                             "output": _summarize(res["output"]),
+                             "output": _summarize(res.get("output", {})),
                              "status": res["status"]},
                 })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": bound_tool_content(
-                        res["output"],
+                        res.get("output", {}),
                         budget_chars=settings.agent_tool_result_max_chars,
                     ),
                 })
@@ -423,8 +456,8 @@ async def run_agent_loop(
                 recent_tool_calls.append((tc.name, _hash_input(tc.input)))
                 # ── 更新 Error_Class 窗口 (R5.1-5.4, 修复 #1: status==ok 含 error 键也算错误) ──
                 error_window.record(
-                    normalize_error_class(res["output"])
-                    if is_error_output(res["status"], res["output"])
+                    normalize_error_class(res.get("output", {}))
+                    if is_error_output(res["status"], res.get("output", {}))
                     else None
                 )
 
@@ -620,17 +653,24 @@ async def _persist_trace(
     """Task E 实现 agent_traces 入库."""
     import json as _json
 
+    from app.knowledge.trace_compression import compact_tool_trace_for_storage
     from app.models import AgentTrace
 
     # ── default=str 兜 BSON Timestamp / datetime / Decimal 等非 JSON 原生类型 ──
     # tool_trace 含 mongo driver 原始返回, 内嵌 bson.Timestamp 会让 json.dumps 抛
     # TypeError, 整个 trace 落不了库 → agent_traces 表常年空, 观测链断裂.
+    # ── A2 修复: 序列化前结构裁剪, 不再 [:N] 硬切 (硬切破坏 JSON 结构) ──
+    compacted = compact_tool_trace_for_storage(
+        tool_trace,
+        max_bytes=settings.agent_trace_max_json_bytes,
+        row_cap=settings.agent_trace_compact_row_cap,
+    )
     payload = _json.dumps(
-        {"tool_trace": tool_trace}, ensure_ascii=False, default=str,
-    )[:settings.agent_trace_max_json_bytes]
+        {"tool_trace": compacted}, ensure_ascii=False, default=str,
+    )
     reflection = _json.dumps(
         reflection_log, ensure_ascii=False, default=str,
-    )[:settings.agent_trace_max_reflection_bytes]
+    )
 
     trace = AgentTrace(
         trace_id=trace_id,
@@ -806,9 +846,18 @@ async def _exec_or_reject(
     registry: dict[str, ToolFn],
     sem: asyncio.Semaphore,
 ) -> dict:
-    """JSON 解析失败时短路 — 不执行工具, 直接返回诊断信号给 LLM."""
+    """JSON 解析失败时短路 — 不执行工具, 直接返回诊断信号给 LLM.
+
+    协议不变量: 返回值 output 字段始终是 dict (对齐 _exec_tool).
+    """
     if tc.parse_error:
-        return {"status": "error", "error_type": "JSON_PARSE_FAILED", "message": tc.parse_error}
+        return {
+            "status": "error",
+            "output": {
+                "error_type": "JSON_PARSE_FAILED",
+                "error_message": tc.parse_error,
+            },
+        }
     return await _exec_tool(tc, registry, sem)
 
 

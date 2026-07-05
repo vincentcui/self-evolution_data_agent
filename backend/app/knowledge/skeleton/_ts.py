@@ -22,6 +22,8 @@ def parse_file(file_path: str, lang_key: str):
         tree = parser.parse(src)
     except Exception:
         return None, None
+    if tree is None:
+        return None, None
     return tree.root_node(), src.encode("utf-8")
 
 

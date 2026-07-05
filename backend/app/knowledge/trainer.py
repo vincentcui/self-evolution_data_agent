@@ -559,7 +559,7 @@ async def run_training_pipeline_with_progress(
                                   error_message=result.reason or "agent error")
         report.evaluation_summary = f"提取失败: {result.reason}"
         report.duration_seconds = round(time.time() - start, 2)
-        await on_progress(100, "提取失败")
+        await on_progress(100, "提取失败")  # noqa: hardcode
         return report
     if result.status == "partial":
         log.warning("[%s] extraction agent partial: %s (objects=%d)",
@@ -714,7 +714,7 @@ async def run_training_pipeline_with_progress(
     # 术语抽取改为用户手动触发 (POST /api/namespaces/{ns_id}/terminology/refresh),
     # 解决 SCO description 冲突未解决时术语质量低的时序问题.
 
-    await on_progress(100, "完成")
+    await on_progress(100, "完成")  # noqa: hardcode
 
     total = time.time() - start
     log.info("[%s] 训练管道完成 repo_id=%d 总耗时 %.1fs score=%d",
