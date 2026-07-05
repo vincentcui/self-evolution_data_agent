@@ -54,6 +54,7 @@ async def list_traces(
     for r in rows:
         # tool_call_count: 解析 trace_json 取 tool_trace 列表长度
         tcc = 0
+        trace_damaged = False
         if r.trace_json:
             try:
                 trace_data = _json.loads(r.trace_json)
@@ -63,7 +64,8 @@ async def list_traces(
                     tt = trace_data.get("tool_trace")
                     tcc = len(tt) if isinstance(tt, list) else 0
             except (_json.JSONDecodeError, TypeError):
-                tcc = 0
+                tcc = None
+                trace_damaged = True
         out.append({
             "id": r.id,
             "trace_id": r.trace_id,
@@ -73,6 +75,7 @@ async def list_traces(
             "refined_at": r.refined_at.isoformat() if r.refined_at else None,
             "created_at": r.created_at.isoformat(),
             "tool_call_count": tcc,
+            "trace_damaged": trace_damaged,
         })
     return out
 
@@ -102,6 +105,7 @@ async def get_trace_detail(
     from app.knowledge.trace_compression import compact_tool_call
 
     tool_trace_raw: list = []
+    trace_damaged = False
     try:
         tj = _json.loads(row.trace_json) if row.trace_json else {}
         raw = tj.get("tool_trace") if isinstance(tj, dict) else None
@@ -109,6 +113,7 @@ async def get_trace_detail(
             tool_trace_raw = raw
     except (ValueError, TypeError):
         tool_trace_raw = []
+        trace_damaged = True
     tool_trace_compact = [compact_tool_call(i, c) for i, c in enumerate(tool_trace_raw)]
 
     return {
@@ -119,6 +124,7 @@ async def get_trace_detail(
         "trace_json": row.trace_json,
         "reflection_log_json": row.reflection_log_json,
         "tool_trace_compact": tool_trace_compact,
+        "trace_damaged": trace_damaged,
         "status": row.status,
         "refined_at": row.refined_at.isoformat() if row.refined_at else None,
         "refined_summary": row.refined_summary,

@@ -10,10 +10,8 @@ import {
   Button,
   Form,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Tabs,
   Tag,
@@ -25,10 +23,10 @@ import {
 } from "@ant-design/icons";
 import * as api from "@/api";
 import NamespaceSelector from "@/components/NamespaceSelector";
+import DataSourceFormModal from "@/components/DataSourceFormModal";
 import type {
   BatchStatus,
   DataSource,
-  DbType,
   GitRepo,
   Namespace,
 } from "@/types";
@@ -44,9 +42,6 @@ const NamespacePage: React.FC = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [showDsModal, setShowDsModal] = useState(false);
   const [form] = Form.useForm();
-  const [dsForm] = Form.useForm();
-  /** 监听数据源表单 db_type 变化, 用于动态调整 label/placeholder */
-  const dsDbType = Form.useWatch<string>("db_type", dsForm);
   /** 重挂 NamespaceSelector, 让 create/delete 后重新拉列表 + 重新默认 */
   const [selectorKey, setSelectorKey] = useState(0);
 
@@ -86,22 +81,6 @@ const NamespacePage: React.FC = () => {
       clearLastNamespaceId();
     }
     setSelectorKey((k) => k + 1);
-  };
-
-  const handleAddDs = async () => {
-    if (!activeNs) return;
-    const vals = await dsForm.validateFields();
-    try {
-      await api.addDataSource(activeNs.id, vals);
-      message.success("数据源添加成功, 连接已验证");
-      setShowDsModal(false);
-      dsForm.resetFields();
-      loadDetail(activeNs);
-    } catch (e: any) {
-      // 后端连不上返回 400, Modal 不关, 展示具体原因
-      const detail = e?.response?.data?.detail || "连接失败, 请检查连接信息";
-      message.error(`数据源添加失败: ${detail}`);
-    }
   };
 
   const handleRefreshSchema = async (dsId: number) => {
@@ -213,6 +192,7 @@ const NamespacePage: React.FC = () => {
                                 {ds.host}:{ds.port} · {ds.db_type.toUpperCase()}
                                 {version ? ` · v${version}` : ""}
                                 {typeof objCount === "number" ? ` · ${objCount} 对象` : ""}
+                                {ds.timezone ? ` · ${ds.timezone}` : ""}
                               </div>
                               {ds.description ? (
                                 <div className={styles.dsMeta}>{ds.description}</div>
@@ -296,73 +276,15 @@ const NamespacePage: React.FC = () => {
         </Form>
       </Modal>
 
-      <Modal
-        title={`添加数据源 — ${activeNs?.name}`}
+      <DataSourceFormModal
         open={showDsModal}
-        onOk={handleAddDs}
+        activeNsId={activeNs?.id ?? null}
         onCancel={() => setShowDsModal(false)}
-      >
-        <Form
-          form={dsForm}
-          layout="vertical"
-          onValuesChange={(changed) => {
-            // 选择数据库类型时自动填写默认端口
-            if (changed.db_type) {
-              const meta = DB_TYPE_META[changed.db_type as DbType];
-              if (meta) dsForm.setFieldValue("port", meta.defaultPort);
-            }
-          }}
-        >
-          <Form.Item name="db_type" label="类型" rules={[{ required: true }]}>
-            <Select
-              options={Object.entries(DB_TYPE_META).map(([v, m]) => ({
-                value: v, label: m.label,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="host" label="主机" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="port" label="端口" rules={[{ required: true }]}>
-            <InputNumber style={{ width: "100%" }} />
-          </Form.Item>
-          {/* Oracle 的 database 字段含义是 Service Name */}
-          <Form.Item
-            name="database"
-            label={
-              dsDbType === "oracle" ? "Service Name" : "数据库"
-            }
-            tooltip={
-              dsDbType === "oracle"
-                ? "Oracle Service Name, 例如 orclpdb"
-                : undefined
-            }
-            rules={[{ required: true }]}
-          >
-            <Input
-              placeholder={
-                dsDbType === "oracle" ? "orclpdb" : undefined
-              }
-            />
-          </Form.Item>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true }]}>
-            <Input.Password />
-          </Form.Item>
-          <Form.Item
-            name="description"
-            label="用途描述"
-            tooltip="这个库存什么数据, 便于 AI 理解 (选填)"
-          >
-            <Input.TextArea
-              rows={2}
-              placeholder="例: 订单交易库 / 设备运维数据"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSubmitted={() => {
+          setShowDsModal(false);
+          if (activeNs) loadDetail(activeNs);
+        }}
+      />
     </div>
   );
 };

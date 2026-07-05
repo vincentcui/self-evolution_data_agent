@@ -21,8 +21,8 @@ from app.engine.drivers.base import (
     ExecuteMode,
     ExecuteResult,
     FieldDef,
+    ProbeResult,
     SchemaSnapshot,
-    ServerCapabilities,
 )
 from app.models import DataSource
 from app.models.base import local_now
@@ -325,14 +325,6 @@ class MySQLDriver:
                 rows = await cur.fetchall()
                 return sorted(r[0] for r in rows)
 
-    # ── get_server_capabilities ──────────────────────────
-
-    async def get_server_capabilities(
-        self, ds: DataSource,
-    ) -> ServerCapabilities | None:
-        """MySQL has no equivalent agg-op version table; return None."""
-        return None
-
     # ── fetch_db_profile ─────────────────────────────────
 
     async def fetch_db_profile(self, ds: DataSource) -> dict:
@@ -391,6 +383,35 @@ class MySQLDriver:
             if conn is not None:
                 conn.close()
         return profile
+
+    # ── probe_connectivity ───────────────────────────────
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """一次性临时连接: 探测连通 + 时区. 不进连接池, 不探 version/charset."""
+        from app.engine.drivers._timezone import normalize_timezone
+        try:
+            conn = await aiomysql.connect(
+                host=ds.host, port=ds.port, user=ds.username,
+                password=ds.password, db=ds.database,
+                connect_timeout=settings.mysql_pool_timeout_secs,
+                autocommit=True, charset="utf8mb4",
+            )
+        except Exception as exc:
+            return ProbeResult(connected=False, failure_reason=str(exc)[:300])
+        try:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    "SELECT @@session.time_zone AS sess, @@system_time_zone AS sys"
+                )
+                row = await cur.fetchone() or {}
+                tz = normalize_timezone(row.get("sess")) or normalize_timezone(row.get("sys"))
+                return ProbeResult(connected=True, detected_timezone=tz)
+        except Exception as exc:
+            return ProbeResult(
+                connected=True, detected_timezone=None, failure_reason=str(exc)[:300]
+            )
+        finally:
+            conn.close()
 
     # ── lifecycle ────────────────────────────────────────
 

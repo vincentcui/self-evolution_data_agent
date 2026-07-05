@@ -1,9 +1,23 @@
 """DataSourceDriver Protocol + 共享数据结构."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict, runtime_checkable
 
 from app.models import DataSource
+
+
+@dataclass
+class ProbeResult:
+    """驱动探测数据库连接的结果.
+
+    connected:        是否成功连接
+    detected_timezone:探测到的数据库时区 (IANA 名, 歧义/失败时为 None)
+    failure_reason:   连接失败原因 (connected=False 时填, 否则 None)
+    """
+    connected: bool
+    detected_timezone: str | None = None
+    failure_reason: str | None = None
 
 
 class FieldDef(TypedDict):
@@ -28,36 +42,6 @@ class CostEstimate(TypedDict):
     estimated_rows: int
     warning_level: Literal["ok", "high", "blocked"]
     raw_explain: dict
-
-
-class EquivalentHint(TypedDict):
-    """命中某能力限制时, 暴露给 LLM 的等效语法提示 (R2.6).
-
-    restriction: 触发该 hint 的限制标识 (算子名 / stage variant id / syntax constraint id)
-    suggestion:  等效表达建议文本 (供 LLM 改写 pipeline)
-    """
-    restriction: str
-    suggestion: str
-
-
-class ServerCapabilities(TypedDict):
-    """Server version + flavor-aware capability restrictions. driver-agnostic shape.
-
-    三类能力限制 (Capability_Restrictions) 覆盖本特性确认的三类 DocumentDB 错误:
-    - unsupported_ops:            不支持的聚合算子扁平名 (如 $getField, 错误码 5654600)
-    - unsupported_stage_variants: 不支持的 stage 变体/选项形态 (如 $lookup.let_pipeline, 错误码 304)
-    - syntax_constraints:         语法约束 (如 project_no_dollar_fieldpath, 错误码 16410)
-
-    agg_ops_unsupported 为 unsupported_ops 的向后兼容别名 (同值填充), 标注 deprecated:
-    保留是因 registry.py 系统提示与下游消费方仍按旧名引用; 新代码应读三类限制字段.
-    """
-    version: str
-    flavor: str
-    unsupported_ops: list[str]
-    unsupported_stage_variants: list[str]
-    syntax_constraints: list[str]
-    equivalent_hints: list[EquivalentHint]
-    agg_ops_unsupported: list[str]  # deprecated alias == unsupported_ops
 
 
 ExecuteMode = Literal["single", "probe", "count", "batched", "render"]
@@ -135,12 +119,6 @@ class DataSourceDriver(Protocol):
     async def health_check(self, ds: DataSource) -> bool:
         ...
 
-    async def get_server_capabilities(
-        self, ds: DataSource,
-    ) -> ServerCapabilities | None:
-        """Return server version + version-gated features. None if not applicable."""
-        ...
-
     async def fetch_db_profile(self, ds: DataSource) -> dict:
         """连库合成库级画像 (版本/字符集或flavor/对象数量).
 
@@ -156,3 +134,7 @@ class DataSourceDriver(Protocol):
         """返回外键关系列表. 每项含 from_target/from_field/to_db_type/to_database/
         to_target/to_field/relation_type. 不支持外键的 driver 显式 return []."""
         return []
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """连库探测连通 + 时区. 一次性临时连接, 不落库. 不探 version/charset."""
+        ...

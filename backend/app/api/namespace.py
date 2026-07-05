@@ -35,6 +35,8 @@ from app.schemas import (
     BlockerOut,
     DataSourceCreate,
     DataSourceOut,
+    DataSourceProbeIn,
+    DataSourceProbeOut,
     NamespaceCreate,
     NamespaceDeletePreview,
     NamespaceOut,
@@ -334,6 +336,7 @@ async def add_datasource(
         username=body.username,
         password=body.password,
         description=body.description,
+        timezone=body.timezone,
     )
     # 连通才存: fetch_db_profile 的 connected 标志为连通判据 (降级安全, 永不抛).
     # 用 connected 而非 "version in profile": 受限账号能连但读不到 version 时不应误拒 (D4).
@@ -352,6 +355,36 @@ async def add_datasource(
     await db.commit()
     await db.refresh(ds)
     return DataSourceOut.from_orm_ds(ds)
+
+
+@router.post("/{ns_id}/datasources/probe", response_model=DataSourceProbeOut)
+async def probe_datasource(
+    ns_id: int,
+    body: DataSourceProbeIn,
+    _user: User = Depends(require_ns_manage),
+    db: AsyncSession = Depends(get_db),
+):
+    """测试连通性 + 时区探测. 不落库. 返回 DataSourceProbeOut."""
+    await _get_namespace(db, ns_id)
+    # timezone 用 settings.app_timezone 占位: probe_connectivity 不读 ds.timezone, 不落库
+    ds = DataSource(
+        namespace_id=ns_id,
+        db_type=body.db_type,
+        host=body.host,
+        port=body.port,
+        database=body.database,
+        username=body.username,
+        password=body.password,
+        description=body.description,
+        timezone=settings.app_timezone,
+    )
+    driver = get_driver(body.db_type)
+    result = await driver.probe_connectivity(ds)
+    return DataSourceProbeOut(
+        connected=result.connected,
+        detected_timezone=result.detected_timezone,
+        failure_reason=result.failure_reason,
+    )
 
 
 @router.post("/{ns_id}/datasources/{ds_id}/refresh-schema", response_model=SchemaRefreshResult)

@@ -63,10 +63,10 @@ class TestComputeUnsupportedOps:
 
 
 # ──────────────────────────────────────────────────────────
-#  MongoDriver.get_server_capabilities (Task 3)
+#  MongoDriver.fetch_db_profile → caps (unsupported_ops)
 # ──────────────────────────────────────────────────────────
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.engine.drivers.mongo import MongoDriver
 from app.models import DataSource
@@ -83,42 +83,56 @@ def make_ds(ds_id: int = 1) -> DataSource:
     return ds
 
 
-class TestMongoDriverServerCapabilities:
+class TestMongoFetchDbProfileCaps:
+    """Test that MongoDriver.fetch_db_profile produces unsupported_ops in profile."""
+
     @pytest.mark.asyncio
-    async def test_returns_version_and_unsupported_for_4_0(self):
+    async def test_profile_includes_unsupported_ops_for_4_0(self):
         driver = MongoDriver()
-        # 注入 mock client (绕过真连)
-        client = MagicMock()
-        client.admin.command = AsyncMock(return_value={"version": "4.0.28"})
-        driver._clients[1] = client
         ds = make_ds(1)
 
-        caps = await driver.get_server_capabilities(ds)
-        assert caps is not None
-        assert caps["version"] == "4.0.28"
-        assert "$round" in caps["agg_ops_unsupported"]
-        assert "$dateTrunc" in caps["agg_ops_unsupported"]
+        with patch("app.engine.drivers.mongo.AsyncIOMotorClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_db = MagicMock()
+            mock_client.__getitem__.return_value = mock_db
+
+            # Ping succeeds
+            mock_db.command = AsyncMock(return_value={"ok": 1})
+            # buildInfo returns version
+            admin_mock = MagicMock()
+            admin_mock.command = AsyncMock(return_value={"version": "4.0.28"})
+            mock_client.admin = admin_mock
+            # list_collection_names
+            mock_db.list_collection_names = AsyncMock(return_value=["c1", "c2"])
+
+            profile = await driver.fetch_db_profile(ds)
+
+        assert profile["connected"] is True
+        assert profile["version"] == "4.0.28"
+        assert "$round" in profile["unsupported_ops"]
+        assert "$dateTrunc" in profile["unsupported_ops"]
 
     @pytest.mark.asyncio
-    async def test_caches_buildinfo_per_ds(self):
+    async def test_buildinfo_failure_omits_caps_keys(self):
         driver = MongoDriver()
-        client = MagicMock()
-        client.admin.command = AsyncMock(return_value={"version": "5.0.0"})
-        driver._clients[2] = client
-        ds = make_ds(2)
+        ds = make_ds(1)
 
-        await driver.get_server_capabilities(ds)
-        await driver.get_server_capabilities(ds)
-        # buildInfo 仅调 1 次
-        assert client.admin.command.call_count == 1
+        with patch("app.engine.drivers.mongo.AsyncIOMotorClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_db = MagicMock()
+            mock_client.__getitem__.return_value = mock_db
 
-    @pytest.mark.asyncio
-    async def test_buildinfo_failure_returns_none(self):
-        driver = MongoDriver()
-        client = MagicMock()
-        client.admin.command = AsyncMock(side_effect=RuntimeError("boom"))
-        driver._clients[3] = client
-        ds = make_ds(3)
+            mock_db.command = AsyncMock(return_value={"ok": 1})
+            admin_mock = MagicMock()
+            admin_mock.command = AsyncMock(side_effect=RuntimeError("boom"))
+            mock_client.admin = admin_mock
+            mock_db.list_collection_names = AsyncMock(return_value=["c1"])
 
-        caps = await driver.get_server_capabilities(ds)
-        assert caps is None  # 不阻塞主链路, 上游照常工作
+            profile = await driver.fetch_db_profile(ds)
+
+        assert profile["connected"] is True
+        # buildInfo 失败 → profile 无 version/unsupported_ops 键
+        assert "version" not in profile
+        assert "unsupported_ops" not in profile

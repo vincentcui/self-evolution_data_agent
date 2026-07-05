@@ -16,7 +16,8 @@ interface TraceRow {
   user_query: string;
   status: string;
   created_at: string;
-  tool_call_count: number;
+  tool_call_count: number | null;
+  trace_damaged?: boolean;
 }
 
 interface ReflectionEntry {
@@ -87,6 +88,7 @@ interface TraceDetail {
   refined_at: string | null;
   refined_summary: string | null;
   created_at: string;
+  trace_damaged?: boolean;
 }
 
 function renderInput(c: CompactCall): string {
@@ -237,6 +239,15 @@ export function TraceDetailModal({
         <strong>Status:</strong> <Tag>{detail.status}</Tag>
       </p>
 
+      {detail.trace_damaged && (
+        <div style={{ marginBottom: 12 }}>
+          <Tag color="red">数据存在但损坏</Tag>
+          <span style={{ color: "#888", fontSize: 12 }}>
+            trace_json JSON 解析失败, 调用列表可能不完整
+          </span>
+        </div>
+      )}
+
       <h4>调用列表 ({detail.tool_trace_compact.length})</h4>
       <div style={{ overflowX: "auto" }}>
       <Table
@@ -359,7 +370,12 @@ export default function AgentTracesPage() {
         </Tag>
       ),
     },
-    { title: "Tools", dataIndex: "tool_call_count", width: 70 },
+    { title: "Tools", dataIndex: "tool_call_count", width: 70,
+      render: (count: number | null, row: TraceRow) =>
+        row.trace_damaged
+          ? <Tag color="red">损坏</Tag>
+          : (count ?? "-"),
+    },
     { title: "Created", dataIndex: "created_at", width: 180 },
     {
       title: "Action",

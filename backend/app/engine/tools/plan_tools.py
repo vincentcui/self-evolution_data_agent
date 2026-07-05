@@ -17,7 +17,6 @@ from langfuse import observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.engine.drivers import get_driver
 from app.engine.plan_executor import execute_plan
 from app.engine.plan_generator import generate_plan
 from app.engine.plan_models import (
@@ -80,7 +79,7 @@ async def generate_query_plan(
     反查 ds 执行.
 
     db / namespace_id 是 dispatcher 按签名注入的 runtime context (LLM 不可见, 不在
-    TOOL_SPECS); 用于内部按集合反查 datasource 并解析 server_capabilities.
+    TOOL_SPECS); 用于内部按集合反查 datasource 并解析 db_profile caps 投影.
     """
     # Resolve per-collection capabilities INTERNALLY (LLM never passes these).
     capabilities_by_target = await _resolve_caps_by_target(db, namespace_id, collections)
@@ -108,8 +107,7 @@ async def generate_query_plan(
 
 # ────────────────────────────────────────────
 #  内部: per-collection capability 解析 (LLM 不可见)
-#  镜像 data_access_tools._attach_server_capabilities 的解析路径:
-#  resolve_ds → get_driver(db_type).get_server_capabilities(ds), 失败安全.
+#  从 ds.db_profile_json 投影 caps (冷启动已探, 失败安全).
 # ────────────────────────────────────────────
 
 def _caps_target_key(db_type: str, database: str, collection: str) -> str:
@@ -132,10 +130,14 @@ async def _resolve_caps_by_target(
 ) -> dict[str, dict]:
     """Per-collection capability resolution at the DATASOURCE dimension.
 
-    For each mongodb collection: resolve_ds → get_server_capabilities (per-ds cached,
+    For each mongodb collection: db_profile caps projection (cold-start probed,
     failure-safe). Native/empty-restriction caps are omitted (no noise). mysql
     collections are skipped (no mongo capability concept).
     """
+    import json as _json
+
+    from app.engine.tools._db_profile_projector import _project_db_profile
+
     out: dict[str, dict] = {}
     for c in collections:
         db_type = (c.get("db_type") or "mongodb").strip()
@@ -148,11 +150,9 @@ async def _resolve_caps_by_target(
         ds = await resolve_ds(db, namespace_id, db_type, database)
         if ds is None:
             continue
-        try:
-            caps = await get_driver(db_type).get_server_capabilities(ds)
-        except Exception:  # noqa: BLE001 — capability probe must never block planning
-            caps = None
-        if caps is not None and _has_restrictions(caps):
+        profile = _json.loads(ds.db_profile_json or "{}")
+        caps = _project_db_profile(profile, "caps")
+        if _has_restrictions(caps):
             out[_caps_target_key(db_type, database, collection)] = dict(caps)
     return out
 

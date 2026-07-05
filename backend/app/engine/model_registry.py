@@ -33,10 +33,9 @@ import logging
 import threading
 from typing import Any
 
-log = logging.getLogger(__name__)
+from app.config import settings
 
-MAX_TOKENS_DEFAULT = 12288  # max_tokens 统一默认值, llm.py/Web UI 共用
-_CLIENT_TIMEOUT = 15  # OpenAI/Anthropic HTTP client timeout (秒)
+log = logging.getLogger(__name__)
 
 
 def _build_proxy_url(cfg: dict[str, Any]) -> str | None:
@@ -156,14 +155,16 @@ class ModelRegistry:
             proto = cfg.get("protocol", "openai")
             if proto == "anthropic":
                 self._chat_client = build_anthropic_client(
-                    cfg["api_key"], cfg["base_url"], timeout=_CLIENT_TIMEOUT, proxy_url=proxy_url)
+                    cfg["api_key"], cfg["base_url"],
+                    timeout=settings.llm_client_timeout_secs, proxy_url=proxy_url)
             else:
                 base_url = cfg["base_url"]
                 path = cfg.get("completions_path") or ""
                 if path and path != "/v1/chat/completions":
                     base_url = base_url.rstrip("/") + path
                 self._chat_client = build_openai_client(
-                    cfg["api_key"], base_url, timeout=_CLIENT_TIMEOUT, proxy_url=proxy_url)
+                    cfg["api_key"], base_url,
+                    timeout=settings.llm_client_timeout_secs, proxy_url=proxy_url)
             self._chat_client_key = cfg_key
         return self._chat_client
 
@@ -189,7 +190,8 @@ class ModelRegistry:
                 base_url = base_url.rstrip("/") + path
             proxy_url = _build_proxy_url(cfg)
             self._embedding_client = build_openai_client(
-                cfg["api_key"], base_url, timeout=_CLIENT_TIMEOUT, proxy_url=proxy_url)
+                cfg["api_key"], base_url,
+                timeout=settings.llm_client_timeout_secs, proxy_url=proxy_url)
             self._embedding_client_key = cfg_key
         return self._embedding_client
 
@@ -242,7 +244,7 @@ class ModelRegistry:
             "model_type": row.model_type,
             "protocol": row.protocol,
             "temperature": float(row.temperature) if row.temperature is not None else 0.1,
-            "max_tokens": row.max_tokens or MAX_TOKENS_DEFAULT,
+            "max_tokens": row.max_tokens or settings.llm_max_tokens_default,
             "completions_path": row.completions_path,
             "embeddings_path": row.embeddings_path,
             "proxy_enabled": row.proxy_enabled,

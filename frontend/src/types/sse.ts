@@ -20,7 +20,8 @@ export type AgentSSEEvent =
           | "max_total_iterations"
           | "dead_loop"
           | "forced_clarify_timeout"
-          | "forced_clarify_exhausted";
+          | "forced_clarify_exhausted"
+          | "llm_timeout";
         total_iterations: number;
         ended_at?: string;
         total_tool_calls?: number;

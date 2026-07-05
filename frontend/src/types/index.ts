@@ -40,6 +40,7 @@ export interface DataSource {
   username: string;
   description: string;
   db_profile: Record<string, unknown>;
+  timezone: string;
   created_at: string;
 }
 

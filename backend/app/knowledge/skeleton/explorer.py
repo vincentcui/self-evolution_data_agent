@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any, Callable
 
 from langfuse import observe
 
@@ -40,7 +41,7 @@ EXPLORER_TOOL_SPECS = [s for s in EXTRACTION_TOOL_SPECS
 # 无硬迭代上限 — dead_loop 检测是唯一终止条件.
 # Explorer 上下文增长 ~1.5K/轮 (list_dir/grep 结果截断), 不存在膨胀问题.
 DEAD_LOOP_WINDOW = 4
-_EXPLORER_TOOL_RESULT_MAX_CHARS = 8192
+_EXPLORER_TOOL_RESULT_MAX_CHARS = 8192  # noqa: hardcode
 
 # ── P1 V3: Explorer System Prompt ───────────────────────────────────────────
 # PA4 §5.3 审批版本 (2026-06-21) — 禁止改写任何字符
@@ -276,7 +277,7 @@ async def explore_repo(
     ]
 
     # ── 工具函数映射 (注入 repo_path 作为 root) ────────────────
-    tool_fns: dict[str, callable] = {
+    tool_fns: dict[str, Callable[..., Any]] = {
         "list_dir": lambda **kw: list_dir(kw.get("path", "."), repo_path),
         "read_file": lambda **kw: read_file(
             kw["path"], repo_path, kw.get("offset"), kw.get("limit")),

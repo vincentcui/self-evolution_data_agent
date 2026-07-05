@@ -1,11 +1,11 @@
-"""Verify fetch_schema / estimate_cost output includes server_capabilities.
+"""Verify fetch_schema / estimate_cost output includes db_profile (schema+caps merge).
 
-L0 集成测试: mock driver + 验证 fetch_schema/estimate_cost 输出 server_capabilities,
-当 driver.get_server_capabilities 返 None (e.g. MySQL no-op 或 buildInfo 失败) 时,
-输出 dict 不应出现该 key (clean shape, 而非 None 占位).
+L0 集成测试: mock driver + 验证 fetch_schema/estimate_cost 输出 db_profile 含
+caps (unsupported_ops 等), 不再返 server_capabilities 字段 (caps 融入 db_profile).
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +17,12 @@ from app.engine.tools.data_access_tools import estimate_cost, fetch_schema
 def mock_ds():
     ds = MagicMock()
     ds.id = 99
+    ds.timezone = "Asia/Shanghai"
+    ds.db_profile_json = json.dumps({
+        "version": "4.0.28", "flavor": "mongodb", "charset": None, "object_count": 3,
+        "unsupported_ops": ["$round", "$dateTrunc", "$function"],
+        "unsupported_stage_variants": [], "syntax_constraints": [], "equivalent_hints": [],
+    })
     return ds
 
 
@@ -37,18 +43,14 @@ def mock_driver_with_caps():
         "warning_level": "ok",
         "raw_explain": {},
     })
-    driver.get_server_capabilities = AsyncMock(return_value={
-        "version": "4.0.28",
-        "agg_ops_unsupported": ["$dateTrunc", "$function", "$round"],
-    })
     return driver
 
 
 @pytest.mark.asyncio
-async def test_fetch_schema_canonical_branch_includes_server_capabilities(
+async def test_fetch_schema_canonical_branch_includes_db_profile_caps(
     mock_ds, mock_driver_with_caps,
 ):
-    """canonical 命中分支也必须 attach server_capabilities."""
+    """canonical 命中分支: db_profile 含 caps (unsupported_ops), 无 server_capabilities."""
     canonical = MagicMock()
     canonical.fields_json = "[]"
     canonical.indexes_json = "[]"
@@ -73,16 +75,16 @@ async def test_fetch_schema_canonical_branch_includes_server_capabilities(
             target="coll_x",
         )
     assert result["source"] == "canonical"
-    assert "server_capabilities" in result
-    assert result["server_capabilities"]["version"] == "4.0.28"
-    assert "$round" in result["server_capabilities"]["agg_ops_unsupported"]
+    assert "server_capabilities" not in result
+    assert "db_profile" in result
+    assert "$round" in result["db_profile"]["unsupported_ops"]
 
 
 @pytest.mark.asyncio
-async def test_fetch_schema_includes_server_capabilities(
+async def test_fetch_schema_includes_db_profile_caps(
     mock_ds, mock_driver_with_caps,
 ):
-    """canonical = None → introspect 路径, server_capabilities 必须 attach."""
+    """canonical = None → introspect 路径: db_profile 含 caps, 无 server_capabilities."""
     with patch(
         "app.engine.tools.data_access_tools.resolve_ds",
         AsyncMock(return_value=mock_ds),
@@ -100,16 +102,16 @@ async def test_fetch_schema_includes_server_capabilities(
             database="db_x",
             target="coll_x",
         )
-    assert "server_capabilities" in result
-    caps = result["server_capabilities"]
-    assert caps["version"] == "4.0.28"
-    assert "$round" in caps["agg_ops_unsupported"]
+    assert "server_capabilities" not in result
+    assert "db_profile" in result
+    assert "$round" in result["db_profile"]["unsupported_ops"]
 
 
 @pytest.mark.asyncio
-async def test_estimate_cost_includes_server_capabilities(
+async def test_estimate_cost_includes_db_profile_caps(
     mock_ds, mock_driver_with_caps,
 ):
+    """estimate_cost: timezone + db_profile(schema+caps merge), 无 server_capabilities."""
     with patch(
         "app.engine.tools.data_access_tools.resolve_ds",
         AsyncMock(return_value=mock_ds),
@@ -125,39 +127,9 @@ async def test_estimate_cost_includes_server_capabilities(
             target="coll_x",
             query={"filter": {}},
         )
-    assert "server_capabilities" in result
-    assert result["server_capabilities"]["version"] == "4.0.28"
-
-
-@pytest.mark.asyncio
-async def test_omits_server_capabilities_when_driver_returns_none(mock_ds):
-    """MySQL driver 返 None 时, 输出不应出现 server_capabilities key (clean shape)."""
-    driver = MagicMock()
-    driver.fetch_schema = AsyncMock(return_value={
-        "db_type": "mysql",
-        "database": "db_x",
-        "target": "tab_x",
-        "description": "",
-        "fields": [],
-        "indexes": [],
-        "sample_count": 0,
-    })
-    driver.get_server_capabilities = AsyncMock(return_value=None)
-    with patch(
-        "app.engine.tools.data_access_tools.resolve_ds",
-        AsyncMock(return_value=mock_ds),
-    ), patch(
-        "app.engine.tools.data_access_tools.get_driver",
-        return_value=driver,
-    ), patch(
-        "app.knowledge.schema_canonical.get_schema_canonical",
-        AsyncMock(return_value=None),
-    ):
-        result = await fetch_schema(
-            db=MagicMock(),
-            namespace_id=1,
-            db_type="mysql",
-            database="db_x",
-            target="tab_x",
-        )
     assert "server_capabilities" not in result
+    assert result["timezone"] == "Asia/Shanghai"
+    db_profile = result["db_profile"]
+    assert "version" in db_profile  # from schema projection
+    assert "unsupported_ops" in db_profile  # from caps projection
+    assert "$round" in db_profile["unsupported_ops"]

@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, require_admin_or_above
+from app.config import settings
 from app.db.metadata import get_db
 from app.models.base import local_now
 from app.models.model_config import ModelConfig
@@ -46,7 +47,7 @@ class ModelConfigIn(BaseModel):
     model_type: str = Field("CHAT", pattern=r"^(CHAT|EMBEDDING)$")
     protocol: str = Field("openai", pattern=r"^(openai|anthropic)$")
     temperature: float | None = 0.0
-    max_tokens: int | None = 12288
+    max_tokens: int | None = Field(default_factory=lambda: settings.llm_max_tokens_default)
     completions_path: str | None = None
     embeddings_path: str | None = None
     proxy_enabled: bool = False
@@ -440,7 +441,7 @@ async def test_connection(
         "model_type": body.model_type,
         "protocol": proto,
         "temperature": body.temperature or 0.0,
-        "max_tokens": body.max_tokens or 12288,
+        "max_tokens": body.max_tokens or settings.llm_max_tokens_default,
         "completions_path": body.completions_path,
         "embeddings_path": body.embeddings_path,
         "proxy_url": _build_proxy_url_from_body(body),
@@ -522,7 +523,11 @@ def _test_openai_chat(cfg: dict[str, Any]) -> None:
     path = cfg.get("completions_path") or "/v1/chat/completions"
     if path != "/v1/chat/completions":
         base_url = base_url.rstrip("/") + path
-    client = build_openai_client(cfg["api_key"], base_url, proxy_url=cfg.get("proxy_url"))
+    client = build_openai_client(
+        cfg["api_key"], base_url,
+        timeout=settings.llm_connect_test_timeout_secs,
+        proxy_url=cfg.get("proxy_url"),
+    )
     client.chat.completions.create(
         model=cfg["model_name"],
         messages=[{"role": "user", "content": "Hello"}],
@@ -533,7 +538,11 @@ def _test_openai_chat(cfg: dict[str, Any]) -> None:
 def _test_anthropic_chat(cfg: dict[str, Any]) -> None:
     """发送 Hello 测试 Anthropic Chat 连接, 失败即抛异常."""
     from app.engine.llm import build_anthropic_client
-    client = build_anthropic_client(cfg["api_key"], cfg["base_url"], proxy_url=cfg.get("proxy_url"))
+    client = build_anthropic_client(
+        cfg["api_key"], cfg["base_url"],
+        timeout=settings.llm_connect_test_timeout_secs,
+        proxy_url=cfg.get("proxy_url"),
+    )
     client.messages.create(
         model=cfg["model_name"],
         messages=[{"role": "user", "content": "Hello"}],
@@ -544,7 +553,11 @@ def _test_anthropic_chat(cfg: dict[str, Any]) -> None:
 def _test_openai_embedding(cfg: dict[str, Any]) -> None:
     """发送 Test 测试 Embedding 连接, 失败即抛异常."""
     from app.engine.llm import build_openai_client
-    client = build_openai_client(cfg["api_key"], cfg["base_url"], proxy_url=cfg.get("proxy_url"))
+    client = build_openai_client(
+        cfg["api_key"], cfg["base_url"],
+        timeout=settings.llm_connect_test_timeout_secs,
+        proxy_url=cfg.get("proxy_url"),
+    )
     client.embeddings.create(model=cfg["model_name"], input="Test")
 
 

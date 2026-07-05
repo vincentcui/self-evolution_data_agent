@@ -594,6 +594,8 @@ async def run_all(engine: AsyncEngine) -> None:
     await _add_missing(engine, "query_history", [
         ("feedback_rating", "VARCHAR(10)"),
     ])
+    # migration_028 (timezone): datasources.timezone 列 + 存量回填
+    await _ensure_datasources_timezone_column(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:
@@ -1029,3 +1031,21 @@ async def _ensure_model_config_audit_logs_table(engine: AsyncEngine) -> None:
             "ON model_config_audit_logs(created_at DESC)"
         ))
     log.info("[schema_migrations] model_config_audit_logs table ensured (migration_025)")
+
+
+async def _ensure_datasources_timezone_column(engine: AsyncEngine) -> None:
+    """migration_026 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
+
+    照抄 migration_024 范式: ADD COLUMN ... NOT NULL DEFAULT 一步原子 (存量行填 Asia/Shanghai),
+    随后 DROP DEFAULT 强制建源时显式给值
+    (DataSourceCreate.timezone 必填, 用户确认是真相, 不靠 DB 默认兜底).
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE datasources ADD COLUMN IF NOT EXISTS "
+            "timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE datasources ALTER COLUMN timezone DROP DEFAULT"
+        ))
+    log.info("[schema_migrations] datasources.timezone column ensured (migration_026)")

@@ -40,8 +40,8 @@ from app.engine.drivers.base import (
     ExecuteMode,
     ExecuteResult,
     FieldDef,
+    ProbeResult,
     SchemaSnapshot,
-    ServerCapabilities,
 )
 from app.models import DataSource
 from app.models.base import local_now
@@ -475,7 +475,7 @@ class OracleDriver:
         target: str,
         query: dict,
         mode: ExecuteMode = "single",
-        batch_size: int = 1000,
+        batch_size: int = 1000,  # noqa: hardcode
     ) -> ExecuteResult:
         """Thick/Thin 统一走 executor + sync pool, 消除双份实现。"""
         log.info(
@@ -544,11 +544,6 @@ class OracleDriver:
             cur.execute("SELECT 1 FROM DUAL")
             cur.fetchone()
 
-    # ── get_server_capabilities ───────────────────────────────
-
-    async def get_server_capabilities(self, ds: DataSource) -> ServerCapabilities | None:
-        return None
-
     # ── list_object_names ──────────────────────────────────────
 
     async def list_object_names(self, ds: DataSource) -> list[str]:
@@ -562,6 +557,33 @@ class OracleDriver:
             cur.execute("SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME")
             rows = cur.fetchall()
             return sorted(r[0] for r in rows)
+
+    # ── probe_connectivity ───────────────────────────────
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """一次性临时连接: 探测连通 + 时区. 走 executor 兼容 Thick/Thin."""
+        return await self._run_in_executor(self._probe_connectivity_sync, ds)
+
+    def _probe_connectivity_sync(self, ds: DataSource) -> ProbeResult:
+        from app.engine.drivers._timezone import normalize_timezone
+        try:
+            conn = oracledb.connect(
+                user=ds.username, password=ds.password, dsn=self._dsn(ds),
+                tcp_connect_timeout=settings.oracle_connect_timeout_secs,
+            )
+        except Exception as exc:
+            return ProbeResult(connected=False, failure_reason=str(exc)[:300])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT SESSIONTIMEZONE FROM DUAL")
+            raw = str(cur.fetchone()[0])
+            return ProbeResult(connected=True, detected_timezone=normalize_timezone(raw))
+        except Exception as exc:
+            return ProbeResult(
+                connected=True, detected_timezone=None, failure_reason=str(exc)[:300]
+            )
+        finally:
+            conn.close()
 
     # ── fetch_db_profile ──────────────────────────────────────
 
@@ -586,6 +608,11 @@ class OracleDriver:
                 ("SELECT USER FROM DUAL", "schema", lambda r: str(r[0])),
                 ("SELECT COUNT(*) FROM USER_TABLES", "object_count",
                  lambda r: int(r[0] or 0)),
+                ("SELECT VALUE FROM NLS_DATABASE_PARAMETERS WHERE PARAMETER='NLS_CHARACTERSET'",
+                 "charset", lambda r: str(r[0])),
+                ("SELECT VALUE FROM NLS_DATABASE_PARAMETERS "
+                 "WHERE PARAMETER='NLS_NCHAR_CHARACTERSET'",
+                 "nchar_charset", lambda r: str(r[0])),
             ]:
                 try:
                     cur.execute(stmt)

@@ -89,6 +89,15 @@ class DataSourceCreate(BaseModel):
     username: str
     password: str  # 明文传入, 服务端加密存储
     description: str = ""  # 用户填写: 这个库是干嘛的, 给 LLM 看
+    timezone: str
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_is_valid_iana(cls, v: str) -> str:
+        from zoneinfo import available_timezones
+        if v not in available_timezones():
+            raise ValueError(f"非法 IANA 时区名: {v!r}")
+        return v
 
 
 class DataSourceOut(BaseModel):
@@ -100,6 +109,7 @@ class DataSourceOut(BaseModel):
     username: str
     description: str
     db_profile: dict
+    timezone: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -115,8 +125,34 @@ class DataSourceOut(BaseModel):
             id=ds.id, db_type=ds.db_type, host=ds.host, port=ds.port,
             database=ds.database, username=ds.username,
             description=ds.description, db_profile=profile,
-            created_at=ds.created_at,
+            timezone=ds.timezone, created_at=ds.created_at,
         )
+
+
+class DataSourceProbeIn(BaseModel):
+    """probe 端点入参: 连通+时区探测, 不含 timezone (detected_timezone 是探测输出)."""
+    db_type: str
+
+    @field_validator("db_type")
+    @classmethod
+    def _db_type_is_supported(cls, v: str) -> str:
+        from app.engine.db_types import SUPPORTED_DB_TYPES
+        if v not in SUPPORTED_DB_TYPES:
+            raise ValueError(f"不支持的 db_type: {v!r}, 仅支持: {sorted(SUPPORTED_DB_TYPES)}")
+        return v
+
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    description: str = ""
+
+
+class DataSourceProbeOut(BaseModel):
+    connected: bool
+    detected_timezone: str | None = None
+    failure_reason: str | None = None
 
 
 class SchemaRefreshResult(BaseModel):

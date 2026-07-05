@@ -7,7 +7,7 @@ from openai import OpenAI
 
 
 def build_openai_client(
-    api_key: str, base_url: str, *, timeout: float = 15, proxy_url: str | None = None,
+    api_key: str, base_url: str, *, timeout: float, proxy_url: str | None = None,
 ) -> OpenAI:
     """构造 OpenAI 兼容客户端."""
     kwargs: dict = {"api_key": api_key, "base_url": base_url, "timeout": timeout}
@@ -17,7 +17,7 @@ def build_openai_client(
 
 
 def build_anthropic_client(
-    api_key: str, base_url: str, *, timeout: float = 15, proxy_url: str | None = None,
+    api_key: str, base_url: str, *, timeout: float, proxy_url: str | None = None,
 ) -> anthropic.Anthropic:
     """构造 Anthropic 客户端."""
     kwargs: dict = {"api_key": api_key, "base_url": base_url, "timeout": timeout}

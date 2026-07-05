@@ -1,21 +1,17 @@
 """Unit tests for plan_tools._resolve_caps_by_target (spec task 3.2).
 
 per-collection capability resolution at the DATASOURCE dimension:
-- mongodb collections resolve caps via resolve_ds → get_server_capabilities
+- mongodb collections resolve caps via ds.db_profile_json caps projection
 - native/empty-restriction caps are omitted (no noise)
 - mysql collections are skipped (no mongo capability concept)
-- failure-safe: resolve_ds None / get_server_capabilities raising or None → omit, no raise
+- failure-safe: resolve_ds None → omit, no exception
 - caps map key format is "[db_type] database.collection"
-
-Mirrors the mocking convention in test_data_access_capabilities.py: patch
-resolve_ds / get_driver where they are looked up (app.engine.tools.plan_tools.*),
-use MagicMock() for the AsyncSession (the helper never touches it directly — it is
-only forwarded to the mocked resolve_ds).
 
 Validates: Requirements 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,27 +56,12 @@ def _documentdb_caps() -> dict:
     }
 
 
-def _make_ds(ds_id: int) -> MagicMock:
+def _make_ds(ds_id: int, caps: dict | None = None) -> MagicMock:
+    """Build a mock datasource. If caps provided, serializes them to db_profile_json."""
     ds = MagicMock()
     ds.id = ds_id
+    ds.db_profile_json = json.dumps(caps) if caps else "{}"
     return ds
-
-
-def _make_driver(caps_by_ds_id: dict[int, dict | None], *, raise_for: set[int] | None = None):
-    """Build a driver mock whose get_server_capabilities dispatches by ds.id.
-
-    raise_for: a set of ds.id values for which get_server_capabilities raises.
-    """
-    raise_for = raise_for or set()
-    driver = MagicMock()
-
-    def _caps(ds):
-        if ds.id in raise_for:
-            raise RuntimeError("buildInfo probe failed")
-        return caps_by_ds_id.get(ds.id)
-
-    driver.get_server_capabilities = AsyncMock(side_effect=_caps)
-    return driver
 
 
 # ════════════════════════════════════════════
@@ -116,20 +97,15 @@ def test_has_restrictions_false_for_native_empty_caps():
 async def test_two_datasources_native_omitted_documentdb_present():
     """Two mongodb collections on two datasources:
     native ds → empty caps omitted; documentdb ds → restrictions present (R3.2/3.3/3.4)."""
-    ds_native = _make_ds(1)
-    ds_doc = _make_ds(2)
+    ds_native = _make_ds(1, _native_caps())
+    ds_doc = _make_ds(2, _documentdb_caps())
 
     def _resolve(db, ns_id, db_type, database):
         return {"native_db": ds_native, "doc_db": ds_doc}.get(database)
 
-    driver = _make_driver({1: _native_caps(), 2: _documentdb_caps()})
-
     with patch(
         "app.engine.tools.plan_tools.resolve_ds",
         AsyncMock(side_effect=_resolve),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
     ):
         out = await _resolve_caps_by_target(
             MagicMock(),
@@ -152,15 +128,11 @@ async def test_two_datasources_native_omitted_documentdb_present():
 @pytest.mark.asyncio
 async def test_key_format_matches_db_type_database_collection():
     """Resolved key uses exactly '[db_type] database.collection' (R3.6)."""
-    ds_doc = _make_ds(2)
-    driver = _make_driver({2: _documentdb_caps()})
+    ds_doc = _make_ds(2, _documentdb_caps())
 
     with patch(
         "app.engine.tools.plan_tools.resolve_ds",
         AsyncMock(return_value=ds_doc),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
     ):
         out = await _resolve_caps_by_target(
             MagicMock(),
@@ -175,16 +147,12 @@ async def test_key_format_matches_db_type_database_collection():
 
 @pytest.mark.asyncio
 async def test_mysql_collection_skipped():
-    """mysql collection is skipped — resolve_ds / get_driver never called for it (R3.5)."""
+    """mysql collection is skipped — resolve_ds never called for it (R3.5)."""
     resolve_mock = AsyncMock()
-    get_driver_mock = MagicMock()
 
     with patch(
         "app.engine.tools.plan_tools.resolve_ds",
         resolve_mock,
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        get_driver_mock,
     ):
         out = await _resolve_caps_by_target(
             MagicMock(),
@@ -196,20 +164,14 @@ async def test_mysql_collection_skipped():
 
     assert out == {}
     resolve_mock.assert_not_awaited()
-    get_driver_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_resolve_ds_none_omits_collection_no_exception():
     """resolve_ds returns None → collection omitted, no exception (R4.1)."""
-    driver = _make_driver({})  # get_server_capabilities must never be reached
-
     with patch(
         "app.engine.tools.plan_tools.resolve_ds",
         AsyncMock(return_value=None),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
     ):
         out = await _resolve_caps_by_target(
             MagicMock(),
@@ -220,75 +182,21 @@ async def test_resolve_ds_none_omits_collection_no_exception():
         )
 
     assert out == {}
-    driver.get_server_capabilities.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_get_server_capabilities_raising_omits_collection_no_exception():
-    """get_server_capabilities raising → collection omitted, no exception (R4.2)."""
-    ds = _make_ds(3)
-    driver = _make_driver({}, raise_for={3})
-
-    with patch(
-        "app.engine.tools.plan_tools.resolve_ds",
-        AsyncMock(return_value=ds),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
-    ):
-        out = await _resolve_caps_by_target(
-            MagicMock(),
-            namespace_id=1,
-            collections=[
-                {"db_type": "mongodb", "database": "flaky_db", "collection": "c_x"},
-            ],
-        )
-
-    assert out == {}
-
-
-@pytest.mark.asyncio
-async def test_get_server_capabilities_none_omits_collection():
-    """get_server_capabilities returns None → treated as no restrictions, omitted (R4.2)."""
-    ds = _make_ds(4)
-    driver = _make_driver({4: None})
-
-    with patch(
-        "app.engine.tools.plan_tools.resolve_ds",
-        AsyncMock(return_value=ds),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
-    ):
-        out = await _resolve_caps_by_target(
-            MagicMock(),
-            namespace_id=1,
-            collections=[
-                {"db_type": "mongodb", "database": "nocaps_db", "collection": "c_y"},
-            ],
-        )
-
-    assert out == {}
 
 
 @pytest.mark.asyncio
 async def test_mixed_collections_only_restricted_documentdb_kept():
     """End-to-end mix (R3.2–3.5): native omitted, mysql skipped, missing-ds omitted,
     only the documentdb collection with restrictions survives."""
-    ds_native = _make_ds(1)
-    ds_doc = _make_ds(2)
+    ds_native = _make_ds(1, _native_caps())
+    ds_doc = _make_ds(2, _documentdb_caps())
 
     def _resolve(db, ns_id, db_type, database):
         return {"native_db": ds_native, "doc_db": ds_doc}.get(database)  # ghost_db → None
 
-    driver = _make_driver({1: _native_caps(), 2: _documentdb_caps()})
-
     with patch(
         "app.engine.tools.plan_tools.resolve_ds",
         AsyncMock(side_effect=_resolve),
-    ), patch(
-        "app.engine.tools.plan_tools.get_driver",
-        return_value=driver,
     ):
         out = await _resolve_caps_by_target(
             MagicMock(),
