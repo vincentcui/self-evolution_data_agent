@@ -599,7 +599,12 @@ async def run_all(engine: AsyncEngine) -> None:
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:
-    """migration_026: sessions 表 — 会话 CRUD, 绑定命名空间, 软删不实施."""
+    """migration_026: sessions 表 — 会话 CRUD, 绑定命名空间, 软删不实施.
+
+    时区说明: created_at/updated_at server_default 硬编码 'Asia/Shanghai' —
+    与 models/base.py LOCAL_NOW 一致 (默认 IS_APP_TIMEZONE).
+    若需改变时区, 迁移已应用的表需手工 ALTER COLUMN.
+    """
     async with engine.begin() as conn:
         await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS sessions ("

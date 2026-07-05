@@ -149,3 +149,13 @@ async def test_readiness_namespace_not_found_returns_no_access(make_client, db):
     # assert_ns_access 对不存在/无权 namespace 抛 403，readiness 端点 catch 后返回 200 + no_access
     assert resp.status_code == 200
     assert resp.json()["ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_readiness_invalid_namespace_id_returns_no_access(make_client, db):
+    """namespace_id=0/-1 非法 ID → 返回 200 + no_access."""
+    client = await make_client(role="super_admin")
+    for bad_id in (0, -1):
+        resp = await client.get(f"/api/namespaces/{bad_id}/readiness")
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is False

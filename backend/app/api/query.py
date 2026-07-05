@@ -52,6 +52,9 @@ from app.knowledge.trace_extractor import (
     normalize_query_plan as _normalize_query_plan_impl,
     extract_join_keys as _extract_join_keys_impl,
 )
+from app.api._session_cleanup import (
+    write_cancelled_history,
+)
 from app.models import (
     Namespace,
     QueryHistory,
@@ -344,14 +347,14 @@ async def query_stream(
         except asyncio.CancelledError:
             # 被取消的对话也要保存，让刷新后仍可查看部分过程
             try:
-                await _write_cancelled_history(
+                await write_cancelled_history(
                     trace_id=trace_id,
                     namespace_id=ns.id,
                     session_id=session_id,
                     question=body.question,
                 )
             except Exception:
-                log.exception("_write_cancelled_history failed trace=%s", trace_id)
+                log.exception("write_cancelled_history failed trace=%s", trace_id)
         except Exception as exc:
             log.exception("query_stream unexpected error trace_id=%s", trace_id)
             await event_q.put({
@@ -553,161 +556,6 @@ async def _write_query_history(
         await db.refresh(entry)
         return entry.id
 
-
-def _last_exec_tool_from_trace(tool_trace: list[dict]) -> dict:
-    """从 tool_trace 中提取最后一条成功执行的 SQL — 返回 {generated_query, row_count, rows_data, columns_data}."""
-    import json as _json
-
-    for tr in reversed(tool_trace):
-        if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
-            out = tr.get("output") or {}
-            rows_data = out.get("rows", [])
-            columns_data = out.get("columns", [])
-            if not columns_data and rows_data and isinstance(rows_data[0], dict):
-                columns_data = list(rows_data[0].keys())
-            return {
-                "generated_query": _json.dumps(tr.get("input", {}), ensure_ascii=False, default=str),
-                "row_count": int(out.get("row_count", 0) or out.get("count", 0) or 0),
-                "rows_data": rows_data,
-                "columns_data": columns_data,
-            }
-    return {"generated_query": "", "row_count": 0, "rows_data": [], "columns_data": []}
-
-
-async def _extract_cancelled_trace_data(trace_id: str) -> dict:
-    """从 AgentTrace 中提取被取消对话的工具执行数据.
-
-    返回 dict: tool_trace, generated_query, row_count, rows_data, columns_data.
-    AgentTrace 不存在时返回空数据 (最小记录模式).
-    """
-    from sqlalchemy import select as sa_select
-
-    from app.models.agent_trace import AgentTrace
-
-    import json as _json
-
-    empty: dict = {
-        "tool_trace": [],
-        "generated_query": "",
-        "row_count": 0,
-        "rows_data": [],
-        "columns_data": [],
-    }
-
-    async with _new_db_session() as new_db:
-        result = await new_db.execute(
-            sa_select(AgentTrace).where(AgentTrace.trace_id == trace_id)
-        )
-        trace_row = result.scalar_one_or_none()
-        if trace_row is None:
-            log.warning(
-                "_extract_cancelled_trace_data AgentTrace not found trace=%s",
-                trace_id,
-            )
-            return empty
-
-        trace_data = _json.loads(trace_row.trace_json or "{}")
-        tool_trace = trace_data.get("tool_trace", [])
-        exec_data = _last_exec_tool_from_trace(tool_trace)
-
-        return {
-            "tool_trace": tool_trace,
-            **exec_data,
-        }
-
-
-def _build_cancelled_result_snapshot(
-    *,
-    session_id: str,
-    generated_query: str,
-    columns_data: list[str],
-    rows_data: list[dict],
-    row_count: int,
-    tool_trace: list[dict],
-) -> dict:
-    """构建 cancelled 状态的 result_snapshot — 前端恢复部分工具执行过程."""
-    return {
-        "session_id": session_id,
-        "history_id": 0,
-        "needs_clarification": False,
-        "clarification_message": "",
-        "generated_query": generated_query,
-        "columns": columns_data,
-        "rows": rows_data,
-        "row_count": row_count,
-        "chart_type": "table",
-        "category_column": "",
-        "chart_option": {},
-        "truncated": False,
-        "rendered_row_count": len(rows_data),
-        "total_row_count": len(rows_data),
-        "performance_warning": "",
-        "error": "cancelled",
-        "clarification_questions": [],
-        "pending_id": 0,
-        "final_answer": "(对话已被终止)",
-        "iterations": len(tool_trace),
-        "stop_reason": "cancelled",
-        "tool_trace": tool_trace,
-    }
-
-
-async def _build_cancelled_history_entry(
-    *,
-    namespace_id: int,
-    session_id: str,
-    question: str,
-    data: dict,
-) -> int | None:
-    """构建并持久化一条 cancelled 状态的 QueryHistory 记录."""
-    import json as _json
-
-    snapshot = _build_cancelled_result_snapshot(
-        session_id=session_id,
-        generated_query=data["generated_query"],
-        columns_data=data["columns_data"],
-        rows_data=data["rows_data"],
-        row_count=data["row_count"],
-        tool_trace=data["tool_trace"],
-    )
-
-    async with _new_db_session() as new_db:
-        entry = QueryHistory(
-            namespace_id=namespace_id,
-            session_id=session_id,
-            role="assistant",
-            content=question,
-            generated_query=data["generated_query"],
-            row_count=data["row_count"],
-            error="cancelled",
-            result_snapshot=_json.dumps(snapshot, ensure_ascii=False, default=str),
-        )
-        new_db.add(entry)
-        await new_db.commit()
-        await new_db.refresh(entry)
-        return entry.id
-
-
-async def _write_cancelled_history(
-    *,
-    trace_id: str,
-    namespace_id: int,
-    session_id: str,
-    question: str,
-) -> int | None:
-    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程."""
-    data = await _extract_cancelled_trace_data(trace_id)
-    entry_id = await _build_cancelled_history_entry(
-        namespace_id=namespace_id,
-        session_id=session_id,
-        question=question,
-        data=data,
-    )
-    log.info(
-        "_write_cancelled_history done trace=%s history_id=%s tools=%d",
-        trace_id, entry_id, len(data["tool_trace"]),
-    )
-    return entry_id
 
 
 @router.post("/query/stream/{trace_id}/correct")
