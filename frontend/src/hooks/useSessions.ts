@@ -37,16 +37,10 @@ export function useSessions(namespaceId: number | null) {
     }
   }, [namespaceId]);
 
-  // 初始化：无活跃会话时自动选最近会话
+  // 初始化：加载会话列表，但不自动选中（刷新后停在"新对话"页）
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    setActiveSessionId((prev) =>
-      prev ?? (sessions.length > 0 ? sessions[0].id : null)
-    );
-  }, [sessions]);
 
   const create = useCallback(
     async (nsId: number) => {

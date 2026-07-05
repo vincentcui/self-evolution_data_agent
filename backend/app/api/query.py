@@ -238,7 +238,7 @@ async def query_stream(
     # session_id: 会话级稳定标识 (前端传则用), 用于多轮历史 / 按会话聚合。
     # 两者解耦 — 同一会话多次提交 → 不同 trace_id, 不再撞 agent_traces 唯一约束。
     trace_id = str(uuid.uuid4())
-    session_id = body.session_id or trace_id
+    session_id = body.session_id or ""  # P0: 不用 trace_id 回退，保证前端传来的 session UUID 可追溯
     event_q, correction_q = register_sse_session(trace_id)
 
     async def sse_emit(evt: dict) -> None:
@@ -352,7 +352,16 @@ async def query_stream(
             except Exception:
                 log.warning("推荐问题生成失败，静默降级", exc_info=True)
         except asyncio.CancelledError:
-            pass  # agent_loop 已 emit 'cancelled'
+            # 被取消的对话也要保存，让刷新后仍可查看部分过程
+            try:
+                await _write_cancelled_history(
+                    trace_id=trace_id,
+                    namespace_id=ns.id,
+                    session_id=session_id,
+                    question=body.question,
+                )
+            except Exception:
+                log.exception("_write_cancelled_history failed trace=%s", trace_id)
         except Exception as exc:
             log.exception("query_stream unexpected error trace_id=%s", trace_id)
             await event_q.put({
@@ -534,11 +543,93 @@ async def _write_query_history(
                 "final_answer": result.final_answer,
                 "iterations": result.iterations,
                 "stop_reason": result.stop_reason,
+                # P0: 保存工具调用链, 前端重建历史时展示完整过程
+                "tool_trace": result.tool_trace,
             }, ensure_ascii=False, default=str),
         )
         db.add(entry)
         await db.commit()
         await db.refresh(entry)
+        return entry.id
+
+
+async def _write_cancelled_history(
+    *,
+    trace_id: str,
+    namespace_id: int,
+    session_id: str,
+    question: str,
+) -> int | None:
+    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程."""
+    from sqlalchemy import select as sa_select
+
+    from app.models.agent_trace import AgentTrace
+
+    import json as _json
+
+    async with _new_db_session() as new_db:
+        result = await new_db.execute(
+            sa_select(AgentTrace).where(AgentTrace.trace_id == trace_id)
+        )
+        trace_row = result.scalar_one_or_none()
+        if trace_row is None:
+            return None
+
+        trace_data = _json.loads(trace_row.trace_json or "{}")
+        tool_trace = trace_data.get("tool_trace", [])
+
+        # 提取最后一条成功执行的 SQL
+        generated_query = ""
+        row_count = 0
+        rows_data = []
+        columns_data = []
+        for tr in reversed(tool_trace):
+            if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
+                generated_query = _json.dumps(tr.get("input", {}), ensure_ascii=False, default=str)
+                out = tr.get("output") or {}
+                row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
+                rows_data = out.get("rows", [])
+                columns_data = out.get("columns", [])
+                if not columns_data and rows_data and isinstance(rows_data[0], dict):
+                    columns_data = list(rows_data[0].keys())
+                break
+
+        entry = QueryHistory(
+            namespace_id=namespace_id,
+            session_id=session_id,
+            role="assistant",
+            content=question,
+            generated_query=generated_query,
+            row_count=row_count,
+            error="cancelled",
+            result_snapshot=_json.dumps({
+                "session_id": session_id,
+                "history_id": 0,
+                "needs_clarification": False,
+                "clarification_message": "",
+                "generated_query": generated_query,
+                "columns": columns_data,
+                "rows": rows_data,
+                "row_count": row_count,
+                "chart_type": "table",
+                "category_column": "",
+                "chart_option": {},
+                "truncated": False,
+                "rendered_row_count": len(rows_data),
+                "total_row_count": len(rows_data),
+                "performance_warning": "",
+                "error": "cancelled",
+                "clarification_questions": [],
+                "pending_id": 0,
+                "final_answer": "(对话已被终止)",
+                "iterations": len(tool_trace),
+                "stop_reason": "cancelled",
+                "tool_trace": tool_trace,
+            }, ensure_ascii=False, default=str),
+        )
+        new_db.add(entry)
+        await new_db.commit()
+        await new_db.refresh(entry)
         return entry.id
 
 

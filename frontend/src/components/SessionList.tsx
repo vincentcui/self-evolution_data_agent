@@ -6,24 +6,24 @@
  * ════════════════════════════════════════════ */
 
 import React, { useState } from "react";
-import { Button, Input, List, message, Modal, Popconfirm, Spin, Typography } from "antd";
+import { Button, Dropdown, Input, message, Popconfirm, Spin } from "antd";
 import {
   DeleteOutlined,
   EditOutlined,
-  PlusOutlined,
-  MessageOutlined,
+  MoreOutlined,
 } from "@ant-design/icons";
+import type { MenuProps } from "antd";
 import type { Session } from "@/types";
 
-const { Text } = Typography;
 
 interface Props {
   namespaceId: number | null;
   sessions: Session[];
   activeSessionId: string | null;
   loading: boolean;
+  ready?: boolean;
   onCreate: (nsId: number) => Promise<Session>;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
@@ -31,6 +31,7 @@ interface Props {
 const SessionList: React.FC<Props> = ({
   namespaceId,
   sessions,
+  ready,
   activeSessionId,
   loading,
   onCreate,
@@ -40,6 +41,10 @@ const SessionList: React.FC<Props> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [hoverList, setHoverList] = useState(false);
+  const [scrolledBottom, setScrolledBottom] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
 
   if (namespaceId == null) {
     return (
@@ -50,11 +55,8 @@ const SessionList: React.FC<Props> = ({
   }
 
   const handleCreate = async () => {
-    try {
-      await onCreate(namespaceId);
-    } catch {
-      message.error("创建会话失败");
-    }
+    if (namespaceId == null || !activeSessionId || ready === false) return;
+    onSelect(""); // triggers newChat in Layout
   };
 
   const handleStartRename = (session: Session) => {
@@ -93,27 +95,6 @@ const SessionList: React.FC<Props> = ({
 
   return (
     <div style={{ padding: "0 0 8px 0" }}>
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "8px 16px",
-        }}
-      >
-        <Text strong style={{ fontSize: 12, color: "#666" }}>
-          会话
-        </Text>
-        <Button
-          type="text"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={handleCreate}
-          loading={loading}
-        />
-      </div>
-
       {/* List */}
       {loading && sessions.length === 0 ? (
         <div style={{ textAlign: "center", padding: 16 }}>
@@ -124,107 +105,122 @@ const SessionList: React.FC<Props> = ({
           暂无会话
         </div>
       ) : (
-        <List
-          size="small"
-          dataSource={sessions}
-          split={false}
-          style={{ maxHeight: "calc(100vh - 300px)", overflowY: "auto" }}
-          renderItem={(session) => (
-            <List.Item
-              key={session.id}
-              onClick={() => onSelect(session.id)}
-              style={{
-                cursor: "pointer",
-                padding: "4px 16px",
-                background:
-                  session.id === activeSessionId ? "#e6f4ff" : "transparent",
-                borderInlineEnd:
-                  session.id === activeSessionId
-                    ? "3px solid #1677ff"
-                    : "3px solid transparent",
-              }}
-              actions={
-                session.id === activeSessionId
-                  ? [
-                      <Button
-                        key="edit"
-                        type="text"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartRename(session);
-                        }}
-                      />,
-                      <Popconfirm
-                        key="delete"
-                        title="确定删除此会话？"
-                        onConfirm={(e) => {
-                          e?.stopPropagation();
-                          handleDelete(session.id);
-                        }}
-                        onCancel={(e) => e?.stopPropagation()}
-                        okText="确定"
-                        cancelText="取消"
-                      >
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </Popconfirm>,
-                    ]
-                  : undefined
-              }
-            >
-              <List.Item.Meta
-                avatar={
-                  <MessageOutlined
-                    style={{
-                      color:
-                        session.id === activeSessionId ? "#1677ff" : "#bbb",
-                      fontSize: 14,
-                    }}
+        <div style={{ position: "relative", flex: 1 }}>
+          <div
+            style={{ overflowY: hoverList ? "auto" : "hidden", maxHeight: "calc(100vh - 300px)" }}
+            onMouseEnter={() => setHoverList(true)}
+            onMouseLeave={() => setHoverList(false)}
+            onScroll={(e) => {
+              const t = e.currentTarget;
+              setOverflowing(t.scrollHeight > t.clientHeight);
+              setScrolledBottom(t.scrollHeight - t.scrollTop - t.clientHeight < 20);
+            }}
+          >
+            {sessions.map((session) => {
+            const menuItems: MenuProps["items"] = [
+              { key: "rename", icon: <EditOutlined />, label: "重命名" },
+              { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+            ];
+            const isActive = session.id === activeSessionId;
+            return (
+              <div
+                key={session.id}
+                onClick={() => onSelect(session.id)}
+                onContextMenu={(e) => { e.preventDefault(); }}
+                style={{
+                  cursor: "pointer",
+                  padding: "10px 12px",
+                  margin: "2px 8px",
+                  borderRadius: 8,
+                  background: isActive ? "#f0f0f0" : "transparent",
+                  transition: "background 0.15s",
+                  position: "relative",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = isActive ? "#e8e8e8" : "#f5f5f5")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = isActive ? "#f0f0f0" : "transparent")}
+              >
+                {editingId === session.id ? (
+                  <Input
+                    size="small"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onPressEnter={handleConfirmRename}
+                    onBlur={handleConfirmRename}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ fontSize: 13 }}
                   />
-                }
-                title={
-                  editingId === session.id ? (
-                    <Input
-                      size="small"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onPressEnter={handleConfirmRename}
-                      onBlur={handleConfirmRename}
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ width: "calc(100% - 30px)" }}
-                    />
-                  ) : (
-                    <Text
-                      ellipsis={{ tooltip: session.title }}
+                ) : (
+                  <>
+                    <span
+                      title={session.title}
                       style={{
+                        display: "block",
                         fontSize: 13,
-                        fontWeight:
-                          session.id === activeSessionId ? 500 : 400,
-                        color:
-                          session.id === activeSessionId ? "#1677ff" : "#333",
+                        fontWeight: isActive ? 500 : 400,
+                        color: isActive ? "#1a1a1a" : "#555",
+                        lineHeight: "20px",
+                        overflow: "hidden",
+                        whiteSpace: "nowrap",
+                        WebkitMaskImage: "linear-gradient(to right, black calc(100% - 36px), transparent 100%)",
+                        maskImage: "linear-gradient(to right, black calc(100% - 36px), transparent 100%)",
                       }}
                     >
                       {session.title}
-                    </Text>
-                  )
-                }
-                description={
-                  <Text style={{ fontSize: 11, color: "#bbb" }}>
-                    {formatTime(session.updated_at)}
-                  </Text>
-                }
-              />
-            </List.Item>
-          )}
-        />
+                    </span>
+                    <span style={{ fontSize: 11, color: "#bbb", lineHeight: "16px" }}>
+                      {formatTime(session.updated_at)}
+                    </span>
+                  </>
+                )}
+                <Popconfirm
+                  open={deletingId === session.id}
+                  title="确定删除此会话？"
+                  onConfirm={(e) => { e?.stopPropagation(); handleDelete(session.id); setDeletingId(null); }}
+                  onCancel={(e) => { e?.stopPropagation(); setDeletingId(null); }}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Dropdown
+                    menu={{
+                      items: menuItems,
+                      onClick: ({ key, domEvent }) => {
+                        domEvent.stopPropagation();
+                        if (key === "rename") handleStartRename(session);
+                        if (key === "delete") setDeletingId(session.id);
+                      },
+                    }}
+                    trigger={["contextMenu", "click"]}
+                  >
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<MoreOutlined />}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: "absolute",
+                      right: 4,
+                      top: 6,
+                      opacity: 0.4,
+                      fontSize: 14,
+                    }}
+                  />
+                </Dropdown>
+                </Popconfirm>
+              </div>
+            );
+          })}
+        </div>
+        {/* 底部渐隐提示 */}
+        {overflowing && !scrolledBottom && (
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0, height: 60,
+            background: "linear-gradient(rgba(255,255,255,0), rgba(255,255,255,0.7) 25%, #fff 55%)",
+            pointerEvents: "none",
+            zIndex: 1,
+          }} />
+        )}
+      </div>
       )}
     </div>
   );

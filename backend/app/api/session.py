@@ -1,11 +1,12 @@
 """Session CRUD API — 对话会话管理."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_ns_access, get_current_user
 from app.db.metadata import get_db
+from app.models.query_history import QueryHistory
 from app.models.session import Session
 from app.models.user import User
 from app.schemas import SessionCreate, SessionOut, SessionUpdate
@@ -99,5 +100,8 @@ async def delete_session(
     if session.created_by != user.id:
         raise HTTPException(status_code=403, detail="无权操作此会话")
 
+    # 级联删除关联的 query_history 记录，避免孤儿数据
+    sid_str = str(sid)
+    await db.execute(delete(QueryHistory).where(QueryHistory.session_id == sid_str))
     await db.delete(session)
     await db.commit()
