@@ -554,6 +554,104 @@ async def _write_query_history(
         return entry.id
 
 
+async def _extract_cancelled_trace_data(trace_id: str) -> dict:
+    """从 AgentTrace 中提取被取消对话的工具执行数据.
+
+    返回 dict: tool_trace, generated_query, row_count, rows_data, columns_data.
+    AgentTrace 不存在时返回空数据 (最小记录模式).
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.models.agent_trace import AgentTrace
+
+    import json as _json
+
+    empty: dict = {
+        "tool_trace": [],
+        "generated_query": "",
+        "row_count": 0,
+        "rows_data": [],
+        "columns_data": [],
+    }
+
+    async with _new_db_session() as new_db:
+        result = await new_db.execute(
+            sa_select(AgentTrace).where(AgentTrace.trace_id == trace_id)
+        )
+        trace_row = result.scalar_one_or_none()
+        if trace_row is None:
+            log.warning(
+                "_extract_cancelled_trace_data AgentTrace not found trace=%s",
+                trace_id,
+            )
+            return empty
+
+        trace_data = _json.loads(trace_row.trace_json or "{}")
+        tool_trace = trace_data.get("tool_trace", [])
+
+        generated_query = ""
+        row_count = 0
+        rows_data: list[dict] = []
+        columns_data: list[str] = []
+
+        for tr in reversed(tool_trace):
+            if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
+                generated_query = _json.dumps(
+                    tr.get("input", {}), ensure_ascii=False, default=str,
+                )
+                out = tr.get("output") or {}
+                row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
+                rows_data = out.get("rows", [])
+                columns_data = out.get("columns", [])
+                if not columns_data and rows_data and isinstance(rows_data[0], dict):
+                    columns_data = list(rows_data[0].keys())
+                break
+
+        return {
+            "tool_trace": tool_trace,
+            "generated_query": generated_query,
+            "row_count": row_count,
+            "rows_data": rows_data,
+            "columns_data": columns_data,
+        }
+
+
+def _build_cancelled_result_snapshot(
+    *,
+    session_id: str,
+    generated_query: str,
+    columns_data: list[str],
+    rows_data: list[dict],
+    row_count: int,
+    tool_trace: list[dict],
+) -> dict:
+    """构建 cancelled 状态的 result_snapshot — 前端恢复部分工具执行过程."""
+    return {
+        "session_id": session_id,
+        "history_id": 0,
+        "needs_clarification": False,
+        "clarification_message": "",
+        "generated_query": generated_query,
+        "columns": columns_data,
+        "rows": rows_data,
+        "row_count": row_count,
+        "chart_type": "table",
+        "category_column": "",
+        "chart_option": {},
+        "truncated": False,
+        "rendered_row_count": len(rows_data),
+        "total_row_count": len(rows_data),
+        "performance_warning": "",
+        "error": "cancelled",
+        "clarification_questions": [],
+        "pending_id": 0,
+        "final_answer": "(对话已被终止)",
+        "iterations": len(tool_trace),
+        "stop_reason": "cancelled",
+        "tool_trace": tool_trace,
+    }
+
+
 async def _write_cancelled_history(
     *,
     trace_id: str,
@@ -563,89 +661,38 @@ async def _write_cancelled_history(
 ) -> int | None:
     """被取消/终止的对话也写入 query_history，刷新后可查看部分过程.
 
-    AgentTrace 不存在时 (db commit 尚未对其他 session 可见) 仍写入最小记录,
+    AgentTrace 不存在时仍写入最小记录,
     确保前端不会因找不到任何历史而显示"暂无对话记录".
     """
-    from sqlalchemy import select as sa_select
-
-    from app.models.agent_trace import AgentTrace
-
     import json as _json
 
-    tool_trace: list[dict] = []
-    generated_query = ""
-    row_count = 0
-    rows_data: list[dict] = []
-    columns_data: list[str] = []
+    data = await _extract_cancelled_trace_data(trace_id)
+    snapshot = _build_cancelled_result_snapshot(
+        session_id=session_id,
+        generated_query=data["generated_query"],
+        columns_data=data["columns_data"],
+        rows_data=data["rows_data"],
+        row_count=data["row_count"],
+        tool_trace=data["tool_trace"],
+    )
 
     async with _new_db_session() as new_db:
-        result = await new_db.execute(
-            sa_select(AgentTrace).where(AgentTrace.trace_id == trace_id)
-        )
-        trace_row = result.scalar_one_or_none()
-        if trace_row is not None:
-            trace_data = _json.loads(trace_row.trace_json or "{}")
-            tool_trace = trace_data.get("tool_trace", [])
-
-            # 提取最后一条成功执行的 SQL
-            for tr in reversed(tool_trace):
-                if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
-                    generated_query = _json.dumps(
-                        tr.get("input", {}), ensure_ascii=False, default=str,
-                    )
-                    out = tr.get("output") or {}
-                    row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
-                    rows_data = out.get("rows", [])
-                    columns_data = out.get("columns", [])
-                    if not columns_data and rows_data and isinstance(rows_data[0], dict):
-                        columns_data = list(rows_data[0].keys())
-                    break
-        else:
-            log.warning(
-                "_write_cancelled_history AgentTrace not found trace=%s — "
-                "writing minimal cancelled record",
-                trace_id,
-            )
-
         entry = QueryHistory(
             namespace_id=namespace_id,
             session_id=session_id,
             role="assistant",
             content=question,
-            generated_query=generated_query,
-            row_count=row_count,
+            generated_query=data["generated_query"],
+            row_count=data["row_count"],
             error="cancelled",
-            result_snapshot=_json.dumps({
-                "session_id": session_id,
-                "history_id": 0,
-                "needs_clarification": False,
-                "clarification_message": "",
-                "generated_query": generated_query,
-                "columns": columns_data,
-                "rows": rows_data,
-                "row_count": row_count,
-                "chart_type": "table",
-                "category_column": "",
-                "chart_option": {},
-                "truncated": False,
-                "rendered_row_count": len(rows_data),
-                "total_row_count": len(rows_data),
-                "performance_warning": "",
-                "error": "cancelled",
-                "clarification_questions": [],
-                "pending_id": 0,
-                "final_answer": "(对话已被终止)",
-                "iterations": len(tool_trace),
-                "stop_reason": "cancelled",
-                "tool_trace": tool_trace,
-            }, ensure_ascii=False, default=str),
+            result_snapshot=_json.dumps(snapshot, ensure_ascii=False, default=str),
         )
         new_db.add(entry)
         await new_db.commit()
         await new_db.refresh(entry)
         log.info(
             "_write_cancelled_history done trace=%s history_id=%s tools=%d",
-            trace_id, entry.id, len(tool_trace),
+            trace_id, entry.id, len(data["tool_trace"]),
         )
         return entry.id
 

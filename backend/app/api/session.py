@@ -1,7 +1,12 @@
-"""Session CRUD API — 对话会话管理."""
+"""Session CRUD API — 对话会话管理.
 
+审计策略: session 生命周期事件通过结构化日志记录 (best-effort).
+若未来需要不可变审计链，可升级为 SessionAuditLog 表 + migration.
+"""
+
+import logging
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_ns_access, get_current_user
@@ -11,6 +16,7 @@ from app.models.session import Session
 from app.models.user import User
 from app.schemas import SessionCreate, SessionOut, SessionUpdate
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
@@ -29,6 +35,10 @@ async def create_session(
     db.add(session)
     await db.commit()
     await db.refresh(session)
+    log.info(
+        "[audit] session_create session_id=%s namespace_id=%d user_id=%d",
+        session.id, body.namespace_id, user.id,
+    )
     return session
 
 
@@ -73,9 +83,14 @@ async def rename_session(
     if session.created_by != user.id:
         raise HTTPException(status_code=403, detail="无权操作此会话")
 
+    old_title = session.title
     session.title = body.title
     await db.commit()
     await db.refresh(session)
+    log.info(
+        "[audit] session_rename session_id=%s old_title=%r new_title=%r user_id=%d",
+        session.id, old_title, body.title, user.id,
+    )
     return session
 
 
@@ -85,7 +100,11 @@ async def delete_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """删除会话（硬删）。仅创建者可操作."""
+    """删除会话（硬删）。仅创建者可操作.
+
+    级联删除关联的 query_history: BulkOperationGuard 豁免 —
+    单会话作用域内的数据完整性级联, 非用户面批量操作.
+    """
     from uuid import UUID
 
     try:
@@ -102,6 +121,13 @@ async def delete_session(
 
     # 级联删除关联的 query_history 记录，避免孤儿数据
     sid_str = str(sid)
-    await db.execute(delete(QueryHistory).where(QueryHistory.session_id == sid_str))
+    cascade_result = await db.execute(
+        delete(QueryHistory).where(QueryHistory.session_id == sid_str)
+    )
     await db.delete(session)
     await db.commit()
+    log.info(
+        "[audit] session_delete session_id=%s namespace_id=%d user_id=%d "
+        "cascaded_history_rows=%d",
+        session.id, session.namespace_id, user.id, cascade_result.rowcount,
+    )

@@ -607,8 +607,8 @@ async def _create_sessions_table(engine: AsyncEngine) -> None:
             "    namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,"
             "    title VARCHAR(255) NOT NULL DEFAULT '新会话',"
             "    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
-            "    created_at TIMESTAMP NOT NULL DEFAULT now(),"
-            "    updated_at TIMESTAMP DEFAULT now()"
+            "    created_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),"
+            "    updated_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')"
             ")"
         ))
         await conn.execute(text(
@@ -1034,7 +1034,7 @@ async def _ensure_model_config_audit_logs_table(engine: AsyncEngine) -> None:
 
 
 async def _ensure_datasources_timezone_column(engine: AsyncEngine) -> None:
-    """migration_026 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
+    """migration_028 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
 
     照抄 migration_024 范式: ADD COLUMN ... NOT NULL DEFAULT 一步原子 (存量行填 Asia/Shanghai),
     随后 DROP DEFAULT 强制建源时显式给值

@@ -27,6 +27,20 @@ import AdminLayout from "@/components/AdminLayout";
 import UserLayout from "@/components/UserLayout";
 import styles from "@/styles/layout.module.css";
 
+/* ── 侧边栏按钮样式常量 ── */
+const BUTTON_BASE_STYLE = {
+  height: 36, borderRadius: 18, fontSize: 16, fontWeight: 500 as const,
+  display: "flex" as const, alignItems: "center", justifyContent: "center",
+};
+
+interface ButtonColors { background: string; border: string; color: string }
+
+function getButtonColors(isActive: boolean, isHover: boolean): ButtonColors {
+  if (isActive) return { background: "#e6f4ff", border: "1px solid #91caff", color: "#1677ff" };
+  if (isHover)  return { background: "#f0f5ff", border: "1px solid #bdd7ff", color: "#4096ff" };
+  return { background: "#fff", border: "1px solid #d9d9d9", color: "#555" };
+}
+
 const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -81,15 +95,8 @@ const Layout: React.FC = () => {
 
   const isAdmin = roleAtLeast(user?.role, "admin");
 
-  const btnBase = { height: 36, borderRadius: 18, fontSize: 16, fontWeight: 500 as const,
-    display: "flex" as const, alignItems: "center", justifyContent: "center" };
-  const ncActive = !activeSessionId;
-  const ncBg = ncActive ? "#e6f4ff" : hoverNewChat ? "#f0f5ff" : "#fff";
-  const ncBd = ncActive ? "1px solid #91caff" : hoverNewChat ? "1px solid #bdd7ff" : "1px solid #d9d9d9";
-  const ncCl = ncActive ? "#1677ff" : hoverNewChat ? "#4096ff" : "#555";
-  const wsBg = wsOpen ? "#e6f4ff" : hoverWorkspace ? "#f0f5ff" : "#fff";
-  const wsBd = wsOpen ? "1px solid #91caff" : hoverWorkspace ? "1px solid #bdd7ff" : "1px solid #d9d9d9";
-  const wsCl = wsOpen ? "#1677ff" : hoverWorkspace ? "#4096ff" : "#555";
+  const ncColors = getButtonColors(!activeSessionId, hoverNewChat);
+  const wsColors = getButtonColors(wsOpen, hoverWorkspace);
 
   /* Logo 区 — 仅 admin（user 在顶栏已有品牌区） */
   const sidebarLogo = (
@@ -110,7 +117,7 @@ const Layout: React.FC = () => {
       <div style={{ padding: "8px 12px 4px" }}>
         <Button block icon={<EditOutlined />} onClick={() => newChat()}
           onMouseEnter={() => setHoverNewChat(true)} onMouseLeave={() => setHoverNewChat(false)}
-          style={{ ...btnBase, background: ncBg, border: ncBd, color: ncCl }}>
+          style={{ ...BUTTON_BASE_STYLE, ...ncColors }}>
           新对话
         </Button>
       </div>
@@ -120,7 +127,7 @@ const Layout: React.FC = () => {
         <div style={{ padding: "4px 12px" }}>
           <Button block icon={<AppstoreOutlined />} onClick={() => setWsOpen(true)}
             onMouseEnter={() => setHoverWorkspace(true)} onMouseLeave={() => setHoverWorkspace(false)}
-            style={{ ...btnBase, background: wsBg, border: wsBd, color: wsCl }}>
+            style={{ ...BUTTON_BASE_STYLE, ...wsColors }}>
             工作台
           </Button>
         </div>
