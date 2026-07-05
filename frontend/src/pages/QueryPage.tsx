@@ -9,15 +9,13 @@
  * ════════════════════════════════════════════ */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { Alert, Button, Modal, Spin } from "antd";
-import { ToolOutlined } from "@ant-design/icons";
 import NamespaceSelector from "@/components/NamespaceSelector";
-import WorkspaceModal from "@/components/WorkspaceModal";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
 import { http } from "@/api";
 import { useAgentStream, initialAgentStreamState, type AgentStreamState } from "@/hooks/useAgentStream";
+import { useAutoArchive } from "@/hooks/useAutoArchive";
 import { useReadiness } from "@/hooks/useReadiness";
 import { readLastNamespaceId } from "@/hooks/useLastNamespaceId";
 import { useSessionContext } from "@/context/SessionContext";
@@ -63,10 +61,11 @@ const QueryPage: React.FC = () => {
     http.get(`/namespaces/${fetchNsId}/history`, { params: { session_id: sidAtRequest, limit: 100 } })
       .then((r) => {
         // 回调时 session 可能已切换，丢弃不匹配的响应
-        if (sidAtRequest !== activeSessionId) return;
+        if (sidAtRequest !== activeSessionId) { setHistoryLoading(false); return; }
         const histories: any[] = r.data;
         if (histories.length === 0) {
           setTurns([]);
+          turnsBySession.current[sidAtRequest] = [];
           setHistoryLoading(false);
           return;
         }
@@ -123,6 +122,8 @@ const QueryPage: React.FC = () => {
           });
         }
         setTurns(pairedTurns.length > 0 ? pairedTurns : []);
+        // 写入缓存，防止 doSwitch() 在 fetch 早于用户确认完成时误清数据
+        turnsBySession.current[sidAtRequest] = pairedTurns.length > 0 ? pairedTurns : [];
         setHistoryLoading(false);
       })
       .catch((err: any) => {
@@ -141,47 +142,19 @@ const QueryPage: React.FC = () => {
   // 跟踪 traceId 用于取消
   useEffect(() => { if (state.traceId) setRunningTraceId(state.traceId); }, [state.traceId]);
 
-  // 自动归档：对话结束（finished/cancelled/error）时自动移入历史区
-  // ⚠️ agent_finished SSE 先于 final_answer 到达，需等待 finalAnswer 就绪后再归档
-  const runningSessionRef = useRef<string | null>(null);
-  const archivedRef = useRef(false);
-  useEffect(() => {
-    // cancelled / error：立即归档（可能没有 finalAnswer）
-    if (state.status === "cancelled" || state.status === "error") {
-      if (archivedRef.current) return;
-      archivedRef.current = true;
-      const latestState = stateRef.current;
-      const ownerSid = runningSessionRef.current;
-      setTurns((prevTurns) => [...prevTurns, latestState]);
-      if (ownerSid) {
-        turnsBySession.current[ownerSid] = [...turnsRef.current, latestState];
-      }
-      resetAgent();
-      return;
-    }
-    // finished：等 finalAnswer 就绪后归档
-    if (state.status === "finished" && state.finalAnswer) {
-      if (archivedRef.current) return;
-      archivedRef.current = true;
-      const latestState = stateRef.current;
-      const ownerSid = runningSessionRef.current;
-      setTurns((prevTurns) => [...prevTurns, latestState]);
-      if (ownerSid) {
-        turnsBySession.current[ownerSid] = [...turnsRef.current, latestState];
-      }
-      resetAgent();
-    }
-  }, [state.status, state.finalAnswer]);
-
-  // 跟踪最新 state.status，避免闭包陈旧
-  const statusRef = useRef(state.status);
-  statusRef.current = state.status;
-
-  // 跟踪最新 state + turns，避免闭包陈旧
+  // 跟踪最新 state + turns，避免闭包陈旧（需在 useAutoArchive 之前定义）
   const stateRef = useRef(state);
   stateRef.current = state;
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
+
+  // 自动归档：对话结束（finished/cancelled/error）时自动移入历史区
+  const runningSessionRef = useRef<string | null>(null);
+  const archivedRef = useAutoArchive(state, stateRef, turnsRef, turnsBySession, runningSessionRef, setTurns, resetAgent);
+
+  // 跟踪最新 state.status，避免闭包陈旧
+  const statusRef = useRef(state.status);
+  statusRef.current = state.status;
 
   // 切换会话：存档当前 → 加载目标
   const prevSidRef = useRef<string | null>(null);
@@ -232,8 +205,10 @@ const QueryPage: React.FC = () => {
         content: "切换会话将停止当前正在执行的任务，是否继续？",
         okText: "停止并切换", cancelText: "取消",
         onOk: async () => {
+          // 先中止客户端 SSE，再等待后端取消完成
+          stop();
           if (stateRef.current.traceId) await cancelStream(stateRef.current.traceId).catch(() => {});
-          stop(); setIsRunning(false); doSwitch();
+          setIsRunning(false); doSwitch();
         },
         onCancel: () => { prevSidRef.current = prev; },
       });
@@ -331,7 +306,7 @@ const QueryPage: React.FC = () => {
     await start({ namespace_id: nsId, question, session_id: sid ?? "" });
     setIsRunning(false);
     setRunningTraceId(null);
-    runningSessionRef.current = null;  // 对话结束，清除归属标记
+    // runningSessionRef 在 auto-archive effect 中清空（effect 异步执行，此处同步置 null 会导致缓存写入跳过）
   };
 
   const handleStop = async () => {

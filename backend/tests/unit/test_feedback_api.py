@@ -1,4 +1,4 @@
-"""Feedback API + 推荐问题测试."""
+"""Feedback API 测试."""
 from __future__ import annotations
 
 import pytest
@@ -38,7 +38,7 @@ async def test_submit_feedback_201(make_client, db):
 
 @pytest.mark.asyncio
 async def test_submit_feedback_update_existing(make_client, db):
-    """重复反馈 → 200，UPDATE 不重复创建."""
+    """重复反馈 → 201，UPDATE 不重复创建."""
     ns = Namespace(name="f2", slug="f2")
     db.add(ns)
     await db.commit()

@@ -22,7 +22,6 @@ interface Props {
   activeSessionId: string | null;
   loading: boolean;
   ready?: boolean;
-  onCreate: (nsId: number) => Promise<Session>;
   onSelect: (id: string | null) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -34,7 +33,6 @@ const SessionList: React.FC<Props> = ({
   ready,
   activeSessionId,
   loading,
-  onCreate,
   onSelect,
   onRename,
   onDelete,
@@ -53,11 +51,6 @@ const SessionList: React.FC<Props> = ({
       </div>
     );
   }
-
-  const handleCreate = async () => {
-    if (namespaceId == null || !activeSessionId || ready === false) return;
-    onSelect(""); // triggers newChat in Layout
-  };
 
   const handleStartRename = (session: Session) => {
     setEditingId(session.id);

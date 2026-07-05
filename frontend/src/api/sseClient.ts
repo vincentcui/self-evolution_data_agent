@@ -69,6 +69,10 @@ export async function openAgentStream(opts: OpenStreamOpts): Promise<StreamHandl
   if (!resp.ok || !resp.body) throw new Error(`SSE stream failed: HTTP ${resp.status}`);
   const traceId = resp.headers.get("X-Trace-Id") ?? "";
   const reader = resp.body.getReader();
+  // signal abort → cancel reader（仅 abort fetch 不够，reader 在连接建立后不受 signal 控制）
+  if (opts.signal) {
+    opts.signal.addEventListener("abort", () => reader.cancel(), { once: true });
+  }
   const decoder = new TextDecoder();
   let leftover = "";
   const done = (async () => {
