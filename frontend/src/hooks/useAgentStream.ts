@@ -58,7 +58,6 @@ export interface AgentStreamState {
     renderedRowCount?: number;
     totalRowCount?: number;
   } | null;
-  recommendedQuestions: string[];
 }
 
 export const initialAgentStreamState = (): AgentStreamState => ({
@@ -76,7 +75,6 @@ export const initialAgentStreamState = (): AgentStreamState => ({
   errors: [],
   planSteps: [],
   finalAnswer: null,
-  recommendedQuestions: [],
 });
 
 type Action =
@@ -230,11 +228,6 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
           renderedRowCount: ev.data.rendered_row_count,
           totalRowCount: ev.data.total_row_count,
         },
-      };
-    case "recommended_questions":
-      return {
-        ...state,
-        recommendedQuestions: ev.data.questions,
       };
     default:
       return state;

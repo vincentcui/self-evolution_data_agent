@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════
- *  主布局 — 基于角色的条件渲染
- *  admin: 侧边栏 + 内容区
- *  user:  顶栏 + 全屏内容区
+ *  主布局 — 统一侧边栏 + 顶栏
+ *  侧边栏: Logo / 新对话 / 工作台(admin) / 历史对话 / 会话列表
+ *  顶栏: 用户名 / 修改密码 / 退出
  * ════════════════════════════════════════════ */
 
 import React, { useCallback, useState } from "react";
@@ -121,19 +121,22 @@ const Layout: React.FC = () => {
           }}
           onRename={renameSession} onDelete={deleteSession}
         />
-
-        <div style={{ marginTop: "auto" }}>
-          <div className={styles.userArea}>
-            <div className={styles.userInfo}><UserOutlined /><span>{user?.username}</span></div>
-            <Button type="text" size="small" icon={<LogoutOutlined />} onClick={handleLogout}>退出</Button>
-          </div>
-        </div>
       </aside>
 
       <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} initialPage={wsPage} />
 
       <main className={styles.mainContent}>
-        <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
+        <div className={styles.topBar}>
+          <div />
+          <div className={styles.userMenu}>
+            <span className={styles.username}>{user?.username}</span>
+            <Button type="text" size="small" onClick={() => navigate("/profile")}>修改密码</Button>
+            <Button type="text" size="small" icon={<LogoutOutlined />} onClick={handleLogout}>退出</Button>
+          </div>
+        </div>
+        <div style={{ flex: 1, padding: "28px 32px" }}>
+          <SessionContext.Provider value={sessionCtx}><Outlet /></SessionContext.Provider>
+        </div>
       </main>
     </div>
   );

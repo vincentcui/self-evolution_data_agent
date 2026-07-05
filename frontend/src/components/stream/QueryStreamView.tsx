@@ -47,7 +47,6 @@ interface Props {
   onCorrect: (action: CorrectionAction, instruction: string) => void;
   /** 只读历史轮: 隐藏操作按钮, 不吸顶、不内部滚动 (随父容器自然流式堆叠). */
   readOnly?: boolean;
-  onSendQuestion?: (question: string) => void;
 }
 
 /** 渲染单个 timeline item */
@@ -101,7 +100,6 @@ export const QueryStreamView: React.FC<Props> = ({
   onStop,
   onClarifyAnswer,
   onCorrect,
-  onSendQuestion,
   readOnly = false,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -176,8 +174,6 @@ export const QueryStreamView: React.FC<Props> = ({
           <FinalResult
             {...state.finalAnswer}
             stopReason={state.stopReason}
-            recommendedQuestions={state.recommendedQuestions}
-            onSendQuestion={onSendQuestion}
           />
         )}
         {!state.finalAnswer && state.status === "finished" && state.stopReason && state.stopReason !== "end_turn" && (

@@ -127,8 +127,13 @@ const QueryPage: React.FC = () => {
       })
       .catch((err: any) => {
         setHistoryLoading(false);
-        if (err?.response?.status === 403) {
+        const status = err?.response?.status;
+        const detail = err?.response?.data?.detail || "";
+        if (status === 403) {
           Modal.warning({ title: "无权限", content: "你无权访问该会话所属空间" });
+        } else if (status && status !== 404) {
+          // 404 后端不区分"ns不存在"和"无session记录"，静默处理
+          Modal.warning({ title: "加载失败", content: detail || `请求失败 (${status})，请刷新后重试` });
         }
       });
   }, [activeSessionId, nsId]);
@@ -137,21 +142,36 @@ const QueryPage: React.FC = () => {
   useEffect(() => { if (state.traceId) setRunningTraceId(state.traceId); }, [state.traceId]);
 
   // 自动归档：对话结束（finished/cancelled/error）时自动移入历史区
-  const runningSessionRef = useRef<string | null>(null);  // 记录运行中的对话属于哪个 session
-  const prevStatusRef = useRef(state.status);
+  // ⚠️ agent_finished SSE 先于 final_answer 到达，需等待 finalAnswer 就绪后再归档
+  const runningSessionRef = useRef<string | null>(null);
+  const archivedRef = useRef(false);
   useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = state.status;
-    if (prev === "running" && (state.status === "finished" || state.status === "cancelled" || state.status === "error")) {
+    // cancelled / error：立即归档（可能没有 finalAnswer）
+    if (state.status === "cancelled" || state.status === "error") {
+      if (archivedRef.current) return;
+      archivedRef.current = true;
       const latestState = stateRef.current;
-      const ownerSid = runningSessionRef.current;  // ⚡ 用运行开始时的 session，不是当前 activeSessionId
+      const ownerSid = runningSessionRef.current;
       setTurns((prevTurns) => [...prevTurns, latestState]);
       if (ownerSid) {
         turnsBySession.current[ownerSid] = [...turnsRef.current, latestState];
       }
-      resetAgent();  // 归档后清空 live state，避免同一段内容在 turns 和 live 区重复渲染
+      resetAgent();
+      return;
     }
-  }, [state.status]);
+    // finished：等 finalAnswer 就绪后归档
+    if (state.status === "finished" && state.finalAnswer) {
+      if (archivedRef.current) return;
+      archivedRef.current = true;
+      const latestState = stateRef.current;
+      const ownerSid = runningSessionRef.current;
+      setTurns((prevTurns) => [...prevTurns, latestState]);
+      if (ownerSid) {
+        turnsBySession.current[ownerSid] = [...turnsRef.current, latestState];
+      }
+      resetAgent();
+    }
+  }, [state.status, state.finalAnswer]);
 
   // 跟踪最新 state.status，避免闭包陈旧
   const statusRef = useRef(state.status);
@@ -256,17 +276,25 @@ const QueryPage: React.FC = () => {
     followRef.current = distanceFromBottom < FOLLOW_THRESHOLD_PX;
   };
 
-  // state 变化触发 (thinking / tools / final_answer / status) — 若在跟随则拉到底
+  // state 变化触发滚动 — 若在跟随则拉到底；新 SSE 内容到达时自动恢复跟随
+  const prevTimelineLenRef = useRef(0);
   useEffect(() => {
-    if (!followRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
+    // handleSend 中暂停了跟随（保留旧对话在视口内），新内容到达时恢复
+    const newLen = state.timeline.length;
+    const hasNewContent = newLen > prevTimelineLenRef.current || (state.finalAnswer != null);
+    if (hasNewContent && state.status === "running") {
+      followRef.current = true;
+    }
+    prevTimelineLenRef.current = newLen;
+    if (!followRef.current) return;
     el.scrollTop = el.scrollHeight;
   }, [state]);
 
   const handleSend = async (question: string) => {
     if (!nsId) return;
-    followRef.current = true; // 新一轮发问, 强制回到底部跟随
+    followRef.current = false;  // 暂停跟随，保留旧对话内容在视口内可见
     // 若上一轮还在运行中（未触发 auto-archive）则手动归档，避免 start() 内部 reset 丢失数据
     const curState = stateRef.current;
     if (curState.status === "running") {
@@ -276,6 +304,7 @@ const QueryPage: React.FC = () => {
       if (ownerSid) {
         turnsBySession.current[ownerSid] = [...turnsRef.current, cancelledState];
       }
+      archivedRef.current = true;
       stop();
     }
     // 无活跃会话时自动创建
@@ -297,6 +326,7 @@ const QueryPage: React.FC = () => {
       try { await renameSession(sid, question.slice(0, 30)); } catch {}
     }
     setIsRunning(true);
+    archivedRef.current = false;  // 新一轮对话，重置归档标志
     runningSessionRef.current = sid;  // 记录本对话归属的 session，防止切换后 auto-archive 写错缓存
     await start({ namespace_id: nsId, question, session_id: sid ?? "" });
     setIsRunning(false);
@@ -430,7 +460,6 @@ const QueryPage: React.FC = () => {
             onStop={handleStop}
             onClarifyAnswer={handleClarifyAnswer}
             onCorrect={handleCorrect}
-            onSendQuestion={handleSend}
           />
         )}
       </div>

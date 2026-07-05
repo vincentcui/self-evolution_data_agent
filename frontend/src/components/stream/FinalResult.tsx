@@ -7,7 +7,7 @@
  * ════════════════════════════════════════════ */
 
 import React, { useState } from "react";
-import { Card, Button, message, Input, Space, Popover, Alert, Tag } from "antd";
+import { Card, Button, message, Input, Space, Popover, Alert } from "antd";
 import {
   ShareAltOutlined,
   CopyOutlined,
@@ -33,8 +33,6 @@ interface Props {
   totalRowCount?: number;
   historyId?: number;
   stopReason?: string | null;
-  recommendedQuestions?: string[];
-  onSendQuestion?: (question: string) => void;
 }
 
 import { normalizeRows } from "@/utils/normalizeRows";
@@ -58,7 +56,6 @@ export const STOP_REASON_HINT: Record<string, string> = {
 export const FinalResult: React.FC<Props> = ({
   content, rows, columns, chartType, chartOption, categoryColumn,
   truncated, renderedRowCount, totalRowCount, historyId, stopReason,
-  recommendedQuestions, onSendQuestion,
 }) => {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -224,20 +221,6 @@ export const FinalResult: React.FC<Props> = ({
       )}
       {fabricated && <ResultDisplay result={fabricated} />}
     </Card>
-    {recommendedQuestions && recommendedQuestions.length > 0 && onSendQuestion && (
-      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {recommendedQuestions.map((q, i) => (
-          <Tag
-            key={i}
-            color="blue"
-            style={{ cursor: "pointer", padding: "4px 8px" }}
-            onClick={() => onSendQuestion(q)}
-          >
-            {q}
-          </Tag>
-        ))}
-      </div>
-    )}
     </>
   );
 };

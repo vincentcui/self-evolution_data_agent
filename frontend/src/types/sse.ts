@@ -71,8 +71,6 @@ export type AgentSSEEvent =
         total_row_count?: number;
       };
     }
-  | { event: "recommended_questions"; data: { questions: string[] } };
-
 export type EventName = AgentSSEEvent["event"];
 
 /* ---------------------------------------------------------------------------

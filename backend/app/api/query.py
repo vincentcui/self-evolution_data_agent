@@ -320,37 +320,6 @@ async def query_stream(
                 "event": "final_answer",
                 "data": final_data,
             })
-            # ── recommend: 生成推荐问题（在 final_answer 之后，独立于 agent loop）──
-            try:
-                from app.engine.llm import chat_completion
-
-                recom_prompt = (
-                    "基于以下问答，生成 1-3 个用户可能感兴趣的后续追问。"
-                    "每行一个问题，不要编号。\n\n"
-                    f"用户问题：{body.question}\n"
-                    f"回答：{result.final_answer[:settings.recommend_llm_context_max_chars]}\n\n"
-                    "输出 1-3 行自然语言问题："
-                )
-                recom_text = await asyncio.wait_for(asyncio.to_thread(
-                    chat_completion,
-                    messages=[{
-                        "role": "system",
-                        "content": "你是帮助用户探索数据的助手。",
-                    }, {
-                        "role": "user",
-                        "content": recom_prompt,
-                    }],
-                    max_tokens=settings.recommend_llm_max_tokens,
-                    temperature=settings.recommend_llm_temperature,
-                ), timeout=settings.recommend_llm_timeout_secs)
-                questions = [q.strip() for q in recom_text.strip().split("\n") if q.strip()]
-                if questions:
-                    await event_q.put({
-                        "event": "recommended_questions",
-                        "data": {"questions": questions[:3]},
-                    })
-            except Exception:
-                log.warning("推荐问题生成失败，静默降级", exc_info=True)
         except asyncio.CancelledError:
             # 被取消的对话也要保存，让刷新后仍可查看部分过程
             try:

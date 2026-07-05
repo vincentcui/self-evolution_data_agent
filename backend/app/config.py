@@ -194,15 +194,6 @@ class Settings(BaseSettings):
     hq_covered_path_max: int = 10
     """HQItem.covered_path 最大长度 (IS_HQ_COVERED_PATH_MAX)."""
 
-    # ── P0 对话体验: 推荐问题 ──────────────────
-    recommend_llm_temperature: float = 0.3
-    """推荐问题 LLM temperature (IS_RECOMMEND_LLM_TEMPERATURE)."""
-    recommend_llm_max_tokens: int = 256  # noqa: hardcode
-    """推荐问题 LLM max_tokens (IS_RECOMMEND_LLM_MAX_TOKENS)."""
-    recommend_llm_timeout_secs: int = 10  # noqa: hardcode
-    """推荐问题 LLM 超时秒数 (IS_RECOMMEND_LLM_TIMEOUT_SECS)."""
-    recommend_llm_context_max_chars: int = 2000  # noqa: hardcode
-    """推荐问题上下文截断字符数 (IS_RECOMMEND_LLM_CONTEXT_MAX_CHARS)."""
     hq_text_validation_mode: str = "lenient"
     """HQ 文本子串校验严格度: strict / lenient / off (IS_HQ_TEXT_VALIDATION_MODE)."""
 
