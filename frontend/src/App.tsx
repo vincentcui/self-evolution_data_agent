@@ -6,19 +6,17 @@ import React from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "./components/Layout";
-import WorkspaceLayout from "./components/WorkspaceLayout";
-import QueryPage from "./pages/QueryPage";
-import NamespacePage from "./pages/NamespacePage";
-import KnowledgePage from "./pages/KnowledgePage";
-import UserManagePage from "./pages/UserManagePage";
-import ShareManagePage from "./pages/ShareManagePage";
+import QueryPageWrapper from "./components/QueryPageWrapper";
 import LoginPage from "./pages/LoginPage";
 import ShareViewPage from "./pages/ShareViewPage";
-import AgentTracesPage from "./pages/AgentTracesPage";
 import ProfilePage from "./pages/ProfilePage";
-import ProfileManagement from "./pages/ProfileManagement";
+import NamespacePage from "./pages/NamespacePage";
 import ModelManagement from "./pages/ModelManagement";
-import WorkspacePage from "./pages/WorkspacePage";
+import KnowledgePage from "./pages/KnowledgePage";
+import ProfileManagement from "./pages/ProfileManagement";
+import AgentTracesPage from "./pages/AgentTracesPage";
+import UserManagePage from "./pages/UserManagePage";
+import ShareManagePage from "./pages/ShareManagePage";
 import { roleAtLeast } from "@/utils/role";
 
 /* ── 认证守卫 ── */
@@ -26,12 +24,6 @@ const RequireAuth: React.FC = () => {
   const { token, loading } = useAuth();
   if (loading) return null;
   return token ? <Outlet /> : <Navigate to="/login" replace />;
-};
-
-/* ── 管理准入守卫 ── */
-const RequireAdmin: React.FC = () => {
-  const { user } = useAuth();
-  return roleAtLeast(user?.role, "admin") ? <Outlet /> : <Navigate to="/" replace />;
 };
 
 const App: React.FC = () => (
@@ -42,24 +34,18 @@ const App: React.FC = () => (
       <Route path="/share/:token" element={<ShareViewPage />} />
 
       <Route element={<RequireAuth />}>
-        {/* 主页布局 — 侧边栏只有会话 + 工作台 */}
         <Route element={<Layout />}>
-          <Route path="/" element={<QueryPage />} />
+          <Route path="/" element={<QueryPageWrapper />} />
           <Route path="/profile" element={<ProfilePage />} />
-        </Route>
-
-        {/* 工作台布局 — 左侧导航 + 右侧内容，和原来首页一样 */}
-        <Route element={<WorkspaceLayout />}>
-          <Route element={<RequireAdmin />}>
-            <Route path="/workspace" element={<WorkspacePage />} />
-            <Route path="/namespaces" element={<NamespacePage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/profiles" element={<ProfileManagement />} />
-            <Route path="/model-management" element={<ModelManagement />} />
-            <Route path="/users" element={<UserManagePage />} />
-            <Route path="/shares" element={<ShareManagePage />} />
-            <Route path="/admin/agent-traces" element={<AgentTracesPage />} />
-          </Route>
+          {/* 管理员页面 — readiness 链接跳转目标 */}
+          <Route path="/namespaces" element={<NamespacePage />} />
+          <Route path="/namespaces/:nsId" element={<NamespacePage />} />
+          <Route path="/model-management" element={<ModelManagement />} />
+          <Route path="/knowledge" element={<KnowledgePage />} />
+          <Route path="/profiles" element={<ProfileManagement />} />
+          <Route path="/admin/agent-traces" element={<AgentTracesPage />} />
+          <Route path="/users" element={<UserManagePage />} />
+          <Route path="/shares" element={<ShareManagePage />} />
         </Route>
       </Route>
     </Routes>

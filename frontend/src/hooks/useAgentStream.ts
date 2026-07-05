@@ -285,5 +285,7 @@ export function useAgentStream() {
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
-  return { state, start, stop };
+  const reset = useCallback(() => dispatch({ type: "reset" }), []);
+
+  return { state, start, stop, reset };
 }
