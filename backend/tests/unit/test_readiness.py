@@ -142,8 +142,8 @@ async def test_readiness_non_admin_sees_user_action(make_client, db):
 
 
 @pytest.mark.asyncio
-async def test_readiness_namespace_not_found(make_client, db):
-    """命名空间不存在 → 404."""
+async def test_readiness_namespace_not_found_returns_no_access(make_client, db):
+    """命名空间不存在 → 返回 200 + no_access（与无权访问统一处理）."""
     client = await make_client(role="super_admin")
     resp = await client.get("/api/namespaces/99999/readiness")
     # assert_ns_access 对不存在/无权 namespace 抛 403，readiness 端点 catch 后返回 200 + no_access

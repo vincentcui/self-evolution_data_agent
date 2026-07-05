@@ -554,6 +554,26 @@ async def _write_query_history(
         return entry.id
 
 
+def _last_exec_tool_from_trace(tool_trace: list[dict]) -> dict:
+    """从 tool_trace 中提取最后一条成功执行的 SQL — 返回 {generated_query, row_count, rows_data, columns_data}."""
+    import json as _json
+
+    for tr in reversed(tool_trace):
+        if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
+            out = tr.get("output") or {}
+            rows_data = out.get("rows", [])
+            columns_data = out.get("columns", [])
+            if not columns_data and rows_data and isinstance(rows_data[0], dict):
+                columns_data = list(rows_data[0].keys())
+            return {
+                "generated_query": _json.dumps(tr.get("input", {}), ensure_ascii=False, default=str),
+                "row_count": int(out.get("row_count", 0) or out.get("count", 0) or 0),
+                "rows_data": rows_data,
+                "columns_data": columns_data,
+            }
+    return {"generated_query": "", "row_count": 0, "rows_data": [], "columns_data": []}
+
+
 async def _extract_cancelled_trace_data(trace_id: str) -> dict:
     """从 AgentTrace 中提取被取消对话的工具执行数据.
 
@@ -588,31 +608,11 @@ async def _extract_cancelled_trace_data(trace_id: str) -> dict:
 
         trace_data = _json.loads(trace_row.trace_json or "{}")
         tool_trace = trace_data.get("tool_trace", [])
-
-        generated_query = ""
-        row_count = 0
-        rows_data: list[dict] = []
-        columns_data: list[str] = []
-
-        for tr in reversed(tool_trace):
-            if tr.get("name") in EXEC_TOOLS and tr.get("status") == "ok":
-                generated_query = _json.dumps(
-                    tr.get("input", {}), ensure_ascii=False, default=str,
-                )
-                out = tr.get("output") or {}
-                row_count = int(out.get("row_count", 0) or out.get("count", 0) or 0)
-                rows_data = out.get("rows", [])
-                columns_data = out.get("columns", [])
-                if not columns_data and rows_data and isinstance(rows_data[0], dict):
-                    columns_data = list(rows_data[0].keys())
-                break
+        exec_data = _last_exec_tool_from_trace(tool_trace)
 
         return {
             "tool_trace": tool_trace,
-            "generated_query": generated_query,
-            "row_count": row_count,
-            "rows_data": rows_data,
-            "columns_data": columns_data,
+            **exec_data,
         }
 
 
@@ -652,21 +652,16 @@ def _build_cancelled_result_snapshot(
     }
 
 
-async def _write_cancelled_history(
+async def _build_cancelled_history_entry(
     *,
-    trace_id: str,
     namespace_id: int,
     session_id: str,
     question: str,
+    data: dict,
 ) -> int | None:
-    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程.
-
-    AgentTrace 不存在时仍写入最小记录,
-    确保前端不会因找不到任何历史而显示"暂无对话记录".
-    """
+    """构建并持久化一条 cancelled 状态的 QueryHistory 记录."""
     import json as _json
 
-    data = await _extract_cancelled_trace_data(trace_id)
     snapshot = _build_cancelled_result_snapshot(
         session_id=session_id,
         generated_query=data["generated_query"],
@@ -690,11 +685,29 @@ async def _write_cancelled_history(
         new_db.add(entry)
         await new_db.commit()
         await new_db.refresh(entry)
-        log.info(
-            "_write_cancelled_history done trace=%s history_id=%s tools=%d",
-            trace_id, entry.id, len(data["tool_trace"]),
-        )
         return entry.id
+
+
+async def _write_cancelled_history(
+    *,
+    trace_id: str,
+    namespace_id: int,
+    session_id: str,
+    question: str,
+) -> int | None:
+    """被取消/终止的对话也写入 query_history，刷新后可查看部分过程."""
+    data = await _extract_cancelled_trace_data(trace_id)
+    entry_id = await _build_cancelled_history_entry(
+        namespace_id=namespace_id,
+        session_id=session_id,
+        question=question,
+        data=data,
+    )
+    log.info(
+        "_write_cancelled_history done trace=%s history_id=%s tools=%d",
+        trace_id, entry_id, len(data["tool_trace"]),
+    )
+    return entry_id
 
 
 @router.post("/query/stream/{trace_id}/correct")

@@ -11,13 +11,19 @@
 import { useEffect, useRef } from "react";
 import type { AgentStreamState } from "./useAgentStream";
 
+type StateRef = React.MutableRefObject<AgentStreamState>;
+type TurnsRef = React.MutableRefObject<AgentStreamState[]>;
+type SessionMapRef = React.MutableRefObject<Record<string, AgentStreamState[]>>;
+type RunningSessionRef = React.MutableRefObject<string | null>;
+type SetTurns = React.Dispatch<React.SetStateAction<AgentStreamState[]>>;
+
 export function useAutoArchive(
   state: AgentStreamState,
-  stateRef: React.MutableRefObject<AgentStreamState>,
-  turnsRef: React.MutableRefObject<AgentStreamState[]>,
-  turnsBySession: React.MutableRefObject<Record<string, AgentStreamState[]>>,
-  runningSessionRef: React.MutableRefObject<string | null>,
-  setTurns: React.Dispatch<React.SetStateAction<AgentStreamState[]>>,
+  stateRef: StateRef,
+  turnsRef: TurnsRef,
+  turnsBySession: SessionMapRef,
+  runningSessionRef: RunningSessionRef,
+  setTurns: SetTurns,
   resetAgent: () => void,
 ) {
   const archivedRef = useRef(false);

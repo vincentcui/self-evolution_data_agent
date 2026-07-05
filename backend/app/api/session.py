@@ -129,5 +129,5 @@ async def delete_session(
     log.info(
         "[audit] session_delete session_id=%s namespace_id=%d user_id=%d "
         "cascaded_history_rows=%d",
-        session.id, session.namespace_id, user.id, cascade_result.rowcount,
+        session.id, session.namespace_id, user.id, int(getattr(cascade_result, "rowcount", 0)),
     )

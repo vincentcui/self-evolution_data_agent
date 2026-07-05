@@ -1,7 +1,7 @@
 """Session ORM 模型 — 对话会话持久化.
 
 每个会话绑定一个命名空间, 用户可在同一命名空间下创建、切换、重命名、删除会话.
-会话删除后 QueryHistory 中的历史问答通过 session_id 仍可查询（不建 FK 约束）.
+删除会话时 API 层手动级联删除关联 QueryHistory，不依赖 DB 层 FK 约束.
 """
 from datetime import datetime
 from uuid import UUID, uuid4
