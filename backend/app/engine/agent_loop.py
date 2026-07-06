@@ -140,10 +140,11 @@ _REFERENCEABLE_TOOLS: frozenset[str] = frozenset({"execute_query", "execute_plan
 class AgentResult:
     final_answer: str
     iterations: int
-    # stop_reason 取值: "end_turn" | "max_total_iterations" | "dead_loop" | "cancelled"
+    # stop_reason 取值:
+    #   "end_turn" | "dead_loop" | "stagnation" | "cost_exhausted" | "cancelled"
     #   | "forced_clarify_timeout" | "forced_clarify_exhausted"
     # 已废弃（降级为 warning log，不再硬停）：
-    #   "max_exploratory_calls" | "max_decisive_calls"
+    #   "max_exploratory_calls" | "max_decisive_calls" | "max_total_iterations"
     stop_reason: str
     tool_trace: list[dict] = field(default_factory=list)
     usage_total: dict = field(default_factory=dict)
@@ -211,7 +212,7 @@ async def run_agent_loop(
         messages.append({"role": "user", "content": question})
 
         usage_total: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
-        recent_tool_calls: list[tuple[str, str]] = []
+        recent_tool_calls: list[tuple[str, str, str | None]] = []
         sem = asyncio.Semaphore(settings.agent_loop_max_tool_concurrency)
 
         # ── 3 桶计数 (interactive 永不入桶) ──
@@ -243,7 +244,7 @@ async def run_agent_loop(
 
             # ── 总轮次兜底 ──
             if iteration > cap_total:
-                stop_reason = "max_total_iterations"
+                stop_reason = "cost_exhausted"
                 await sse_emit({"event": "agent_finished", "data": {
                     "ended_at": _now_iso(),
                     "total_iterations": iteration - 1,
@@ -251,7 +252,7 @@ async def run_agent_loop(
                     "stop_reason": stop_reason,
                 }})
                 return AgentResult(
-                    final_answer=f"(已达总轮次上限 {cap_total}, 当前进展见 tool_trace)",
+                    final_answer=f"(已达总轮次成本后墙 {cap_total}, 当前进展见 tool_trace)",
                     iterations=iteration - 1,
                     stop_reason=stop_reason,
                     tool_trace=tool_trace,
@@ -411,7 +412,11 @@ async def run_agent_loop(
                     ),
                 })
                 # ── 修复 #2: dead_loop 历史在执行后才追加 (仅已执行调用) ──
-                recent_tool_calls.append((tc.name, _hash_input(tc.input)))
+                recent_tool_calls.append((
+                    tc.name,
+                    _hash_input(tc.input),
+                    _progress_marker(res["output"]),
+                ))
                 # ── 更新 Error_Class 窗口 (R5.1-5.4, 修复 #1: status==ok 含 error 键也算错误) ──
                 error_window.record(
                     normalize_error_class(res["output"])
@@ -478,24 +483,25 @@ async def run_agent_loop(
                     })
                     continue  # 进入下一迭代
 
-            # ── 死循环检测 (修复 #2: 下移到执行后 + 错误类阈值判定之后) ──
+            # ── 死循环/停滞检测 (修复 #2: 下移到执行后 + 错误类阈值判定之后) ──
             window = settings.agent_loop_dead_loop_window
-            if _is_dead_loop(recent_tool_calls, window):
-                # M4: 保留既有 dead_loop 的 warning SSE emit (前端据此提示)
+            stop_signal = _loop_stop_signal(recent_tool_calls, window)
+            if stop_signal:
+                stop_reason, message = stop_signal
                 await sse_emit({
                     "event": "warning",
-                    "data": {"message": f"死循环检测: 连续 {window} 次同 tool+同参, 升级 clarify"},
+                    "data": {"message": message},
                 })
                 await sse_emit({"event": "agent_finished", "data": {
                     "ended_at": _now_iso(),
                     "total_iterations": iteration,
                     "total_tool_calls": len(tool_trace),
-                    "stop_reason": "dead_loop",
+                    "stop_reason": stop_reason,
                 }})
                 return AgentResult(
-                    final_answer="(死循环检测触发, 请人工介入)",
+                    final_answer=f"({message}, 请人工介入)",
                     iterations=iteration,
-                    stop_reason="dead_loop",
+                    stop_reason=stop_reason,
                     tool_trace=tool_trace,
                     usage_total=usage_total,
                 )
@@ -854,12 +860,57 @@ def _hash_input(inp: dict) -> str:
         return repr(inp)
 
 
-def _is_dead_loop(history: list[tuple[str, str]], window: int) -> bool:
-    """最近 window 次 tool_call 全部 (name, input_hash) 相同 → 死循环."""
+def _progress_marker(output: object) -> str | None:
+    """返回可用于停滞检测的进展标记；None 表示本次工具调用未产生有效结果。"""
+    if output is None:
+        return None
+    if isinstance(output, str):
+        return f"str:{len(output)}" if output.strip() else None
+    if isinstance(output, (list, tuple, set)):
+        return f"seq:{len(output)}" if output else None
+    if not isinstance(output, dict):
+        return f"scalar:{type(output).__name__}"
+    if output.get("error") or output.get("error_type") or output.get("error_message"):
+        return None
+    rows = output.get("rows")
+    if isinstance(rows, list) and rows:
+        return f"rows:{len(rows)}"
+    for key in (
+        "row_count", "total_row_count", "rendered_row_count",
+        "final_total_row_count", "estimated_docs", "hit_count",
+        "value_count", "entry_id", "history_id",
+    ):
+        value = output.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return f"{key}:{value}"
+    meaningful = {
+        k: v for k, v in output.items()
+        if k != "result_ref" and v not in (None, "", [], {}, False)
+    }
+    return f"dict:{len(meaningful)}" if meaningful else None
+
+
+def _loop_stop_signal(
+    history: list[tuple[str, str, str | None]],
+    window: int,
+) -> tuple[str, str] | None:
+    """返回 (stop_reason, message)，无终止信号则返回 None。"""
     if len(history) < window:
-        return False
+        return None
     last = history[-window:]
-    return all(item == last[0] for item in last)
+    if all((name, inp) == (last[0][0], last[0][1]) for name, inp, _ in last):
+        return "dead_loop", f"死循环检测: 连续 {window} 次同 tool+同参"
+    if all(marker is None for _, _, marker in last):
+        return "stagnation", f"停滞检测: 连续 {window} 次工具调用无有效结果"
+    return None
+
+
+def _is_dead_loop(history: list[tuple[str, str]], window: int) -> bool:
+    """兼容旧单测：最近 window 次 tool_call 全部 (name, input_hash) 相同。"""
+    return _loop_stop_signal(
+        [(name, inp, "progress") for name, inp in history],
+        window,
+    ) is not None
 
 
 def _accumulate_usage(total: dict[str, int], delta: dict | None) -> None:

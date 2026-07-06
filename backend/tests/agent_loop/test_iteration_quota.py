@@ -42,7 +42,7 @@ def _make_tool(name, output):
 
 @pytest.mark.asyncio
 async def test_max_exploratory_calls_soft_limit(monkeypatch, caplog):
-    """exploratory 超软上限只记 warning，不硬停；继续到 total_iterations."""
+    """exploratory 超软上限只记 warning，不硬停；继续到 cost_exhausted."""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 3)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
@@ -60,14 +60,14 @@ async def test_max_exploratory_calls_soft_limit(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="app.engine.agent_loop"):
         result = await run_agent_loop(
             trace_id="t-explore-soft", question="q",
-            tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", [])},
+            tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", {"hit_count": 1})},
             tool_specs=[], sse_emit=emit,
             user_correction_queue=asyncio.Queue(),
             llm=llm, system_prompt="",
         )
 
-    # 软上限：不硬停，由 total_iterations 成本后墙终止
-    assert result.stop_reason == "max_total_iterations"
+    # 软上限：不硬停，由 cost_exhausted 成本后墙终止
+    assert result.stop_reason == "cost_exhausted"
     # 超软上限时记了 warning
     assert any("超软上限" in r.message for r in caplog.records)
 
@@ -97,13 +97,13 @@ async def test_max_decisive_calls_soft_limit(monkeypatch, caplog):
             llm=llm, system_prompt="",
         )
 
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
     assert any("超软上限" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
 async def test_max_total_iterations_triggers(monkeypatch):
-    """总轮次到 cap 触发 max_total_iterations."""
+    """总轮次到 cap 触发 cost_exhausted."""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
@@ -120,12 +120,12 @@ async def test_max_total_iterations_triggers(monkeypatch):
 
     result = await run_agent_loop(
         trace_id="t-total-cap", question="q",
-        tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", [])},
+        tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", {"hit_count": 1})},
         tool_specs=[], sse_emit=emit,
         user_correction_queue=asyncio.Queue(),
         llm=llm, system_prompt="",
     )
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
     assert result.iterations == 3
 
 
@@ -159,7 +159,7 @@ async def test_clarify_does_not_count_towards_explore_decisive(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_iteration_limit_disabled_bypasses_quotas(monkeypatch):
-    """enabled=False 时, 即使超配额也不触发 max_*_calls."""
+    """enabled=False 时, 即使超配额也不触发 max_*_calls。工具有进展则不触发 stagnation。"""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_iteration_limit_enabled", False)
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 1)
@@ -176,7 +176,7 @@ async def test_iteration_limit_disabled_bypasses_quotas(monkeypatch):
 
     result = await run_agent_loop(
         trace_id="t-disabled", question="q",
-        tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", [])},
+        tools_registry={"lookup_knowledge": _make_tool("lookup_knowledge", {"hit_count": 1})},
         tool_specs=[], sse_emit=emit,
         user_correction_queue=asyncio.Queue(),
         llm=llm, system_prompt="",

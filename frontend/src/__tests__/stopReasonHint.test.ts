@@ -5,10 +5,10 @@ import { STOP_REASON_HINT } from "../components/stream/FinalResult";
 
 describe("STOP_REASON_HINT", () => {
   const warningReasons = [
-    "max_exploratory_calls",
-    "max_decisive_calls",
-    "max_total_iterations",
     "dead_loop",
+    "stagnation",
+    "cost_exhausted",
+    "max_total_iterations",   // 兼容旧后端
     "forced_clarify_timeout",
     "forced_clarify_exhausted",
   ];

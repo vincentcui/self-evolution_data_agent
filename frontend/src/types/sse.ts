@@ -15,10 +15,10 @@ export type AgentSSEEvent =
       data: {
         stop_reason:
           | "end_turn"
-          | "max_exploratory_calls"
-          | "max_decisive_calls"
-          | "max_total_iterations"
           | "dead_loop"
+          | "stagnation"
+          | "cost_exhausted"
+          | "max_total_iterations"   // 兼容旧后端，新后端已改为 cost_exhausted
           | "forced_clarify_timeout"
           | "forced_clarify_exhausted";
         total_iterations: number;
