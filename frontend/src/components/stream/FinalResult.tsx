@@ -45,10 +45,11 @@ const EXPIRY_OPTIONS = [
 ] as const;
 
 export const STOP_REASON_HINT: Record<string, string> = {
-  max_exploratory_calls: "探索类工具调用已达上限，可能信息收集过多但未推进到决策。",
-  max_decisive_calls: "决策类工具调用已达上限，可能反复重试或图表换型未收敛。",
-  max_total_iterations: "总轮次已达上限，可能问题过于复杂。",
-  dead_loop: "检测到死循环（连续相同工具同参数），已自动中止。",
+  dead_loop:     "检测到连续重复调用，已自动中止。",
+  stagnation:    "连续多次工具调用没有有效结果，已自动中止。",
+  cost_exhausted: "已达到总轮次成本后墙，当前进展可查看工具调用记录。",
+  // 兼容旧后端（新后端已改为 cost_exhausted）
+  max_total_iterations: "总轮次已达上限，当前进展可查看工具调用记录。",
   forced_clarify_timeout: "因反复命中同类错误已向你发起澄清，但等待回应超时，已中止本次查询。",
   forced_clarify_exhausted: "已就同类错误多次向你澄清仍未解决，为避免空耗已中止本次查询。",
 };

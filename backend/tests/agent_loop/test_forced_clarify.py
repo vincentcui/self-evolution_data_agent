@@ -255,7 +255,7 @@ async def test_property_31_total_hard_ceiling(monkeypatch):
         tools_registry={"execute_query": _err_tool(304), "clarify_with_user": clarify},
         tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
     )
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
 
 
 # task 15.14 / R5.9: cap=1 第二次同类 → forced_clarify_exhausted
@@ -306,13 +306,15 @@ def _clarify_capture(sink: list):
     return _clarify
 
 
-# Feature: mongo-flavor-capabilities-and-error-clarify, Property 23: 保留三桶配额终止语义
+# Property 23: 桶配额降级为软告警，成本后墙终止
 @pytest.mark.asyncio
-async def test_property_23_quota_terminates(monkeypatch):
+async def test_property_23_quota_soft_limit(monkeypatch):
+    """decisive 软上限超后不硬停，继续到 total_iterations 成本后墙."""
     monkeypatch.setattr(al, "_resolve_caps_for_error", _noop_caps)
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 1)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    # total_iterations 作唯一计数型后墙
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 4)
     monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 100)
     monkeypatch.setattr(al.settings, "agent_loop_error_class_window_size", 5)
     monkeypatch.setattr(al.settings, "agent_loop_error_class_threshold", 2)
@@ -320,15 +322,15 @@ async def test_property_23_quota_terminates(monkeypatch):
     async def _ok(**kw):
         return {"rows": [{"x": 1}], "row_count": 1}
 
-    # execute_query 是 decisive; cap=1 → 第二次 decisive 触顶
-    llm = FakeLLM(responses=[_resp([_tc("execute_query", {"q": i})]) for i in range(5)])
+    # decisive cap=1，但软上限不硬停；由 total_iterations=4 终止
+    llm = FakeLLM(responses=[_resp([_tc("execute_query", {"q": i})]) for i in range(10)])
     events, emit = _sse()
     result = await run_agent_loop(
         trace_id="t", question="q",
         tools_registry={"execute_query": _ok, "clarify_with_user": _clarify_stub()},
         tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
     )
-    assert result.stop_reason == "max_decisive_calls"
+    assert result.stop_reason == "cost_exhausted"
 
 
 # Feature: mongo-flavor-capabilities-and-error-clarify, Property 24: 澄清为 interactive 且不计任何配额桶
@@ -426,24 +428,28 @@ async def test_c1_probe_count_not_decisive(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_c1_single_still_decisive(monkeypatch):
-    """single 仍归 decisive: 超 cap 触发 max_decisive_calls (改动 C1 不破坏既有语义)."""
+async def test_c1_single_still_decisive(monkeypatch, caplog):
+    """single 仍归 decisive 桶：超软上限记 warning，由 total_iterations 终止."""
+    import logging
     monkeypatch.setattr(al, "_resolve_caps_for_error", _noop_caps)
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 2)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 4)
     monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 100)
 
     async def _ok(**kw):
         return {"rows": [{"x": 1}], "row_count": 1}
 
     llm = FakeLLM(responses=[
-        _resp([_tc("execute_query", {"mode": "single", "q": i}, f"c{i}")]) for i in range(5)
+        _resp([_tc("execute_query", {"mode": "single", "q": i}, f"c{i}")]) for i in range(10)
     ])
     events, emit = _sse()
-    result = await run_agent_loop(
-        trace_id="t", question="q",
-        tools_registry={"execute_query": _ok, "clarify_with_user": _clarify_stub()},
-        tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
-    )
-    assert result.stop_reason == "max_decisive_calls"
+    with caplog.at_level(logging.WARNING, logger="app.engine.agent_loop"):
+        result = await run_agent_loop(
+            trace_id="t", question="q",
+            tools_registry={"execute_query": _ok, "clarify_with_user": _clarify_stub()},
+            tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
+        )
+    # 软上限：decisive 超限记 warning 不硬停，由 total_iterations 终止
+    assert result.stop_reason == "cost_exhausted"
+    assert any("决策类工具调用超软上限" in r.message for r in caplog.records)

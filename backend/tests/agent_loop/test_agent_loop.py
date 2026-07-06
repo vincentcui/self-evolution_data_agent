@@ -203,7 +203,7 @@ async def test_dead_loop_detection_breaks_and_escalates():
 
 @pytest.mark.asyncio
 async def test_max_total_iterations_forces_break(monkeypatch):
-    """旧 max_iterations 兜底已替换为 max_total_iterations."""
+    """总轮次兜底以 cost_exhausted 终止（成本后墙）."""
     from app.engine import agent_loop as al
     monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
     monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
@@ -227,7 +227,7 @@ async def test_max_total_iterations_forces_break(monkeypatch):
         system_prompt="",
     )
     assert result.iterations == 2
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
 
 
 # ════════════════════════════════════════════
