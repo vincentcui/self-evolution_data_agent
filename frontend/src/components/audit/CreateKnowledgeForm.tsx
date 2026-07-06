@@ -12,6 +12,7 @@ import React, { useEffect, useState } from "react";
 import { Form, Input, InputNumber, Modal, Select, message } from "antd";
 import * as api from "@/api";
 import type { KnowledgeEntryCreateResponse } from "@/types";
+import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 import TerminologyEditPanel, {
   type TerminologyPayload,
 } from "./TerminologyEditPanel";
@@ -435,13 +436,13 @@ function ExampleFields({
           placeholder='{"steps": [{"db_type": "mysql", ...}]}'
         />
       </Form.Item>
-      <Form.Item label="结果摘要 (可选，最多 300 字)">
+      <Form.Item label={`结果摘要 (可选，最多 ${RESULT_SUMMARY_MAX_LEN} 字)`}>
         <Input.TextArea
           aria-label="result_summary"
           rows={2}
           value={value.result_summary}
           onChange={(e) => onChange({ ...value, result_summary: e.target.value })}
-          maxLength={300}
+          maxLength={RESULT_SUMMARY_MAX_LEN}
           showCount
         />
       </Form.Item>
