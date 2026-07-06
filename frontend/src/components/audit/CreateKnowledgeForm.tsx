@@ -112,7 +112,7 @@ export default function CreateKnowledgeForm({
     setTermPayload({});
     setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
     setRulePayload({ rule_text: "", applies_to_collections: [], priority: 0 });
-    setExPayload({ question: "", target_collection: "", target_database: "", query_json_text: "", result_summary: "" });
+    setExPayload({ question_pattern: "", collections_text: "", final_query_plan_text: "", result_summary: "" });
     setRhPayload({ question_pattern: "", collection_path: [], cost_strategy: "default", reason: "" });
     setJsonError("");
   }, [open]);

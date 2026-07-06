@@ -10,6 +10,9 @@ import CreateKnowledgeForm from "@/components/audit/CreateKnowledgeForm";
 
 vi.mock("@/api", () => ({
   createKnowledge: vi.fn().mockResolvedValue({ id: 1 }),
+  // TerminologyEditPanel mount 时调用，不补会导致 "No export" 报错
+  getDatabases:    vi.fn().mockResolvedValue([]),
+  getCollections:  vi.fn().mockResolvedValue([]),
 }));
 
 // Ant Design 部分组件依赖 getComputedStyle / scrollTo 等 jsdom 未实现的 API
