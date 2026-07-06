@@ -9,6 +9,7 @@ import json
 import re as _re
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -687,11 +688,6 @@ class ReadinessOut(BaseModel):
 # ════════════════════════════════════════════
 #  P0 对话体验 — Session
 # ════════════════════════════════════════════
-
-from datetime import datetime  # noqa: E402
-from uuid import UUID  # noqa: E402
-
-from pydantic import BaseModel, Field  # noqa: E402
 
 class SessionCreate(BaseModel):
     namespace_id: int

@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     schema_audit_log_page_max: int = 1000  # noqa: hardcode
     """schema canonical audit_log 端点单页上限, env: IS_SCHEMA_AUDIT_LOG_PAGE_MAX"""
 
+    # ── P0 对话体验 — Session ──
+    session_list_max: int = 50  # noqa: hardcode
+    """会话列表端点单页上限 (按 updated_at DESC), env: IS_SESSION_LIST_MAX"""
+
     # ── Phase 2 Terminology Refresh (trainer 末端异步 worker) ──
     terminology_refresh_timeout_secs: int = 300  # noqa: hardcode
     """Phase 2 refresh_namespace_terminology 单 namespace 整体超时, env: IS_TERMINOLOGY_REFRESH_TIMEOUT_SECS"""

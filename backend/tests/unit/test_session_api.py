@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import func, select
 
+from app.models.agent_trace import AgentTrace
 from app.models.namespace import Namespace
+from app.models.query_history import QueryHistory
 
 
 @pytest.mark.asyncio
@@ -135,3 +137,64 @@ async def test_delete_session_other_user_403(make_client, db):
     other = await make_client(role="admin", user_id=2, username="other")
     resp = await other.delete(f"/api/sessions/{sid}")
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_session_endpoints_malformed_uuid_404(make_client, db):
+    """非法 UUID → 404 (覆盖 _get_owned_session 的 except ValueError 分支).
+
+    回归 code-review: rename/delete 共用守卫的非法 UUID 负路径此前零覆盖。
+    """
+    client = await make_client(role="super_admin")
+    resp_del = await client.delete("/api/sessions/not-a-uuid")
+    assert resp_del.status_code == 404
+    resp_ren = await client.patch("/api/sessions/not-a-uuid", json={"title": "x"})
+    assert resp_ren.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_session_cascades_history_and_traces(make_client, db):
+    """删除会话同事务级联清空 query_history + agent_traces，杜绝孤儿数据.
+
+    回归 code-review critical: delete_session 原仅级联 QueryHistory，
+    AgentTrace 共享同一 session_id 却被遗漏 → 悬空孤儿行。
+    """
+    ns = Namespace(name="s8", slug="s8")
+    db.add(ns)
+    await db.commit()
+    await db.refresh(ns)
+
+    client = await make_client(role="super_admin")
+    r = await client.post("/api/sessions", json={"namespace_id": ns.id})
+    sid = r.json()["id"]
+
+    # 该会话下写入历史 + trace (session_id 与 QueryHistory/AgentTrace 同源)
+    db.add(QueryHistory(
+        namespace_id=ns.id, session_id=sid, role="user", content="q1",
+    ))
+    db.add(AgentTrace(
+        trace_id="t-s8-1", session_id=sid, namespace_id=ns.id,
+        user_query="q1", trace_json="{}",
+    ))
+    # 另一会话的 trace 作对照，删除不应波及
+    db.add(AgentTrace(
+        trace_id="t-other", session_id="ffffffff-0000-0000-0000-000000000000",
+        namespace_id=ns.id, user_query="qX", trace_json="{}",
+    ))
+    await db.commit()
+
+    resp = await client.delete(f"/api/sessions/{sid}")
+    assert resp.status_code == 204
+
+    hist = await db.scalar(
+        select(func.count()).select_from(QueryHistory).where(QueryHistory.session_id == sid)
+    )
+    traces = await db.scalar(
+        select(func.count()).select_from(AgentTrace).where(AgentTrace.session_id == sid)
+    )
+    survivor = await db.scalar(
+        select(func.count()).select_from(AgentTrace).where(AgentTrace.trace_id == "t-other")
+    )
+    assert hist == 0, "query_history 未被级联清空"
+    assert traces == 0, "agent_traces 未被级联清空 (孤儿数据)"
+    assert survivor == 1, "误删了其他会话的 trace"
