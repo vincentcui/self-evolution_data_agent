@@ -49,7 +49,7 @@ export default function ExampleEditPanel({ value, onChange }: Props) {
           value={value.result_summary}
           onChange={(e) => update({ result_summary: e.target.value })}
           rows={2}
-          maxLength={120}
+          maxLength={300}
           showCount
         />
       </Form.Item>

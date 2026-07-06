@@ -255,7 +255,7 @@ async def test_property_31_total_hard_ceiling(monkeypatch):
         tools_registry={"execute_query": _err_tool(304), "clarify_with_user": clarify},
         tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
     )
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
 
 
 # task 15.14 / R5.9: cap=1 第二次同类 → forced_clarify_exhausted
@@ -330,7 +330,7 @@ async def test_property_23_quota_soft_limit(monkeypatch):
         tools_registry={"execute_query": _ok, "clarify_with_user": _clarify_stub()},
         tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
     )
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
 
 
 # Feature: mongo-flavor-capabilities-and-error-clarify, Property 24: 澄清为 interactive 且不计任何配额桶
@@ -451,5 +451,5 @@ async def test_c1_single_still_decisive(monkeypatch, caplog):
             tool_specs=[], sse_emit=emit, user_correction_queue=asyncio.Queue(), llm=llm,
         )
     # 软上限：decisive 超限记 warning 不硬停，由 total_iterations 终止
-    assert result.stop_reason == "max_total_iterations"
+    assert result.stop_reason == "cost_exhausted"
     assert any("决策类工具调用超软上限" in r.message for r in caplog.records)

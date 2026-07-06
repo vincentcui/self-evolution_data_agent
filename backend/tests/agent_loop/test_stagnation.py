@@ -1,7 +1,10 @@
 """停滞检测 + cost_exhausted 测试."""
 from __future__ import annotations
+
 import asyncio
+
 import pytest
+
 from app.engine.agent_loop import run_agent_loop
 from app.engine.llm import ToolCall, ToolUseResponse
 
@@ -16,6 +19,7 @@ def _tuc(*, calls=None, text="", stop="end_turn"):
 class FakeLLM:
     def __init__(self, responses):
         self._responses = list(responses)
+
     async def __call__(self, *, messages, tools, stream_callback=None):
         await asyncio.sleep(0)
         return self._responses.pop(0)
@@ -23,9 +27,22 @@ class FakeLLM:
 
 def _sse_sink():
     events: list[dict] = []
+
     async def emit(ev):
         events.append(ev)
     return events, emit
+
+
+# ── async 工具 mock（agent_loop 会 await fn(**tc.input)）──────────────────
+
+async def _empty(**kw):
+    """返回空列表 = 无进展"""
+    return []
+
+
+async def _hit(**kw):
+    """返回有效结果 = 有进展"""
+    return {"hit_count": 1}
 
 
 @pytest.mark.asyncio
@@ -47,7 +64,7 @@ async def test_no_progress_stagnates_before_total(monkeypatch):
 
     result = await run_agent_loop(
         trace_id="t-stagnation", question="q",
-        tools_registry={"lookup_knowledge": lambda **kw: []},  # 返回空列表 = 无进展
+        tools_registry={"lookup_knowledge": _empty},
         tool_specs=[], sse_emit=emit,
         user_correction_queue=asyncio.Queue(),
         llm=llm, system_prompt="",
@@ -76,7 +93,7 @@ async def test_same_tool_same_input_still_dead_loop(monkeypatch):
 
     result = await run_agent_loop(
         trace_id="t-dead-loop", question="q",
-        tools_registry={"lookup_knowledge": lambda **kw: {"hit_count": 1}},
+        tools_registry={"lookup_knowledge": _hit},
         tool_specs=[], sse_emit=emit,
         user_correction_queue=asyncio.Queue(),
         llm=llm, system_prompt="",
@@ -103,7 +120,7 @@ async def test_progress_outputs_continue_to_cost_exhausted(monkeypatch):
 
     result = await run_agent_loop(
         trace_id="t-cost", question="q",
-        tools_registry={"lookup_knowledge": lambda **kw: {"hit_count": 1}},
+        tools_registry={"lookup_knowledge": _hit},
         tool_specs=[], sse_emit=emit,
         user_correction_queue=asyncio.Queue(),
         llm=llm, system_prompt="",

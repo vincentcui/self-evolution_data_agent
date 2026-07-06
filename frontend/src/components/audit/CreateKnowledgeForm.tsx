@@ -399,11 +399,14 @@ function ExampleFields({
           placeholder='{"filter": {"week": "last"}, "sort": {"sales": -1}}'
         />
       </Form.Item>
-      <Form.Item label="result_summary (可选)">
-        <Input
+      <Form.Item label="result_summary (可选，最多 300 字)">
+        <Input.TextArea
           aria-label="result_summary"
+          rows={2}
           value={value.result_summary}
           onChange={(e) => onChange({ ...value, result_summary: e.target.value })}
+          maxLength={300}
+          showCount
         />
       </Form.Item>
     </>
