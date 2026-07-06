@@ -903,6 +903,13 @@ def _hash_input(inp: dict) -> str:
         return repr(inp)
 
 
+# catalog / schema 类工具的无进展 status 集合（模块级常量）
+_NO_PROGRESS_STATUSES: frozenset[str] = frozenset({
+    "unknown_database", "no_schema_extracted",
+    "error", "skipped", "not_found", "empty",
+})
+
+
 def _progress_marker(output: object) -> str | None:
     """返回可用于停滞检测的进展标记；None 表示本次工具调用未产生有效结果。"""
     if output is None:
@@ -917,11 +924,6 @@ def _progress_marker(output: object) -> str | None:
         return None
     if output.get("success") is False:   # {"success": False, "reason": ...} 视为无进展
         return None
-    # catalog / schema 类工具的无进展状态（库不存在、未提取 schema 等）
-    _NO_PROGRESS_STATUSES = {
-        "unknown_database", "no_schema_extracted",
-        "error", "skipped", "not_found", "empty",
-    }
     status = output.get("status")
     if isinstance(status, str) and status in _NO_PROGRESS_STATUSES:
         # status 标记失败/无数据；只有同时有非空 tables/rows 才算进展
