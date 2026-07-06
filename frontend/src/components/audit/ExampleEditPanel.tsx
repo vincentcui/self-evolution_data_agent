@@ -10,6 +10,7 @@
 
 import React from "react";
 import { Form, Input, Space, Tag, Typography } from "antd";
+import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 
 const { Text } = Typography;
 
@@ -48,14 +49,20 @@ export default function ExampleEditPanel({ value, onChange }: Props) {
         />
       </Form.Item>
 
-      <Form.Item label="结果摘要">
+      <Form.Item
+        label="结果摘要"
+        validateStatus={value.result_summary.length > RESULT_SUMMARY_MAX_LEN ? "error" : ""}
+        help={value.result_summary.length > RESULT_SUMMARY_MAX_LEN
+          ? `已超出 ${value.result_summary.length - RESULT_SUMMARY_MAX_LEN} 字，请缩减至 ${RESULT_SUMMARY_MAX_LEN} 字以内再保存`
+          : ""}
+      >
         <Input.TextArea
           aria-label="结果摘要"
           value={value.result_summary}
           onChange={(e) => update({ result_summary: e.target.value })}
           rows={2}
-          maxLength={120}
-          showCount
+          showCount={{ formatter: ({ count }) => `${count} / ${RESULT_SUMMARY_MAX_LEN}` }}
+          status={value.result_summary.length > RESULT_SUMMARY_MAX_LEN ? "error" : ""}
         />
       </Form.Item>
 

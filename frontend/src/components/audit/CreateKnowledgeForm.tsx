@@ -8,10 +8,11 @@
  *  - conflicts / overflow 通过 onSubmitted(response) 抛回父组件决定 Modal 关闭
  * ══════════════════════════════════════════════════════════════════════════ */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Form, Input, InputNumber, Modal, Select, message } from "antd";
 import * as api from "@/api";
 import type { KnowledgeEntryCreateResponse } from "@/types";
+import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 import TerminologyEditPanel, {
   type TerminologyPayload,
 } from "./TerminologyEditPanel";
@@ -101,6 +102,20 @@ export default function CreateKnowledgeForm({
   });
   const [jsonError, setJsonError] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Bug fix ZYZ-55: 每次打开弹窗（新建模式）时重置所有字段，避免带出上次的历史数据
+  useEffect(() => {
+    if (!open) return;
+    setEntryType("terminology");
+    setScope("namespace");
+    setTier("normal");
+    setTermPayload({});
+    setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
+    setRulePayload({ rule_text: "", applies_to_collections: [], priority: 0 });
+    setExPayload({ question_pattern: "", collections_text: "", final_query_plan_text: "", result_summary: "" });
+    setRhPayload({ question_pattern: "", collection_path: [], cost_strategy: "default", reason: "" });
+    setJsonError("");
+  }, [open]);
 
   const handleSubmit = async () => {
     const namespace_id = scope === "global" ? null : defaultNamespaceId ?? null;
@@ -421,12 +436,14 @@ function ExampleFields({
           placeholder='{"steps": [{"db_type": "mysql", ...}]}'
         />
       </Form.Item>
-      <Form.Item label="结果摘要 (可选)">
-        <Input
-          aria-label="结果摘要"
+      <Form.Item label={`结果摘要 (可选，最多 ${RESULT_SUMMARY_MAX_LEN} 字)`}>
+        <Input.TextArea
+          aria-label="result_summary"
+          rows={2}
           value={value.result_summary}
           onChange={(e) => onChange({ ...value, result_summary: e.target.value })}
-          placeholder="自然语言总结, 例: 在orders上按status分组统计数量"
+          maxLength={RESULT_SUMMARY_MAX_LEN}
+          showCount
         />
       </Form.Item>
     </>

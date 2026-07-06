@@ -11,6 +11,7 @@ import ConflictDiff from "./ConflictDiff";
 import TerminologyEditPanel, { type TerminologyPayload } from "./TerminologyEditPanel";
 import ExampleEditPanel, { type ExamplePayload } from "./ExampleEditPanel";
 import RouteHintEditPanel, { type RouteHintPayload } from "./RouteHintEditPanel";
+import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 
 interface Props {
   entry: KnowledgeEntry;
@@ -124,6 +125,11 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
         const q = (examplePayload.question_pattern as string || examplePayload.question as string || "").trim();
         if (!q) {
           message.warning("问题模式不能为空");
+          setSubmitting(false);
+          return;
+        }
+        if (examplePayload.result_summary.length > RESULT_SUMMARY_MAX_LEN) {
+          message.warning(`结果摘要不能超过 ${RESULT_SUMMARY_MAX_LEN} 字（当前 ${examplePayload.result_summary.length} 字）`);
           setSubmitting(false);
           return;
         }
