@@ -123,9 +123,6 @@ class Settings(BaseSettings):
     terminology_synonym_max_len: int = 50
     """synonym 字数上限（释义性短语，英文术语天然更长），env: IS_TERMINOLOGY_SYNONYM_MAX_LEN"""
 
-    example_result_summary_max_len: int = 300
-    """示例查询 result_summary 字数上限，env: IS_EXAMPLE_RESULT_SUMMARY_MAX_LEN"""
-
     # ── Phase 1 schema-knowledge-onboarding 配置 ─────────
     promote_batch_size: int = 200
     """候选 promote 批大小, env: IS_PROMOTE_BATCH_SIZE"""

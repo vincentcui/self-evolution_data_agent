@@ -101,7 +101,7 @@ instance_alias:
 
 example:
   - question (str, 原用户问题或归一化形式)
-  - result_summary (str, 可空, ≤300 字, 描述过滤+关联+聚合)
+  - result_summary (str, 可空, ≤160 字, 描述过滤+关联+聚合)
 
 rule:
   - rule_text (str, 一句话规则描述, 含字段路径)

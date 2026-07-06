@@ -73,16 +73,6 @@ class ExamplePayload(BaseModel):
     target_database: str | None = None
     query_json: dict
     result_summary: str = ""
-
-    @field_validator("result_summary")
-    @classmethod
-    def _result_summary_len_check(cls, v: str) -> str:
-        max_len = settings.example_result_summary_max_len
-        if len(v) > max_len:
-            raise ValueError(
-                f"result_summary 超过字数上限 {max_len}（当前 {len(v)} 字）"
-            )
-        return v
     source_query_history_id: int | None = None
     schema_hash: str | None = None
 
