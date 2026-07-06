@@ -872,6 +872,8 @@ def _progress_marker(output: object) -> str | None:
         return f"scalar:{type(output).__name__}"
     if output.get("error") or output.get("error_type") or output.get("error_message"):
         return None
+    if output.get("success") is False:   # {"success": False, "reason": ...} 视为无进展
+        return None
     rows = output.get("rows")
     if isinstance(rows, list) and rows:
         return f"rows:{len(rows)}"

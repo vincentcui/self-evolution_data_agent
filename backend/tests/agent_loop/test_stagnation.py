@@ -127,3 +127,39 @@ async def test_progress_outputs_continue_to_cost_exhausted(monkeypatch):
     )
     assert result.stop_reason == "cost_exhausted"
     assert result.iterations == 5
+
+
+@pytest.mark.asyncio
+async def test_success_false_treated_as_no_progress(monkeypatch):
+    """success=False 的失败结果视为无进展，触发 stagnation 而非 cost_exhausted。
+
+    场景：LLM 连续尝试不同非法 payload，每次 save_knowledge 返回
+    {"success": False, "reason": "validation_failed"}。
+    参数不同 → 不触发 dead_loop；success=False → 无进展 → 触发 stagnation。
+    """
+    from app.engine import agent_loop as al
+    monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 3)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 40)
+    monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
+
+    async def _fail(**kw):
+        return {"success": False, "reason": "validation_failed"}
+
+    responses = [
+        _tuc(calls=[ToolCall(id=f"c{i}", name="save_knowledge",
+                              input={"payload": f"bad_{i}"})], stop="tool_use")
+        for i in range(10)
+    ]
+    llm = FakeLLM(responses=responses)
+    events, emit = _sse_sink()
+
+    result = await run_agent_loop(
+        trace_id="t-success-false", question="q",
+        tools_registry={"save_knowledge": _fail},
+        tool_specs=[], sse_emit=emit,
+        user_correction_queue=asyncio.Queue(),
+        llm=llm, system_prompt="",
+    )
+    assert result.stop_reason == "stagnation"
+    assert result.iterations == 3
