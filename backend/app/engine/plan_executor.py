@@ -605,9 +605,9 @@ async def execute_plan(
 
     for step in plan.steps:
         log.info(
-            "[plan_exec] step=%d db_type=%s db=%s target=%s op=%s limit=%d",
+            "[plan_exec] step=%d db_type=%s db=%s target=%s op=%s",
             step.step_idx, step.db_type, step.database, step.collection,
-            step.operation, step.limit,
+            step.operation,
         )
 
         # 每步建一个子 span 便于 Langfuse 追踪

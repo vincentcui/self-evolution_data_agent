@@ -45,7 +45,6 @@ def _dict_to_plan_step(d: dict) -> PlanStep:
         query=dict(d.get("query") or {}),
         projection=dict(d.get("projection") or {}),
         sort=list(d.get("sort") or []),
-        limit=d.get("limit", 1000),
         exports=list(d.get("exports") or []),
         db_type=d.get("db_type", "mongodb"),
     )

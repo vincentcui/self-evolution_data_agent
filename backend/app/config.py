@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     render_row_limit: int = 20000  # noqa: hardcode
     """渲染源 (plan 末步 mode=render) 专用行上限; 与保护 LLM 上下文的 query_row_limit 分离.
     字节数学: 20000 行聚合数据 ≈2MB, 请求级作用域 (tool_trace 随请求结束 GC)."""
+    probe_row_limit: int = 10  # noqa: hardcode
+    """probe mode (小样本探查) 行上限; 三驱动 (mysql/oracle/mongo) 共用单一真相源,
+    取代原各 driver probe 分支散落的 hardcode 10. 默认 10 保持原语义."""
     agent_tool_result_max_chars: int = 500_000  # noqa: hardcode
     """回喂 LLM 的单条 tool 结果字符预算; 超出则 dict-aware 收缩 + 截断 (tool_trace 不受影响)"""
 

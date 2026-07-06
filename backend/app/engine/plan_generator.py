@@ -272,7 +272,6 @@ def _parse_plan(raw: str) -> QueryPlan:
             query=query,
             projection=s.get("projection") or {},
             sort=s.get("sort") or [],
-            limit=int(s.get("limit") or 1000),
             exports=[str(x) for x in (s.get("exports") or []) if x],
             db_type=db_type,
         ))

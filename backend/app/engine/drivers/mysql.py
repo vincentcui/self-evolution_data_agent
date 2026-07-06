@@ -34,10 +34,32 @@ _DML_DDL_KEYWORDS = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|GRANT|REVOKE|CALL)\b",
     re.IGNORECASE,
 )
-# 末尾外层 LIMIT / LIMIT a,b / OFFSET — render/count 剥离 planner 末步行保护用
+# 末尾外层 LIMIT / LIMIT a,b / OFFSET — render/count 剥离 + 三态提取共用.
+# group(1)=首数值, group(2)=次数值 (LIMIT a,b 的 b=返回行数); OFFSET 非捕获.
 _OUTER_LIMIT_RE = re.compile(
-    r"\s+LIMIT\s+\d+(\s*,\s*\d+)?(\s+OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE,
+    r"\s+LIMIT\s+(\d+)(?:\s*,\s*(\d+))?(?:\s+OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE,
 )
+
+
+def _normalize_for_limit(sql: str) -> str:
+    """行保护判定前的统一规范化: tokenizer 剥注释 + 去尾分号/空白.
+
+    关键 (spec-review Claim 3): 尾部注释会静默击穿 $ 锚定 —— `LIMIT 10000 -- c` 末尾是
+    注释非 LIMIT, 正则不匹配 → 判为无 LIMIT → 拼接的 cap 被 `--` 吞掉, DB 跑 10000。
+    用 sqlparse (已是依赖, _enforce_select_only 在用) tokenizer 剥注释而非正则 —— 尊重
+    字符串字面量边界 (`'-- x'` 不误剥), 确定性词法操作非猜语义。render/count 的
+    _strip_outer_limit 与三态 _apply_row_limit 共用, 统一硬化 (含现网潜伏盲点)。
+    """
+    return sqlparse.format(sql, strip_comments=True).strip().rstrip(";").rstrip()
+
+
+def _extract_outer_limit_value(m: re.Match) -> int:
+    """从 _OUTER_LIMIT_RE match 取"返回行数": LIMIT a,b 取 b (group2), 否则取 group1.
+
+    MySQL LIMIT 语义: `LIMIT count` / `LIMIT offset, count` / `LIMIT count OFFSET off`.
+    两种含 offset 的形态里返回行数分别是 group2 与 group1, 故 group2 优先。
+    """
+    return int(m.group(2)) if m.group(2) is not None else int(m.group(1))
 
 
 class MySQLDriver:
@@ -502,33 +524,47 @@ class MySQLDriver:
     def _strip_outer_limit(sql: str) -> str:
         """剥离末尾外层 LIMIT/LIMIT a,b/OFFSET (planner 末步行保护).
 
-        仅尾部一处, 不动子查询内 LIMIT. render mode + render-count 共用.
+        先经 _normalize_for_limit 剥注释, 杜绝 `... LIMIT n -- c` 尾注释让 $ 锚定失配
+        (render/count 现网同盲点, 本次一并硬化)。仅尾部一处, 不动子查询内 LIMIT。
         """
-        return _OUTER_LIMIT_RE.sub("", sql.rstrip().rstrip(";")).rstrip()
+        return _OUTER_LIMIT_RE.sub("", _normalize_for_limit(sql)).rstrip()
+
+    @staticmethod
+    def _apply_row_limit(sql: str, cap: int) -> str:
+        """保护型行数 cap 三态: 无 LIMIT 注入; >cap 剥离+注入; ≤cap 保留原值.
+
+        只对"会拉爆"与"没保护"干预, 不触碰"已在安全区且主动选择"的小 LIMIT
+        (尊重 LLM 小样本/probe 意图)。single/batched/probe 共用。
+        先 _normalize_for_limit 剥注释, 杜绝尾注释击穿 (spec-review Claim 3)。
+        """
+        base = _normalize_for_limit(sql)                     # 剥注释, 防尾注释击穿
+        m = _OUTER_LIMIT_RE.search(base)
+        if m is None:
+            return f"{base} LIMIT {cap}"                    # 无 LIMIT → 注入
+        if _extract_outer_limit_value(m) > cap:
+            return f"{MySQLDriver._strip_outer_limit(base)} LIMIT {cap}"  # >cap → cap
+        return base                                          # ≤cap → 保留原值
 
     @staticmethod
     def _wrap_by_mode(sql: str, mode: ExecuteMode, batch_size: int) -> str:
-        """按 mode 包装 SQL (添加 LIMIT). 已有 LIMIT 时不重复添加.
+        """按 mode 包装 SQL. 两类契约:
 
-        render 例外: 不短路 has_limit, 而是剥离末步外层 LIMIT 后 override 为
-        render_row_limit (渲染源行上限唯一所有者, 见 §4.6).
+        保护型 (single/batched/probe): _apply_row_limit 三态, 尊重 LLM 小 LIMIT.
+        权威型 (render/count): 无条件 strip 外层行保护后注入权威语义
+          — render 注 render_row_limit (渲染源唯一所有者); count 包 COUNT 返标量总数.
         """
-        # 去除尾部分号
-        sql = sql.rstrip().rstrip(";")
-        has_limit = "LIMIT" in sql.upper()
         if mode == "probe":
-            return sql if has_limit else f"{sql} LIMIT 10"
-        elif mode == "count":
-            return f"SELECT COUNT(*) AS cnt FROM ({sql}) AS _sub"
+            return MySQLDriver._apply_row_limit(sql, settings.probe_row_limit)
         elif mode == "batched":
-            return sql if has_limit else f"{sql} LIMIT {batch_size}"
+            return MySQLDriver._apply_row_limit(sql, batch_size)
+        elif mode == "count":
+            base = MySQLDriver._strip_outer_limit(sql)
+            return f"SELECT COUNT(*) AS cnt FROM ({base}) AS _sub"
         elif mode == "render":
-            # 剥离 planner 末步外层 LIMIT → 注入 render_row_limit (唯一所有者)
             base = MySQLDriver._strip_outer_limit(sql)
             return f"{base} LIMIT {settings.render_row_limit}"
-        else:
-            # single — 使用全局 row_limit (已有 LIMIT 时不覆盖)
-            return sql if has_limit else f"{sql} LIMIT {settings.query_row_limit}"
+        else:  # single
+            return MySQLDriver._apply_row_limit(sql, settings.query_row_limit)
 
 
 def _fk_rows_to_relationships(

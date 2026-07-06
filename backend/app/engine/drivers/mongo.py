@@ -402,7 +402,7 @@ class MongoDriver:
 
         # 确定 limit
         if mode == "probe":
-            limit = 10
+            limit = settings.probe_row_limit
         elif mode == "batched":
             limit = batch_size
         elif mode == "render":

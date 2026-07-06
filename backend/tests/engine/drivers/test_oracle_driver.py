@@ -278,3 +278,83 @@ async def test_thin_fetch_db_profile_connected_false_on_error():
 
     assert profile["connected"] is False, "连接失败 → 不得写入 connected=True"
     assert "error" in profile
+
+
+# ══ 三态行数保护 (Oracle ROWNUM/FETCH) — 生产 trace 60fc1016 对称防线 ══
+from app.config import settings as _settings  # noqa: E402
+from app.engine.drivers.oracle import (  # noqa: E402
+    OracleDriver,
+    _apply_rownum_limit,
+    _extract_outer_rownum_value,
+)
+
+
+def test_oracle_extract_rownum_wrapper_value():
+    sql = "SELECT * FROM (SELECT a FROM t) WHERE ROWNUM <= 500"
+    assert _extract_outer_rownum_value(sql) == 500
+
+
+def test_oracle_extract_fetch_first_value():
+    sql = "SELECT a FROM t FETCH FIRST 5000 ROWS ONLY"
+    assert _extract_outer_rownum_value(sql) == 5000
+
+
+def test_oracle_extract_none_when_no_limit():
+    assert _extract_outer_rownum_value("SELECT a FROM t") is None
+
+
+def test_oracle_apply_no_limit_wraps_with_cap():
+    out = _apply_rownum_limit("SELECT a FROM t", 1000)
+    assert "ROWNUM <= 1000" in out
+
+
+def test_oracle_apply_over_cap_rewrapped():
+    # FETCH 5000 > cap 1000 → strip + ROWNUM 1000
+    out = _apply_rownum_limit("SELECT a FROM t FETCH FIRST 5000 ROWS ONLY", 1000)
+    assert "ROWNUM <= 1000" in out
+    assert "5000" not in out
+
+
+def test_oracle_apply_under_cap_preserved():
+    # FETCH 10 ≤ cap 1000 → 保留原值 (尊重 LLM 小样本)
+    sql = "SELECT a FROM t FETCH FIRST 10 ROWS ONLY"
+    out = _apply_rownum_limit(sql, 1000)
+    assert out == sql
+
+
+def test_oracle_wrap_single_uses_query_row_limit():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t", "single", 1000)
+    assert f"ROWNUM <= {_settings.query_row_limit}" in out
+
+
+def test_oracle_wrap_probe_uses_probe_row_limit():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t", "probe", 1000)
+    assert f"ROWNUM <= {_settings.probe_row_limit}" in out
+
+
+def test_oracle_count_strips_and_wraps():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t FETCH FIRST 50 ROWS ONLY", "count", 1000)
+    assert out.startswith("SELECT COUNT(*) AS cnt FROM (")
+    assert "50" not in out
+
+
+# ── 尾注释对称硬化 (Claim 3, 与 MySQL 对称) ──
+def test_oracle_extract_fetch_ignores_trailing_comment():
+    # 击穿防线: FETCH 5000 后带注释, 剥注释后仍能提取 5000
+    sql = "SELECT a FROM t FETCH FIRST 5000 ROWS ONLY -- c"
+    assert _extract_outer_rownum_value(sql) == 5000
+
+
+def test_oracle_apply_over_cap_with_trailing_comment_capped():
+    out = _apply_rownum_limit("SELECT a FROM t FETCH FIRST 5000 ROWS ONLY -- c", 1000)
+    assert "ROWNUM <= 1000" in out
+    assert "5000" not in out
+    assert "--" not in out
+
+
+def test_oracle_string_literal_dashes_not_stripped():
+    # tokenizer 尊重字面量: 引号内 '-- x' 不被当注释
+    sql = "SELECT a, '-- x' AS c FROM t FETCH FIRST 5000 ROWS ONLY"
+    out = _apply_rownum_limit(sql, 1000)
+    assert "'-- x'" in out
+    assert "ROWNUM <= 1000" in out

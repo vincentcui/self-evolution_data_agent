@@ -33,7 +33,7 @@ def _step(idx=1, db="db1", coll="c", op="aggregate",
     return PlanStep(
         step_idx=idx, database=db, collection=coll, operation=op,
         pipeline=pipeline or [], query=query or {},
-        exports=exports or [], limit=100, db_type=db_type,
+        exports=exports or [], db_type=db_type,
     )
 
 

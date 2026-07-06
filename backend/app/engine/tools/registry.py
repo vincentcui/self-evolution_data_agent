@@ -274,8 +274,8 @@ TOOL_SPECS: list[dict] = [
             "执行查询, 按 mode 控制粒度. "
             "Use when: 已拿到 schema 和过滤条件, 准备实际取数. "
             "Do not use when: 跨 db_type 或跨 database (用 generate_query_plan). "
-            "mode: count=只数行, probe=小探查(limit 10), "
-            "single=完整结果, batched=分批. "
+            "mode: count=只求总数, 驱动包装返标量 (勿自行聚合); "
+            "probe=小样本探查; single=完整结果; batched=分批. "
             "query 形态: MySQL/Oracle 用 {sql:'...'} (Oracle 用 Oracle SQL 方言, 不写 LIMIT), "
             "MongoDB 用 {pipeline:[...]}. "
             "返回 {rows, row_count, truncated, elapsed_ms, result_ref}. "
@@ -500,7 +500,7 @@ types 按需选择: instance_alias(别名→记录ID) / example(历史成功对)
 5. **歧义澄清**: 多候选无法自决 → clarify_with_user. \
 用户回答后 save_knowledge 沉淀.
 6. **代价评估**: 大表查询前先 estimate_cost. \
-只要行数用 execute_query(mode="count"). \
+只要行数用 execute_query(mode="count") — 照常写取数 query, 驱动包装返总数. \
 单步聚合若结果会超行上限 → 不要用更窄条件分多次 single 拼接, \
 改走 generate_query_plan → execute_plan (产出单一完整结果集).
 7. **执行**: 单源单步 → execute_query(mode="single"); \
@@ -532,7 +532,8 @@ MongoDB 用 {{pipeline: [...]}} 或 {{filter: {{...}}}}
 - 关联超 2 层: 先 estimate_cost 看每层规模.
 - 任一层估算 > {single_layer_limit:,} 行 → execute_query(mode="batched") 分批.
 - 三层连乘估算 > {total_limit:,} 行 → clarify_with_user 询问分组策略.
-- 用户只问 "个数/占比" → execute_query(mode="count") 短路.
+- 用户只问 "个数/占比" → execute_query(mode="count"), 照常写取数 query 驱动返标量总数; \
+要每组明细数量走 mode="single" 自行分组.
 
 # 死循环规避
 

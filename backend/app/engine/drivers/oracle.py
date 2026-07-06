@@ -96,17 +96,22 @@ _DML_DDL_KEYWORDS = re.compile(
 # ── 行数保护剥离 ──────────────────────────────────────────────
 
 _ORACLE_FETCH_TAIL_RE = re.compile(
-    r"\s+(OFFSET\s+\d+\s+ROWS\s+)?FETCH\s+(FIRST|NEXT)\s+\d+\s+ROWS\s+ONLY\s*$",
+    r"\s+(?:OFFSET\s+\d+\s+ROWS\s+)?FETCH\s+(?:FIRST|NEXT)\s+(\d+)\s+ROWS\s+ONLY\s*$",
     re.IGNORECASE,
 )
 _ORACLE_ROWNUM_WRAPPER_RE = re.compile(
-    r"^\s*SELECT\s+\*\s+FROM\s*\((?P<body>.*)\)\s+WHERE\s+ROWNUM\s*<=\s*\d+\s*$",
+    r"^\s*SELECT\s+\*\s+FROM\s*\((?P<body>.*)\)\s+WHERE\s+ROWNUM\s*<=\s*(\d+)\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 
 
 def _normalize_sql(sql: str) -> str:
-    return sql.strip().rstrip(";").strip()
+    """规范化: sqlparse tokenizer 剥注释 (尊重字符串字面量边界) + 去尾分号/空白.
+
+    尾注释会静默击穿 FETCH/ROWNUM 的 $ 锚定 (spec-review Claim 3) —— 与 MySQL
+    _normalize_for_limit 对称。sqlparse 已在 L29 import, _enforce_select_only 在用。
+    """
+    return sqlparse.format(sql, strip_comments=True).strip().rstrip(";").strip()
 
 
 def _strip_outer_row_limit_impl(sql: str) -> str:
@@ -125,6 +130,29 @@ def _strip_outer_row_limit_impl(sql: str) -> str:
 def _rownum_wrap(sql: str, limit: int) -> str:
     base = _strip_outer_row_limit_impl(sql)
     return f"SELECT * FROM ({base}) WHERE ROWNUM <= {int(limit)}"
+
+
+def _extract_outer_rownum_value(sql: str) -> int | None:
+    """取最外层行保护数值 (ROWNUM<=n 或 FETCH FIRST n), 无则 None. 只看最外层."""
+    current = _normalize_sql(sql)
+    m = _ORACLE_ROWNUM_WRAPPER_RE.match(current)
+    if m:
+        assert m.lastindex is not None            # 匹配成功必有捕获组 (body + 数值)
+        return int(m.group(m.lastindex))          # ROWNUM <= n 的 n
+    m = _ORACLE_FETCH_TAIL_RE.search(current)
+    if m:
+        return int(m.group(1))                    # FETCH FIRST n
+    return None
+
+
+def _apply_rownum_limit(sql: str, cap: int) -> str:
+    """Oracle 保护型三态: 无保护注入 cap; >cap 剥离+重包 cap; ≤cap 保留原值."""
+    val = _extract_outer_rownum_value(sql)
+    if val is None:
+        return _rownum_wrap(sql, cap)             # 无保护 → 注入
+    if val > cap:
+        return _rownum_wrap(sql, cap)             # >cap → strip+重包 (_rownum_wrap 内含 strip)
+    return _normalize_sql(sql)                    # ≤cap → 保留原值
 
 
 def _cursor_to_dicts(cursor: Any, rows: list) -> list[dict]:
@@ -755,15 +783,18 @@ class OracleDriver:
 
     @staticmethod
     def _wrap_by_mode(sql: str, mode: ExecuteMode, batch_size: int) -> str:
-        normalized = _normalize_sql(sql)
-        base = _strip_outer_row_limit_impl(normalized)
-        has_limit = base != normalized
+        """两类契约, 与 MySQL 对称 (Oracle 用 ROWNUM 包装):
+
+        保护型 (single/batched/probe): _apply_rownum_limit 三态.
+        权威型 (render/count): strip 后注入权威语义.
+        """
+        base = _strip_outer_row_limit_impl(sql)
         if mode == "count":
             return f"SELECT COUNT(*) AS cnt FROM ({base})"
         if mode == "render":
             return _rownum_wrap(base, settings.render_row_limit)
         if mode == "probe":
-            return normalized if has_limit else _rownum_wrap(normalized, 10)
+            return _apply_rownum_limit(sql, settings.probe_row_limit)
         if mode == "batched":
-            return normalized if has_limit else _rownum_wrap(normalized, batch_size)
-        return normalized if has_limit else _rownum_wrap(normalized, settings.query_row_limit)
+            return _apply_rownum_limit(sql, batch_size)
+        return _apply_rownum_limit(sql, settings.query_row_limit)  # single
