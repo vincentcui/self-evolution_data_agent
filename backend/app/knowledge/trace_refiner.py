@@ -104,7 +104,7 @@ example:
   - collections (list[str], 有序 db.collection 链, 描述此问题涉及的所有表/集合)
   - join_keys (list[dict], 跨表连接键 [{"from":"orders.user_id","to":"users.id"}])
   - final_query_plan (dict, 统一查询计划, steps 内 db_type 按数据库类型多态, operation:sql|aggregate|filter)
-  - result_summary (str, 可空, ≤160 字, 自然语言描述过滤/关联/聚合模式)
+  - result_summary (str, 可空, ≤300 字, 自然语言描述过滤/关联/聚合模式)
 
 rule:
   - rule_text (str, 一句话规则描述, 含字段路径)
