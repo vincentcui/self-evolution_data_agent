@@ -917,9 +917,27 @@ def _progress_marker(output: object) -> str | None:
         return None
     if output.get("success") is False:   # {"success": False, "reason": ...} 视为无进展
         return None
+    # catalog / schema 类工具的无进展状态（库不存在、未提取 schema 等）
+    _NO_PROGRESS_STATUSES = {
+        "unknown_database", "no_schema_extracted",
+        "error", "skipped", "not_found", "empty",
+    }
+    status = output.get("status")
+    if isinstance(status, str) and status in _NO_PROGRESS_STATUSES:
+        # status 标记失败/无数据；只有同时有非空 tables/rows 才算进展
+        tables = output.get("tables")
+        rows_val = output.get("rows")
+        if not (
+            (isinstance(tables, list) and tables)
+            or (isinstance(rows_val, list) and rows_val)
+        ):
+            return None
     rows = output.get("rows")
     if isinstance(rows, list) and rows:
         return f"rows:{len(rows)}"
+    tables = output.get("tables")   # list_tables 成功路径
+    if isinstance(tables, list) and tables:
+        return f"tables:{len(tables)}"
     for key in (
         "row_count", "total_row_count", "rendered_row_count",
         "final_total_row_count", "estimated_docs", "hit_count",

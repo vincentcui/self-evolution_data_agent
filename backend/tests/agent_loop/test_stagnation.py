@@ -163,3 +163,77 @@ async def test_success_false_treated_as_no_progress(monkeypatch):
     )
     assert result.stop_reason == "stagnation"
     assert result.iterations == 3
+
+
+@pytest.mark.asyncio
+async def test_catalog_no_result_triggers_stagnation(monkeypatch):
+    """list_tables 连续返回 unknown_database/no_schema_extracted 视为无进展。
+
+    LLM 换不同库名尝试 list_tables，每次返回 catalog 无数据状态
+    （不同参数所以不触发 dead_loop），应在 K 次后以 stagnation 停止。
+    """
+    from app.engine import agent_loop as al
+    monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 3)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 40)
+    monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
+
+    call_count = {"n": 0}
+
+    async def _catalog_no_result(**kw):
+        call_count["n"] += 1
+        # 奇偶交替两种失败状态，模拟 LLM 换库名重试
+        if call_count["n"] % 2 == 1:
+            return {"database": kw.get("database", "db"), "tables": [], "count": 0,
+                    "status": "unknown_database"}
+        return {"database": kw.get("database", "db"), "tables": [], "count": 0,
+                "status": "no_schema_extracted", "hint": "暂无表结构"}
+
+    responses = [
+        _tuc(calls=[ToolCall(id=f"c{i}", name="list_tables",
+                              input={"database": f"db_{i}"})], stop="tool_use")
+        for i in range(10)
+    ]
+    llm = FakeLLM(responses=responses)
+    events, emit = _sse_sink()
+
+    result = await run_agent_loop(
+        trace_id="t-catalog-no-result", question="q",
+        tools_registry={"list_tables": _catalog_no_result},
+        tool_specs=[], sse_emit=emit,
+        user_correction_queue=asyncio.Queue(),
+        llm=llm, system_prompt="",
+    )
+    assert result.stop_reason == "stagnation"
+    assert result.iterations == 3
+
+
+@pytest.mark.asyncio
+async def test_catalog_with_tables_not_stagnation(monkeypatch):
+    """list_tables 返回真实表（tables 非空）不被 stagnation 误杀。"""
+    from app.engine import agent_loop as al
+    monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 3)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 5)
+    monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
+
+    async def _catalog_ok(**kw):
+        return {"database": "shop", "tables": ["orders", "users"], "count": 2,
+                "status": "ok"}
+
+    responses = [
+        _tuc(calls=[ToolCall(id=f"c{i}", name="list_tables",
+                              input={"database": f"db_{i}"})], stop="tool_use")
+        for i in range(10)
+    ]
+    llm = FakeLLM(responses=responses)
+    events, emit = _sse_sink()
+
+    result = await run_agent_loop(
+        trace_id="t-catalog-ok", question="q",
+        tools_registry={"list_tables": _catalog_ok},
+        tool_specs=[], sse_emit=emit,
+        user_correction_queue=asyncio.Queue(),
+        llm=llm, system_prompt="",
+    )
+    assert result.stop_reason == "cost_exhausted"  # 有进展，不被误杀
