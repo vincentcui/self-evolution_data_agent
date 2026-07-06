@@ -16,8 +16,10 @@ import {
   InputNumber,
   Modal,
   Select,
+  Tooltip,
   message,
 } from "antd";
+import { CheckCircleFilled, CloseCircleFilled } from "@ant-design/icons";
 import * as api from "@/api";
 import type { DbType } from "@/types";
 import { DB_TYPE_META } from "@/types";
@@ -165,12 +167,35 @@ const DataSourceFormModal: React.FC<DataSourceFormModalProps> = ({
     <Modal
       title="添加数据源"
       open={open}
-      onOk={handleOk}
       onCancel={handleCancel}
-      okButtonProps={{ disabled: !canSubmit }}
-      okText="确定"
-      cancelText="取消"
       destroyOnHidden
+      footer={
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          {/* 左下: 测试连通性 + 结果图标 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button onClick={handleProbe} loading={probing} data-testid="probe-btn">
+              测试连通性
+            </Button>
+            {(probeState.status === "ok" || probeState.status === "need-tz") && (
+              <Tooltip title={probeState.status === "need-tz" ? "已连接，请选择时区" : "连接成功"}>
+                <CheckCircleFilled style={{ color: "#52c41a", fontSize: 18 }} data-testid="probe-ok" />
+              </Tooltip>
+            )}
+            {probeState.status === "fail" && (
+              <Tooltip title={probeState.reason}>
+                <CloseCircleFilled style={{ color: "#ff4d4f", fontSize: 18 }} data-testid="probe-fail" />
+              </Tooltip>
+            )}
+          </div>
+          {/* 右下: 取消 / 确定, 与测试连通性按钮平齐 */}
+          <div>
+            <Button onClick={handleCancel}>取消</Button>
+            <Button type="primary" onClick={handleOk} disabled={!canSubmit} style={{ marginLeft: 8 }}>
+              确定
+            </Button>
+          </div>
+        </div>
+      }
     >
       <Form
         form={form}
@@ -222,20 +247,6 @@ const DataSourceFormModal: React.FC<DataSourceFormModalProps> = ({
           <Input.TextArea rows={2} placeholder="例: 订单交易库 / 设备运维数据" />
         </Form.Item>
 
-        {/* 测试连通性按钮 */}
-        <Form.Item>
-          <Button
-            onClick={handleProbe}
-            loading={probing}
-            data-testid="probe-btn"
-          >
-            测试连通性
-          </Button>
-          {probeState.status === "ok" && (
-            <span style={{ marginLeft: 8, color: "green" }}>连接成功</span>
-          )}
-        </Form.Item>
-
         {/* 时区 combobox */}
         <Form.Item
           name="timezone"
@@ -254,15 +265,10 @@ const DataSourceFormModal: React.FC<DataSourceFormModalProps> = ({
           />
         </Form.Item>
 
-        {/* 错误/警告提示 */}
+        {/* need-tz 引导: 连通但测不出时区, 提示手动选择 */}
         {probeState.status === "need-tz" && !timezoneValue && (
           <div style={{ color: "red", marginBottom: 8 }}>
             必须选择时区
-          </div>
-        )}
-        {probeState.status === "fail" && (
-          <div style={{ color: "red", marginBottom: 8 }}>
-            {probeState.reason}
           </div>
         )}
       </Form>

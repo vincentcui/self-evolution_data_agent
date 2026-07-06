@@ -8,6 +8,7 @@ export interface Namespace {
   slug: string;
   description: string;
   created_at: string;
+  created_by: number | null;
 }
 
 /** 所有支持的数据库类型 — 全局唯一定义, 组件/API 通过此类型而非散落的 union */
@@ -124,6 +125,7 @@ export interface QueryResponse {
   row_count: number;
   chart_type: "line" | "bar" | "pie" | "card" | "table";
   category_column?: string;
+  value_column?: string;
   chart_option: Record<string, any>;
   performance_warning: string;
   /* §4.6 截断显式 (绝不静默): 渲染源撞 IS_RENDER_ROW_LIMIT 时透传 */

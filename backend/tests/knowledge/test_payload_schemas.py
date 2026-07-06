@@ -2,9 +2,13 @@
 import pytest
 from pydantic import ValidationError
 
+from app.config import settings
 from app.schemas.knowledge_payload import (
-    TerminologyPayload, ExamplePayload, RulePayload,
-    RouteHintPayload, parse_payload,
+    ExamplePayload,
+    RouteHintPayload,
+    RulePayload,
+    TerminologyPayload,
+    parse_payload,
 )
 
 
@@ -55,6 +59,20 @@ def test_example_payload_full():
         result_summary="在 orders 上按 status 字段 $group + $sum:1",
     )
     assert len(p.collections) == 1
+
+
+def test_example_result_summary_at_limit_ok():
+    """result_summary 恰好等于配置上限 → 通过 (边界 == 合法)."""
+    max_len = settings.example_result_summary_max_len
+    p = ExamplePayload(question_pattern="查询订单", result_summary="订" * max_len)
+    assert len(p.result_summary) == max_len
+
+
+def test_example_result_summary_over_limit_rejected():
+    """result_summary 超配置上限一字 → ValidationError (config 驱动硬上限)."""
+    max_len = settings.example_result_summary_max_len
+    with pytest.raises(ValidationError, match="result_summary 超过字数上限"):
+        ExamplePayload(question_pattern="查询订单", result_summary="订" * (max_len + 1))
 
 
 def test_example_payload_accepts_old_fields():

@@ -9,7 +9,8 @@
  * ════════════════════════════════════════════ */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, Spin } from "antd";
+import { useNavigate } from "react-router-dom";
+import { Button, Modal, Spin } from "antd";
 import NamespaceSelector from "@/components/NamespaceSelector";
 import ChatInput from "@/components/ChatInput";
 import { QueryStreamView } from "@/components/stream/QueryStreamView";
@@ -28,21 +29,51 @@ import styles from "@/styles/query.module.css";
 /** 距底阈值 — 小于这个距离就认为用户"还在底部", 可自动跟随. */
 const FOLLOW_THRESHOLD_PX = 64;
 
+/* readiness 覆盖层 — 仅显示一种, 优先级: 未选择 ns > 空间未创建 > 数据源未添加 > Schema 未采集 > API Key 未配置
+ * admin 显示操作按钮 (navigate 工作台子页), non-admin 显示"请联系管理员". 覆盖在 ChatInput 上替代黄色 Alert. */
+function resolveOverlayBlocker(
+  nsId: number | null,
+  namespaceCount: number,
+  blockers: { type: string }[],
+  isAdmin: boolean,
+): { desc: string; action?: string; target?: string } | null {
+  if (nsId == null && namespaceCount > 0) {
+    return { desc: "请先在顶部选择命名空间后开始问数" };
+  }
+  if (namespaceCount === 0) {
+    return isAdmin
+      ? { desc: "当前还没有可用的命名空间，创建命名空间后才可以开始问数", action: "点击去创建命名空间", target: "/workspace/namespaces" }
+      : { desc: "当前还没有可用的命名空间，请联系管理员配置后开始问数" };
+  }
+  if (!isAdmin) {
+    return blockers.length > 0
+      ? { desc: "当前空间还未完成初始化，请联系管理员配置后开始问数" }
+      : null;
+  }
+  const order = [
+    { type: "no_datasource", desc: "当前空间还未配置数据源，添加数据源后才可以开始问数", action: "点击去添加数据源", target: "/workspace/namespaces" },
+    { type: "no_schema", desc: "当前空间还未采集 Schema，采集 Schema 后才可以开始问数", action: "点击去采集 Schema", target: "/workspace/namespaces" },
+    { type: "no_api_key", desc: "当前空间还未配置 API Key，配置后才可以开始问数", action: "点击去配置 API Key", target: "/workspace/model-management" },
+  ];
+  for (const o of order) {
+    if (blockers.some((b) => b.type === o.type)) return o;
+  }
+  return null;
+}
+
 const QueryPage: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = roleAtLeast(user?.role, "admin");
-  const [nsRefreshKey, setNsRefreshKey] = useState(0);
+  const navigate = useNavigate();
   const [namespaceCount, setNamespaceCount] = useState(0);
   const refreshNsCount = () => {
     http.get("/namespaces").then((r) => setNamespaceCount(r.data.length)).catch(() => {});
   };
   useEffect(() => { refreshNsCount(); }, []);
-  const { activeSessionId, setActiveSessionId, createSession, renameSession, resetKey, setIsRunning, setRunningTraceId, currentNamespaceId, setCurrentNamespaceId, wsOpen, setWsOpen, wsPage, setWsPage, loading: sessionsLoading } = useSessionContext();
+  const { activeSessionId, setActiveSessionId, createSession, renameSession, resetKey, setIsRunning, setRunningTraceId, currentNamespaceId, setCurrentNamespaceId, loading: sessionsLoading } = useSessionContext();
   const nsId = currentNamespaceId;
   const setNsId = setCurrentNamespaceId;
-  const { ready, blockers, refresh: refreshReadiness } = useReadiness(nsId);
-  // 工作台关闭后刷新
-  useEffect(() => { if (!wsOpen) { refreshNsCount(); setNsRefreshKey((k) => k + 1); refreshReadiness(); } }, [wsOpen]);
+  const { ready, blockers } = useReadiness(nsId);
   const { state, start, stop, reset: resetAgent } = useAgentStream();
   // 按 session 缓存轮次：切换会话时恢复，新对话时保留
   const turnsBySession = useRef<Record<string, AgentStreamState[]>>({});
@@ -112,6 +143,7 @@ const QueryPage: React.FC = () => {
               chartType: snap.chart_type,
               chartOption: snap.chart_option,
               categoryColumn: snap.category_column,
+              valueColumn: snap.value_column,
               truncated: snap.truncated,
               renderedRowCount: snap.rendered_row_count,
               totalRowCount: snap.total_row_count,
@@ -335,7 +367,7 @@ const QueryPage: React.FC = () => {
   if (sessionsLoading && !activeSessionId) {
     return (
       <div className={`${styles.pageContainer} ${styles.pageIdle}`}>
-        <NamespaceSelector key={nsRefreshKey} value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
+        <NamespaceSelector value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
         <div className={styles.idleWrapper}>
           <Spin size="default" />
           <div style={{ color: "#999", fontSize: 13, marginTop: 12 }}>加载中…</div>
@@ -345,52 +377,37 @@ const QueryPage: React.FC = () => {
   }
 
 
-  const pageByBlocker: Record<string, string> = {
-    no_datasource: "namespaces", no_api_key: "model-management", no_schema: "namespaces",
-  };
-  const openWorkspace = (blockerType: string) => {
-    setWsPage(pageByBlocker[blockerType] || "namespaces");
-    setWsOpen(true);
-  };
+  /* readiness 覆盖层 — 纯函数计算 (非 hook), 可安全位于 early return 之后 */
+  const overlayBlocker = resolveOverlayBlocker(nsId, namespaceCount, blockers, isAdmin);
 
-  const blockingList: any[] = namespaceCount === 0
-    ? [{ type: "no_ns", message: "无可用的命名空间", admin_action: "去创建命名空间", user_action: "请联系管理员配置" }]
-    : nsId == null
-    ? [{ type: "no_select", message: "请先选择命名空间", admin_action: "", user_action: "" }]
-    : blockers;
-  const blockerAlert = blockingList.length > 0 && (
-    <div style={{ marginTop: 12, maxWidth: 600, textAlign: "left" }}>
-      {blockingList.map((b, i) => (
-        <Alert
-          key={b.type}
-          type="warning"
-          showIcon
-          banner
-          style={{ marginBottom: i < blockingList.length - 1 ? 4 : 0 }}
-          message={
-            <span>
-              {b.message}
-              {(b.admin_action || b.user_action) && <span style={{ marginLeft: 8 }}>
-                {isAdmin && b.admin_action
-                  ? <Button type="link" style={{ padding: 0, height: "auto", fontSize: 13 }} onClick={() => openWorkspace(b.type)}>{b.admin_action}</Button>
-                  : <span style={{ color: "#666", fontSize: 13 }}>{b.user_action}</span>}
-              </span>}
-            </span>
-          }
-        />
-      ))}
-    </div>
-  );
+  /* ChatInput + readiness 覆盖层 (idle 与 footer 两处共用) */
+  const renderChatInput = () => {
+    const b = overlayBlocker;
+    return (
+      <div style={{ position: "relative" }}>
+        <ChatInput onSend={handleSend} loading={inputDisabled} />
+        {b && (
+          <div className={styles.readyOverlay}>
+            <div className={styles.readyOverlayDesc}>{b.desc}</div>
+            {b.action && (
+              <Button type="primary" onClick={() => navigate(b.target!)}>
+                {b.action}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (isIdle) {
     return (
       <>
       <div className={`${styles.pageContainer} ${styles.pageIdle}`}>
-        <NamespaceSelector key={nsRefreshKey} value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
+        <NamespaceSelector value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
         <div className={styles.idleWrapper}>
           <div className={styles.logo}>NL2QL</div>
-          <ChatInput onSend={handleSend} loading={inputDisabled} />
-          {blockerAlert}
+          {renderChatInput()}
         </div>
       </div>
       </>
@@ -401,7 +418,7 @@ const QueryPage: React.FC = () => {
     <>
     <div className={styles.pageContainer}>
       <div className={styles.chatHeader}>
-        <NamespaceSelector key={nsRefreshKey} value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
+        <NamespaceSelector value={nsId ?? undefined} onChange={(id) => setNsId(id ?? null)} />
       </div>
       <div
         className={styles.chatScroll}
@@ -439,8 +456,7 @@ const QueryPage: React.FC = () => {
         )}
       </div>
       <div className={styles.chatFooter}>
-        <ChatInput onSend={handleSend} loading={inputDisabled} />
-        {blockerAlert}
+        {renderChatInput()}
       </div>
     </div>
     </>

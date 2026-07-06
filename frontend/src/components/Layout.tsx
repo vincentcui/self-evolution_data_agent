@@ -22,7 +22,6 @@ import { readLastNamespaceId, writeLastNamespaceId } from "@/hooks/useLastNamesp
 import { cancelStream } from "@/api/correction";
 import { getGlobalStop } from "@/hooks/useAgentStream";
 import SessionList from "@/components/SessionList";
-import WorkspaceModal from "@/components/WorkspaceModal";
 import AdminLayout from "@/components/AdminLayout";
 import UserLayout from "@/components/UserLayout";
 import styles from "@/styles/layout.module.css";
@@ -51,8 +50,6 @@ const Layout: React.FC = () => {
     loading: sessionsLoading, refresh,
   } = useSessions(nsId);
   const { ready } = useReadiness(nsId);
-  const [wsOpen, setWsOpen] = useState(false);
-  const [wsPage, setWsPage] = useState<string>("namespaces");
   const [hoverWorkspace, setHoverWorkspace] = useState(false);
   const [hoverNewChat, setHoverNewChat] = useState(false);
   const [resetKey, setResetKey] = useState(0);
@@ -86,7 +83,6 @@ const Layout: React.FC = () => {
     createSession, renameSession, deleteSession,
     loading: sessionsLoading, refresh,
     newChat, resetKey, isRunning, setIsRunning, runningTraceId, setRunningTraceId,
-    wsOpen, setWsOpen, wsPage, setWsPage,
     currentNamespaceId: nsId,
     setCurrentNamespaceId: (id: number | null) => { setNsId(id); if (id) writeLastNamespaceId(id); },
   };
@@ -96,7 +92,7 @@ const Layout: React.FC = () => {
   const isAdmin = roleAtLeast(user?.role, "admin");
 
   const ncColors = getButtonColors(!activeSessionId, hoverNewChat);
-  const wsColors = getButtonColors(wsOpen, hoverWorkspace);
+  const wsColors = getButtonColors(false, hoverWorkspace);
 
   /* Logo 区 — 仅 admin（user 在顶栏已有品牌区） */
   const sidebarLogo = (
@@ -122,10 +118,10 @@ const Layout: React.FC = () => {
         </Button>
       </div>
 
-      {/* P0: 工作台 (仅 admin) */}
+      {/* P0: 工作台 (仅 admin) — 路由跳转 /workspace/namespaces */}
       {isAdmin && (
         <div style={{ padding: "4px 12px" }}>
-          <Button block icon={<AppstoreOutlined />} onClick={() => setWsOpen(true)}
+          <Button block icon={<AppstoreOutlined />} onClick={() => navigate("/workspace/namespaces")}
             onMouseEnter={() => setHoverWorkspace(true)} onMouseLeave={() => setHoverWorkspace(false)}
             style={{ ...BUTTON_BASE_STYLE, ...wsColors }}>
             工作台
@@ -167,11 +163,6 @@ const Layout: React.FC = () => {
     </div>
   );
 
-  /* 工作台弹窗 — 作为 ReactNode 传入 AdminLayout */
-  const workspaceModalNode = (
-    <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} initialPage={wsPage} />
-  );
-
   if (!isAdmin) {
     return (
       <UserLayout
@@ -190,7 +181,6 @@ const Layout: React.FC = () => {
       sidebarLogo={sidebarLogo}
       sidebarSessionMgmt={sidebarSessionMgmt}
       sidebarUserArea={sidebarUserArea}
-      workspaceModal={workspaceModalNode}
       sessionCtx={sessionCtx}
     />
   );

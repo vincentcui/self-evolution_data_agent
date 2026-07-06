@@ -29,6 +29,34 @@
   flex-shrink: 0;
 }
 
+/* ── readiness 覆盖层 — 覆盖在 ChatInput 上, 替代黄色 Alert ──
+ * 贴合 inputBox 形状 (inputArea padding 16px 0), 仅显示一种阻塞提示 */
+.readyOverlay {
+  position: absolute;
+  top: 16px;
+  right: 0;
+  bottom: 16px;
+  left: 0;
+  background: #fff;
+  border: 1.5px solid #dbeafe;
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px 24px;
+  z-index: 10;
+}
+
+.readyOverlayDesc {
+  font-size: 14px;
+  color: #475569;
+  text-align: center;
+  line-height: 1.6;
+}
+
 /* ── 空状态居中布局 (参考 kimi.com) ── */
 .emptyState {
   flex: 1;

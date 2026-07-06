@@ -441,7 +441,7 @@ async def run_agent_loop(
                 recent_tool_calls.append((
                     tc.name,
                     _hash_input(tc.input),
-                    _progress_marker(res.get("output", {})),
+                    _progress_marker(res["output"]),
                 ))
                 # ── 更新 Error_Class 窗口 (R5.1-5.4, 修复 #1: status==ok 含 error 键也算错误) ──
                 error_window.record(

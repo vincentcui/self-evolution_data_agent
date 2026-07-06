@@ -323,6 +323,7 @@ async def query_stream(
                 final_data["chart_type"] = presented["chart_type"]
                 final_data["chart_option"] = presented["chart_option"]
                 final_data["category_column"] = presented["category_column"]
+                final_data["value_column"] = presented["value_column"]
                 final_data["truncated"] = presented["truncated"]  # §4.6 显式透传
                 final_data["rendered_row_count"] = presented["rendered_row_count"]
                 final_data["total_row_count"] = presented["total_row_count"]
@@ -337,6 +338,7 @@ async def query_stream(
                     final_data["chart_type"] = "table"
                 final_data.setdefault("chart_option", {})
                 final_data.setdefault("category_column", "")
+                final_data.setdefault("value_column", "")
                 final_data.setdefault("truncated", False)
                 final_data.setdefault("rendered_row_count", len(final_data.get("rows", [])))
                 final_data.setdefault("total_row_count", len(final_data.get("rows", [])))
@@ -419,7 +421,7 @@ def _extract_from_tool_trace(
 def _resolve_present_result(trace: list[dict]) -> dict | None:
     """找最后一个成功 present_result → 按 ref 反查目标执行的完整 rows → render_chart.
 
-    返回 {rows, columns, chart_type, chart_option, category_column,
+    返回 {rows, columns, chart_type, chart_option, category_column, value_column,
           truncated, rendered_row_count, total_row_count} 或 None (无 present_result).
     ref 失效时渲染端 fail-safe (render_chart 对空 rows 返回 table).
     truncated/total_row_count 取自目标执行 output (render mode 疑似截断时由 executor
@@ -459,6 +461,7 @@ def _resolve_present_result(trace: list[dict]) -> dict | None:
         "chart_type": chart_type,
         "chart_option": chart_option,
         "category_column": chart_spec.get("x", ""),  # 兼容旧前端字段
+        "value_column": chart_spec.get("value", ""),  # 切换图表类型时前端复用 LLM 选定的度量列
         "truncated": truncated,                       # §4.6 截断显式透传
         "rendered_row_count": len(rows),
         "total_row_count": total_row_count,           # 截断时为补 count 的精确总数
@@ -495,6 +498,7 @@ async def _write_query_history(
         chart_type_data = presented["chart_type"]
         chart_option_data = presented["chart_option"]
         category_column_data = presented["category_column"]
+        value_column_data = presented["value_column"]
         truncated_data = presented["truncated"]
         rendered_row_count_data = presented["rendered_row_count"]
         total_row_count_data = presented["total_row_count"]
@@ -507,6 +511,7 @@ async def _write_query_history(
         chart_type_data = "table"
         chart_option_data = {}
         category_column_data = ""
+        value_column_data = ""
         truncated_data = False
         rendered_row_count_data = len(rows_data)
         total_row_count_data = len(rows_data)
@@ -531,6 +536,7 @@ async def _write_query_history(
                 "row_count": row_count,
                 "chart_type": chart_type_data,
                 "category_column": category_column_data,
+                "value_column": value_column_data,
                 "chart_option": chart_option_data,
                 "truncated": truncated_data,
                 "rendered_row_count": rendered_row_count_data,

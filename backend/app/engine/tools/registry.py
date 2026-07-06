@@ -170,7 +170,7 @@ TOOL_SPECS: list[dict] = [
             "final_query_plan:{steps:[{db_type:数据库类型, database, "
             "collection:表名/集合名, operation:sql|aggregate|filter, "
             "query:{sql:SQL串 或 pipeline:[Mongo聚合阶段]}}]}, "
-            "result_summary?:≤120字结果形态}\n"
+            "result_summary?:一句话结果形态}\n"
             "- rule: {rule_text, applies_to_collections?:[]}\n"
             "- route_hint: {question_pattern, collection_path:[], reason?}\n"
             "输入示例: {\"entry_type\":\"example\", \"content\":\"按状态分组统计订单数\", "

@@ -299,6 +299,7 @@ const UserManagePage: React.FC = () => {
               <Form.Item
                 name="namespace_ids"
                 label="命名空间访问权限"
+                extra="勾选仅授予非创建者访问权; 标记「创建者」的空间属用户自有, 权限不可在此移除。"
               >
                 <Checkbox.Group
                   style={{
@@ -307,14 +308,22 @@ const UserManagePage: React.FC = () => {
                     gap: 8,
                   }}
                 >
-                  {namespaces.map((ns) => (
-                    <Checkbox key={ns.id} value={ns.id}>
-                      <span style={{ fontWeight: 500 }}>{ns.name}</span>
-                      <span style={{ color: "#64748b", fontSize: 12, marginLeft: 6 }}>
-                        ({ns.slug})
-                      </span>
-                    </Checkbox>
-                  ))}
+                  {namespaces.map((ns) => {
+                    const isOwner = ns.created_by != null && ns.created_by === activeUserId;
+                    return (
+                      <Checkbox key={ns.id} value={ns.id} disabled={isOwner}>
+                        <span style={{ fontWeight: 500 }}>{ns.name}</span>
+                        <span style={{ color: "#64748b", fontSize: 12, marginLeft: 6 }}>
+                          ({ns.slug})
+                        </span>
+                        {isOwner && (
+                          <Tag color="gold" style={{ marginLeft: 8, marginRight: 0 }}>
+                            创建者
+                          </Tag>
+                        )}
+                      </Checkbox>
+                    );
+                  })}
                 </Checkbox.Group>
               </Form.Item>
 

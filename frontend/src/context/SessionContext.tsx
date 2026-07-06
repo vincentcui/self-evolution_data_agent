@@ -22,10 +22,6 @@ export interface SessionContextValue {
   setIsRunning: (v: boolean) => void;
   runningTraceId: string | null;
   setRunningTraceId: (v: string | null) => void;
-  wsOpen: boolean;
-  setWsOpen: (v: boolean) => void;
-  wsPage: string;
-  setWsPage: (v: string) => void;
 }
 
 export const SessionContext = createContext<SessionContextValue | null>(null);

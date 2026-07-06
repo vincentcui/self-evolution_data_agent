@@ -33,7 +33,7 @@ tool_trace 摘要 (按时间序):
 单集合查询填 null.
 </task>
 
-<task id="3" name="result_summary">用一句 ≤120 字自然语言描述做了什么过滤/关联/聚合, 不做具体数值说明.
+<task id="3" name="result_summary">用一句自然语言描述做了什么过滤/关联/聚合, 不做具体数值说明.
 单集合 group/aggregate 用"按 X 字段分组统计 Y".
 单步 filter+sort 用"在 X 集合上按 Y 条件过滤, 按 Z 排序".
 举例: "在 orders 上按 status 分组, $sum 统计各状态数量"

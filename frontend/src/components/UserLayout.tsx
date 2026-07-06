@@ -35,7 +35,7 @@ const UserLayout: React.FC<Props> = ({
       {sidebarSessionMgmt}
     </aside>
 
-    <div className={styles.fullScreen} style={{ marginLeft: 200 }}>
+    <div className={styles.fullScreen} style={{ marginLeft: 267 }}>
       <div className={styles.topBar}>
         <div />
         <div className={styles.userMenu}>

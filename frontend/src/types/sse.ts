@@ -66,6 +66,7 @@ export type AgentSSEEvent =
         chart_type?: string;
         chart_option?: Record<string, unknown>;
         category_column?: string;
+        value_column?: string;
         truncated?: boolean;
         rendered_row_count?: number;
         total_row_count?: number;

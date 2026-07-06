@@ -81,6 +81,15 @@ class ExamplePayload(BaseModel):
     final_query_plan: dict | None = None
     result_summary: str = ""
 
+    # Phase 2 P2.T13: NL paraphrases 索引升级 — 向后兼容
+    nl_paraphrases: list[str] = []
+    dynamic_variants: list[dict] = []
+    extraction_source: Literal["qmql_history", "mybatis_extract"] = "qmql_history"
+    source_mapper: str | None = None
+    source_method: str | None = None
+    source_repo_id: int | None = None
+    explain_verified: bool = False
+
     @field_validator("result_summary")
     @classmethod
     def _result_summary_len_check(cls, v: str) -> str:

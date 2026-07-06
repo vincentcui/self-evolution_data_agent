@@ -28,6 +28,7 @@ interface Props {
   chartType?: string;
   chartOption?: Record<string, unknown>;
   categoryColumn?: string;
+  valueColumn?: string;
   truncated?: boolean;
   renderedRowCount?: number;
   totalRowCount?: number;
@@ -55,7 +56,7 @@ export const STOP_REASON_HINT: Record<string, string> = {
 };
 
 export const FinalResult: React.FC<Props> = ({
-  content, rows, columns, chartType, chartOption, categoryColumn,
+  content, rows, columns, chartType, chartOption, categoryColumn, valueColumn,
   truncated, renderedRowCount, totalRowCount, historyId, stopReason,
 }) => {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export const FinalResult: React.FC<Props> = ({
         row_count: rows?.length ?? 0,
         chart_type: (chartType ?? "table") as QueryResponse["chart_type"],
         category_column: categoryColumn ?? "",
+        value_column: valueColumn ?? "",
         chart_option: chartOption ?? {},
         performance_warning: "",
         truncated: truncated ?? false,

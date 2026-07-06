@@ -3,8 +3,8 @@
  * ════════════════════════════════════════════ */
 
 .sidebar {
-  width: 200px;
-  min-width: 200px;
+  width: 267px;
+  min-width: 267px;
   background: #ffffff;
   border-right: 1px solid #e0e7ff;
   display: flex;
@@ -107,7 +107,7 @@
 }
 
 .mainContent {
-  margin-left: 200px;
+  margin-left: 267px;
   flex: 1;
   background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
   min-height: 100vh;

@@ -20,14 +20,16 @@ interface Props {
  * 从 rows (二维数组) + columns 自动构建 ECharts option
  * 规则:
  *   - categoryColumn 指定的列作为 category (x 轴 / 饼图 name)
- *   - 未指定时 fallback 到第一个非数值列, 再 fallback 到第一列
- *   - 其余数值列作为 series
+ *   - valueColumn 指定的列作为度量 (优先复用 LLM 在 chart_spec 选定的 value)
+ *   - 两者未指定时 fallback 到启发式: 第一个非数值列为 category, 其余数值列为 series
+ *   - id 类数值列 (user_id / _id 等) 仅作启发式 fallback 时排除, valueColumn 显式给定则尊重
  */
 function buildAutoOption(
   type: string,
   rows: any[][],
   columns: string[],
   categoryColumn?: string,
+  valueColumn?: string,
 ): Record<string, any> {
   if (!rows.length || !columns.length) return {};
 
@@ -47,6 +49,10 @@ function buildAutoOption(
 
   const categories = rows.map((r) => String(r[catIdx] ?? ""));
 
+  // 标识符列 (user_id / _id / doc_id …) — 数值型但语义是维度不是度量
+  const isIdColumn = (name: string) =>
+    /(^|_)(id|uid|uuid)(_|\b|$)|^_id$/i.test(name);
+
   // 找数值列 (排除 category 列)
   const numericCols: number[] = [];
   for (let i = 0; i < columns.length; i++) {
@@ -61,16 +67,26 @@ function buildAutoOption(
     numericCols.push(fallback);
   }
 
-  if (type === "pie") {
-    // 优先选列名含 count/sum/total/amount 的列作为 value
+  // value 列: 优先 LLM 选定的 valueColumn, 否则启发式 (排除 id 类列)
+  let valueIdx = -1;
+  if (valueColumn) {
+    const idx = columns.indexOf(valueColumn);
+    if (idx >= 0) valueIdx = idx;
+  }
+  if (valueIdx < 0) {
     const valueKeywords = ["count", "sum", "total", "amount"];
-    let valueIdx = numericCols[0] ?? (catIdx === 0 ? 1 : 0);
-    if (numericCols.length > 1) {
-      const preferred = numericCols.find((i) =>
+    const candidates = numericCols.filter((i) => !isIdColumn(columns[i]));
+    const pool = candidates.length > 0 ? candidates : numericCols;
+    valueIdx = pool[0] ?? (catIdx === 0 ? 1 : 0);
+    if (pool.length > 1) {
+      const preferred = pool.find((i) =>
         valueKeywords.some((kw) => columns[i].toLowerCase().includes(kw)),
       );
       if (preferred !== undefined) valueIdx = preferred;
     }
+  }
+
+  if (type === "pie") {
     const data = rows.map((r) => ({
       name: String(r[catIdx] ?? ""),
       value: Number(r[valueIdx] ?? 0),
@@ -89,8 +105,10 @@ function buildAutoOption(
     };
   }
 
-  // line / bar 共用逻辑
-  const series = numericCols.map((colIdx) => ({
+  // line / bar: 有显式 valueColumn 时只画该列, 避免标识符列污染 y 轴尺度;
+  // 否则保持原行为 (所有数值列各一条 series) 兼容多 series 场景
+  const seriesCols = valueColumn && valueIdx >= 0 ? [valueIdx] : numericCols;
+  const series = seriesCols.map((colIdx) => ({
     name: columns[colIdx],
     type,
     data: rows.map((r) => Number(r[colIdx] ?? 0)),
@@ -98,7 +116,7 @@ function buildAutoOption(
 
   return {
     tooltip: { trigger: "axis" },
-    legend: { data: numericCols.map((i) => columns[i]) },
+    legend: { data: seriesCols.map((i) => columns[i]) },
     xAxis: {
       type: "category",
       data: categories,
@@ -108,6 +126,8 @@ function buildAutoOption(
     series,
   };
 }
+
+export { buildAutoOption };
 
 const ChartRenderer: React.FC<Props> = ({ result, chartType }) => {
   const type = chartType || result.chart_type;
@@ -146,7 +166,7 @@ const ChartRenderer: React.FC<Props> = ({ result, chartType }) => {
   const hasOption = !userSwitched && option && Object.keys(option).length > 0;
   const finalOption = hasOption
     ? option
-    : buildAutoOption(type, rows, result.columns, result.category_column);
+    : buildAutoOption(type, rows, result.columns, result.category_column, result.value_column);
 
   if (!finalOption || Object.keys(finalOption).length === 0) {
     return <DataTable columns={result.columns} rows={rows} />;
