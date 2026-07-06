@@ -6,16 +6,16 @@
   Property 5: Bug Condition — 存量迁移幂等回填
 ═══════════════════════════════════════════════════════════════════════════════
 
-  对任意历史术语 KE (`entry_type="terminology" AND source="git"` 带 repo_id 值),
+  对任意历史术语 KE (`entry_type="terminology" AND source="code_extract"` 带 repo_id 值),
   迁移后 SHALL 满足:
       source == "schema"  AND  repo_id IS NULL
-  对应术语冲突 (`candidate_source="git"` 的 TerminologyConflict):
+  对应术语冲突 (`candidate_source="code_extract"` 的 TerminologyConflict):
       candidate_source == "schema"  AND  candidate_repo_id IS NULL
   迁移重复运行 SHALL 不改变已迁移条目 (幂等, 二次命中 0 行);
   非 git / 非术语条目 SHALL NOT 受影响.
 
   **CRITICAL**: 本测试在未修复代码上 *预期 FAIL* —— 失败即确认 bug 存在.
-  存量 `source="git"` 的术语 KE 与 `candidate_source="git"` 的冲突当前 **无任何
+  存量 `source="code_extract"` 的术语 KE 与 `candidate_source="code_extract"` 的冲突当前 **无任何
   迁移路径回填**: `app.db.schema_migrations` 中不存在
   `_migrate_terminology_source_to_schema` 函数 (待 task 9.8 新增 migration_019).
 
@@ -69,7 +69,7 @@ def _resolve_migration_fn():
     fn = getattr(schema_migrations, _MIGRATION_FN_NAME, None)
     assert fn is not None, (
         f"迁移函数 schema_migrations.{_MIGRATION_FN_NAME} 不存在 —— 存量 "
-        "source='git' 的术语 KE / candidate_source='git' 的冲突无迁移路径回填, "
+        "source='code_extract' 的术语 KE / candidate_source='code_extract' 的冲突无迁移路径回填, "
         "新清场逻辑 (按 source='schema') 永远清不掉这些存量孤儿条目. "
         "(待 task 9.8 新增 migration_019)"
     )
@@ -136,7 +136,7 @@ async def _seed_entries(
             ke = KnowledgeEntry(
                 namespace_id=ns_id, entry_type="terminology", status="proposed",
                 tier="normal", content=f"git术语{i}", payload="{}",
-                source="git", repo_id=repo_id,
+                source="code_extract", repo_id=repo_id,
             )
         elif kind == "schema_term":
             ke = KnowledgeEntry(
@@ -154,7 +154,7 @@ async def _seed_entries(
             ke = KnowledgeEntry(
                 namespace_id=ns_id, entry_type="example", status="proposed",
                 tier="normal", content=f"git示例{i}", payload="{}",
-                source="git", repo_id=repo_id,
+                source="code_extract", repo_id=repo_id,
             )
         db.add(ke)
         await db.flush()
@@ -178,7 +178,7 @@ async def _seed_entries(
     for _ in range(n_git_conf):
         c = TerminologyConflict(
             namespace_id=ns_id, existing_entry_id=anchor.id,
-            candidate_payload="{}", candidate_source="git",
+            candidate_payload="{}", candidate_source="code_extract",
             candidate_repo_id=repo_id, status="open",
         )
         db.add(c)

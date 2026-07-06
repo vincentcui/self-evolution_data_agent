@@ -42,6 +42,7 @@ from app.models import (
 )
 from app.models.user import User
 from app.schemas import (
+    BatchStatus,
     ConflictItemOut,
     EditCanonicalBody,
     EditCanonicalOut,
@@ -185,6 +186,7 @@ async def create_knowledge(
         source="manual",
         # Stage 1: 手工录入默认 proposed (待人审进 RAG); 走 PATCH status=canonical 通过审核
         status="proposed",
+        payload=json.dumps(body.payload, ensure_ascii=False) if body.payload else None,
         refined_at=datetime.now(),
     )
     db.add(entry)
@@ -641,9 +643,17 @@ async def list_repos(
         )
         log.info("[repos-poll] ns=%d active=%d [%s]", ns_id, len(active), summary)
 
+    # ── 全量清场窗口: worker 尚未落库 worker_id, 靠 batch_status 暴露中间态,
+    #    驱动前端轮询启动 + 横幅提示, worker 起来后 worker_id 接管 (见 batch_parse_repos) ──
+    from app.engine.repo_worker import is_rebuilding
+
+    batch_status = None
+    if is_rebuilding(ns_id):
+        batch_status = BatchStatus(active=True, progress="", message="清场中，准备重新解析…")
+
     return RepoListResponse(
         repos=[GitRepoOut.model_validate(o) for o in out],
-        batch_status=None,
+        batch_status=batch_status,
     )
 
 
@@ -800,38 +810,47 @@ async def batch_parse_repos(
     #  Stage 2 Task 3: KE 部分走 BulkOpGuard (audit + 人类编辑兜底)
     #
     #  异步执行: 清场可能耗时 >60s (BulkOpGuard 逐条 ChromaDB 删除),
-    #  放到后台 task 避免 HTTP 超时. 前端 2s 轮询自动感知 worker 启动.
+    #  放到后台 task 避免 HTTP 超时.
+    #
+    #  可见性: 清场阶段 repo.worker_id 仍为空, 靠 worker_id 无法感知.
+    #  故同步标记 _rebuilding_namespaces (在 create_task 之前), list_repos
+    #  据此回填 batch_status.active, 前端轮询立即启动, worker 起来后无缝接管.
     # ═══════════════════════════════════════════
     if force:
+        from app.engine.repo_worker import clear_rebuilding, mark_rebuilding
+
         repo_ids = [r.id for r in repos]
 
         async def _force_rebuild_task():
             """后台: 清场 → 启动 workers (串行化, 避免 SQLite 并发锁)"""
             from app.db.metadata import async_session as _async_session
+            started_any = False
             try:
                 async with _async_session() as clean_db:
-                    ke_report = await _clean_namespace_knowledge_entries(
-                        clean_db, ns_id, ns.slug, actor_id=admin.id,
-                    )
                     mongo_stats = await _clean_namespace_mongo_canonical(clean_db, ns_id)
                     log.info(
-                        "[batch-parse] 全量清理完成 ns=%s ke_deleted=%d "
-                        "ke_preserved=%d audit_id=%s mongo=%s",
-                        ns.slug, ke_report.affected_count,
-                        ke_report.preserved_audited_count,
-                        ke_report.audit_log_id, mongo_stats,
+                        "[batch-parse] 全量清理完成 ns=%s mongo=%s",
+                        ns.slug, mongo_stats,
                     )
+                for rid in repo_ids:
+                    try:
+                        await start_parse_worker(rid, ns_id)
+                        started_any = True
+                    except Exception as e:
+                        log.error("[batch-parse] worker 启动失败 repo_id=%d: %s", rid, e)
             except Exception as e:
                 log.error("[batch-parse] 全量清理异常 ns=%s: %s", ns.slug, e, exc_info=True)
-                return
+            finally:
+                # 清理所有权: 成功派发的 worker 各自在落库 worker_id 后 clear_rebuilding,
+                # 由 worker_id 无缝接管可见性 — 此处「不能」抢在 worker 落库前清, 否则制造
+                # 「标记已清 + worker_id 未落库」的盲窗, race 复发.
+                # 仅当一个 worker 都没起来 (清场异常 / 全部启动失败) 时兜底清标记,
+                # 防 batch_status 永久卡在 active.
+                if not started_any:
+                    clear_rebuilding(ns_id)
 
-            for rid in repo_ids:
-                try:
-                    await start_parse_worker(rid, ns_id)
-                except Exception as e:
-                    log.error("[batch-parse] worker 启动失败 repo_id=%d: %s", rid, e)
-
-        import asyncio
+        # ── 同步标记必须先于 create_task: 保证 HTTP 响应返回时标记已就位 ──
+        mark_rebuilding(ns_id)
         asyncio.create_task(_force_rebuild_task())
 
         return {
@@ -977,70 +996,6 @@ async def get_parse_report(
     if not repo.parse_report:
         raise HTTPException(404, "暂无解析报告")
     return ParseReportOut(**json.loads(repo.parse_report))
-
-
-@router.get("/api/namespaces/{ns_id}/git-ke-summary")
-async def get_git_ke_summary(
-    ns_id: int,
-    _user: User = Depends(require_ns_manage),
-    db: AsyncSession = Depends(get_db),
-):
-    """返回该 ns 下所有 git repo 的 source=git KE 统计 (供前端全量解析 banner)."""
-    from sqlalchemy import func
-    total = (await db.execute(
-        select(func.count(KnowledgeEntry.id)).where(
-            KnowledgeEntry.namespace_id == ns_id,
-            KnowledgeEntry.source == "git",
-        )
-    )).scalar_one()
-    canonical = (await db.execute(
-        select(func.count(KnowledgeEntry.id)).where(
-            KnowledgeEntry.namespace_id == ns_id,
-            KnowledgeEntry.source == "git",
-            KnowledgeEntry.status == "canonical",
-        )
-    )).scalar_one()
-    return {"total": total, "canonical": canonical}
-
-
-
-# ════════════════════════════════════════════
-#  全量清理 — 命名空间知识库从零重建的前置操作
-# ════════════════════════════════════════════
-
-async def _clean_namespace_knowledge_entries(
-    db: AsyncSession, ns_id: int, ns_slug: str, actor_id: int | None,
-):
-    """步骤 2: 通过 BulkOperationGuard 清 KnowledgeEntry (走宪章 6 条)
-
-    scope_filter:
-        - source ∈ {git, self_answer, clarify}
-                                        — Stage 1 §1.4: +clarify 修复隐藏缺口
-        - namespace_id = ns_id           — 必须显式隔离, BulkOpGuard 不会自动按命名空间隔离
-        - entry_type 维度移除            — 这三个 source 写的所有
-                                           entry_type 都该清.
-
-    宪章 §3 兜底:
-        audit_log 中 actor_id != NULL ∧ action ∈ {approve, edit} 的人类编辑过条目永不批删.
-    宪章 §4 / §6:
-        真删自动写 audit_log + best-effort 同步 ChromaDB.
-
-    返回:
-        BulkOpReport (含 affected_count / preserved_audited_count / audit_log_id)
-    """
-    from app.knowledge.bulk_guard import BulkOperationGuard
-
-    guard = BulkOperationGuard(
-        op_name="git_reparse_clean_namespace",
-        scope_filter={
-            "source": ["git", "self_answer", "clarify"],
-            "namespace_id": ns_id,
-        },
-        dry_run=False,
-        actor_id=actor_id,
-        reason=f"force-reparse namespace_id={ns_id}",
-    )
-    return await guard.execute(db, slug=ns_slug)
 
 
 async def _clean_namespace_mongo_canonical(db: AsyncSession, ns_id: int) -> dict:

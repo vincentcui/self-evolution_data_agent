@@ -45,7 +45,7 @@ async def test_expired_proposed_marked_rejected_with_audit(db_session):
     stale = KnowledgeEntry(
         entry_type="rule",
         content="超期 proposed",
-        source="conversation",
+        source="manual",
         status="proposed",
         created_at=datetime.now() - timedelta(days=31),
     )

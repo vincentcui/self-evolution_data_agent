@@ -22,6 +22,14 @@ KnowledgeStatus = Literal["proposed", "canonical", "superseded", "rejected"]
 """
 
 
+KnowledgeSource = Literal["manual", "agent_learn", "schema", "code_extract"]
+"""knowledge_entries.source 渠道维度类型别名.
+
+写入路径 (extraction_writer / terminology_refresher / knowledge API / knowledge_tools)
+优先用此 Literal, 让 type checker 在编译期捕获拼写错误.
+"""
+
+
 class KnowledgeEntry(Base):
     __tablename__ = "knowledge_entries"
 
@@ -49,10 +57,7 @@ class KnowledgeEntry(Base):
 
     # ── 来源追溯 ────────────────────────────────────────
     source: Mapped[str] = mapped_column(String(20), default="manual")
-    """∈ {schema, manual, agent_learn, conversation, git, migration}
-
-    (self_answer: legacy, 不再产生新数据)
-    """
+    """∈ {manual, agent_learn, schema, code_extract} — 见 KnowledgeSource Literal"""
 
     raw_input: Mapped[str] = mapped_column(Text, default="")
     description: Mapped[str] = mapped_column(Text, default="")

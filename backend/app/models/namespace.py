@@ -40,7 +40,7 @@ class DataSource(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     namespace_id: Mapped[int] = mapped_column(ForeignKey("namespaces.id", ondelete="CASCADE"))
-    db_type: Mapped[str] = mapped_column(String(20))  # mysql | mongodb
+    db_type: Mapped[str] = mapped_column(String(20))  # mysql | oracle | mongodb
     host: Mapped[str] = mapped_column(String(255))
     port: Mapped[int]
     database: Mapped[str] = mapped_column(String(100))
@@ -48,6 +48,7 @@ class DataSource(Base):
     password: Mapped[str] = mapped_column(EncryptedString)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     db_profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=LOCAL_NOW, default=local_now,
     )

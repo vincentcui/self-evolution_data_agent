@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SchemaCanonicalObject
+from app.models.base import local_now
 
 log = logging.getLogger(__name__)
 
@@ -211,6 +212,23 @@ async def refresh_driver_canonicals(
                 repo_name, db_type.upper(), ds.id, e,
             )
 
+    # ── FK writer: 每 ds 查外键 → relationship candidate ──
+    from app.knowledge.canonical_relationship_writer import (
+        write_relationship_candidates_from_foreign_keys,
+    )
+    for ds in ds_rows:
+        try:
+            driver = get_driver(db_type)
+            fks = await driver.fetch_foreign_keys(ds, target=None)
+            if fks:
+                await write_relationship_candidates_from_foreign_keys(
+                    db, namespace_id=namespace_id, datasource=ds,
+                    foreign_keys=fks, ds_id=ds.id,
+                    referenced_targets=referenced_targets,
+                )
+        except Exception as e:
+            log.warning("[%s] fetch FK failed ds=%d: %s", repo_name, ds.id, e)
+
     # 写完所有 candidate 后触发 promote (仅 trigger_promote=True)
     if table_count > 0 and trigger_promote:
         await promote_candidates_to_canonical(db, namespace_id)
@@ -220,6 +238,7 @@ async def refresh_driver_canonicals(
         await backfill_indexes_from_driver(
             db, namespace_id, db_type=db_type, database=backfill_database,
         )
+        await cleanup_stale_fk_relationships(db, namespace_id)
 
     log.info(
         "[%s] refreshed %d %s tables (via candidate) for ns=%d",
@@ -314,6 +333,8 @@ async def backfill_indexes_from_driver(
 
     updated = 0
     for sco in scos:
+        if sco.user_locked:
+            continue
         ds = await _get_ds(sco.db_type, sco.database)
         if ds is None:
             continue
@@ -355,7 +376,7 @@ async def backfill_indexes_from_driver(
             if changed:
                 sco.fields_json = json.dumps(fields, ensure_ascii=False)
 
-            sco.updated_at = datetime.now()
+            sco.updated_at = local_now()
             updated += 1
 
         except Exception as e:
@@ -372,3 +393,83 @@ async def backfill_indexes_from_driver(
         namespace_id, updated, len(scos),
     )
     return updated
+
+
+async def cleanup_stale_fk_relationships(
+    db: AsyncSession, namespace_id: int,
+) -> int:
+    """清理已删 FK 对应的 relationship 条目.
+
+    仅清理 sources 含 "introspect_fk" 且 from_field 不在当前 FK 集合的条目.
+    降级安全: FK 查询失败的 ds 其 SCO 全部跳过 (不当作 "FK 全删").
+    幂等: 可重复调用.
+    """
+    import json
+
+    from app.engine.drivers import get_driver
+    from app.models import DataSource, SchemaCanonicalCandidate
+
+    ds_rows = list((await db.execute(
+        select(DataSource).where(DataSource.namespace_id == namespace_id),
+    )).scalars().all())
+
+    # per-ds FK 集合
+    fk_by_target: dict[tuple[str, str], dict[str, set[str]]] = {}
+    degraded_ds: set[tuple[str, str]] = set()
+
+    for ds in ds_rows:
+        try:
+            fks = await get_driver(ds.db_type).fetch_foreign_keys(ds, None)
+            m: dict[str, set[str]] = {}
+            for fk in fks:
+                m.setdefault(fk["from_target"], set()).add(fk["from_field"])
+            fk_by_target[(ds.db_type, ds.database)] = m
+        except Exception:
+            degraded_ds.add((ds.db_type, ds.database))
+            continue
+
+    scos = await list_schema_canonicals(db, namespace_id)
+    removed = 0
+
+    # 预取 ns 下全部 active confirmed_by_code relationship candidate → (target, field_path) 集合
+    # 避免逐条关系查库 (N+1)
+    protected_rows = (await db.execute(
+        select(
+            SchemaCanonicalCandidate.target,
+            SchemaCanonicalCandidate.field_path,
+        ).where(
+            SchemaCanonicalCandidate.namespace_id == namespace_id,
+            SchemaCanonicalCandidate.candidate_kind == "relationship",
+            SchemaCanonicalCandidate.status == "active",
+            SchemaCanonicalCandidate.confidence_status == "confirmed_by_code",
+        ),
+    )).all()
+    protected: set[tuple[str, str]] = {(t, f) for t, f in protected_rows}
+
+    for sco in scos:
+        if (sco.db_type, sco.database) in degraded_ds:
+            continue
+        current = fk_by_target.get(
+            (sco.db_type, sco.database), {},
+        ).get(sco.target, set())
+        rels = json.loads(sco.relationships_json or "[]")
+        cleaned = []
+
+        for r in rels:
+            if "introspect_fk" not in r.get("sources", []):
+                cleaned.append(r)
+                continue
+            if r.get("from_field") in current:
+                cleaned.append(r)
+                continue
+            # 有 active confirmed_by_code 的 candidate 保护则不清
+            if (sco.target, r.get("from_field")) in protected:
+                cleaned.append(r)
+
+        if len(cleaned) != len(rels):
+            sco.relationships_json = json.dumps(cleaned, ensure_ascii=False)
+            removed += 1
+
+    if removed:
+        await db.flush()
+    return removed

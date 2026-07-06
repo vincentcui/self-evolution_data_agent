@@ -65,25 +65,21 @@ class TerminologyPayload(BaseModel):
 
 
 class ExamplePayload(BaseModel):
-    """Q-MQL 历史成功对. Stage 5 后台从 query_history 提取."""
-    model_config = ConfigDict(extra="forbid")
+    """统一 example payload — agent_learn + code_extract + trace_refiner 共用.
 
-    question: str
-    target_collection: str
-    target_database: str | None = None
-    query_json: dict
+    question_pattern: 语义骨架, ChromaDB 索引入口.
+    collections:      有序 db.collection 链 ["shop.orders", "shop.users"].
+    join_keys:        跨表连接键 [{"from": "orders.user_id", "to": "users.id"}].
+    final_query_plan: 统一查询计划 (db_type 多态内化在 step.query 中).
+    result_summary:   自然语言描述 filter+join+aggregate 模式.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    question_pattern: str
+    collections: list[str] = []
+    join_keys: list[dict] = []
+    final_query_plan: dict | None = None
     result_summary: str = ""
-    source_query_history_id: int | None = None
-    schema_hash: str | None = None
-
-    # Phase 2 P2.T13: NL paraphrases 索引升级 — 向后兼容
-    nl_paraphrases: list[str] = []
-    dynamic_variants: list[dict] = []
-    extraction_source: Literal["qmql_history", "mybatis_extract"] = "qmql_history"
-    source_mapper: str | None = None
-    source_method: str | None = None
-    source_repo_id: int | None = None
-    explain_verified: bool = False
 
 
 class RulePayload(BaseModel):

@@ -202,7 +202,7 @@ async def test_delete_schema_terminology_returns_rows_for_vector_cleanup(
 
         schema_term = _mk_term(ns.id, source="schema", content="schema术语")
         # 不应命中: git 术语 (per-repo 清场负责)
-        git_term = _mk_term(ns.id, source="git", content="git术语", repo_id=None)
+        git_term = _mk_term(ns.id, source="code_extract", content="git术语", repo_id=None)
         # 不应命中: schema 非术语
         schema_nonterm = KnowledgeEntry(
             namespace_id=ns.id, entry_type="example", status="proposed",

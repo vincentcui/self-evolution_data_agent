@@ -1,9 +1,9 @@
-"""G9: rejected git KE 被 purge 清后, 同 anchor 重生走 _create_proposed.
+"""G9: rejected code_extract KE 被 purge 清后, 同 anchor 重生走 _create_proposed.
 
 spec 2026-05-21-git-source-full-purge 声明:
-    清场后该 ns 内 source='git' ∧ repo_id=R 的 rejected KE 全删.
+    清场后该 ns 内 source='code_extract' ∧ repo_id=R 的 rejected KE 全删.
     下一轮 LLM 抽到同 anchor 同 term 时, _find_active_duplicate 无命中,
-    走 _create_proposed 分支写新 KE(status='proposed') + audit_log(action='auto_generate').
+    走 _create_proposed 分支写新 KE(status='proposed') + audit_log(action='propose').
 
     这是既有逻辑天然成立, 不需要新代码. 仅做回归保护.
 """
@@ -23,10 +23,10 @@ from app.models.terminology_conflict import TerminologyConflict
 
 
 @pytest.mark.asyncio
-async def test_rejected_git_regenerates_as_proposed_after_purge(
+async def test_rejected_code_extract_regenerates_as_proposed_after_purge(
     async_session, chroma_isolated,
 ):
-    """purge 清掉 rejected git KE 后, 同 anchor 重抽 → _create_proposed."""
+    """purge 清掉 rejected code_extract KE 后, 同 anchor 重抽 → _create_proposed."""
     async with async_session() as db:
         ns = Namespace(name="g9", slug="g9", description="")
         db.add(ns)
@@ -43,7 +43,7 @@ async def test_rejected_git_regenerates_as_proposed_after_purge(
         await db.commit()
         await db.refresh(repo)
 
-        # 种 1 条 rejected git terminology
+        # 种 1 条 rejected code_extract terminology
         payload = {
             "term": "订单", "synonyms": ["order"],
             "primary_collection": "c_orders", "primary_database": "db_g9",
@@ -51,7 +51,7 @@ async def test_rejected_git_regenerates_as_proposed_after_purge(
         }
         rejected_ke = KnowledgeEntry(
             namespace_id=ns.id, entry_type="terminology",
-            source="git", status="rejected", is_superseded=False,
+            source="code_extract", status="rejected", is_superseded=False,
             payload=json.dumps(payload, ensure_ascii=False),
             content="订单", raw_input="", evidence_json="{}",
             repo_id=repo.id,
@@ -68,28 +68,28 @@ async def test_rejected_git_regenerates_as_proposed_after_purge(
         # 重新走闸门 (模拟下一轮 LLM 抽到同 term)
         result = await upsert_terminology_with_validation(
             db, ns_id=ns.id, payload_dict=payload,
-            source="git", repo_id=repo.id,
+            source="code_extract", repo_id=repo.id,
         )
         await db.commit()
 
         assert result is not None
         assert result.status == "proposed", f"应入 proposed, got {result.status}"
-        assert result.source == "git"
-        # 验 audit_log 写 auto_generate
+        assert result.source == "code_extract"
+        # 验 audit_log 写 propose
         log_row = (await db.execute(
             select(KnowledgeAuditLog).where(
                 KnowledgeAuditLog.entry_id == result.id,
-                KnowledgeAuditLog.action == "auto_generate",
+                KnowledgeAuditLog.action == "propose",
             )
         )).scalar_one_or_none()
-        assert log_row is not None, "应有 auto_generate audit log"
+        assert log_row is not None, "应有 propose audit log"
 
 
 @pytest.mark.asyncio
-async def test_rejected_purge_then_regeneration_routes_to_conflict_when_non_git_canonical_exists(
+async def test_rejected_purge_then_regeneration_routes_to_conflict_when_non_code_extract_canonical_exists(
     async_session, chroma_isolated,
 ):
-    """G9 负面路径: purge 后, 若同 anchor 已存在非 git canonical, 重生走 conflict."""
+    """G9 负面路径: purge 后, 若同 anchor 已存在非 code_extract canonical, 重生走 conflict."""
     async with async_session() as db:
         ns = Namespace(name="g9b", slug="g9b", description="")
         db.add(ns)
@@ -112,10 +112,10 @@ async def test_rejected_purge_then_regeneration_routes_to_conflict_when_non_git_
             "db_type": "mongodb", "source_collections": ["c_orders"],
         }
 
-        # 种 rejected git KE (将被 purge 删)
+        # 种 rejected code_extract KE (将被 purge 删)
         rejected_ke = KnowledgeEntry(
             namespace_id=ns.id, entry_type="terminology",
-            source="git", status="rejected", is_superseded=False,
+            source="code_extract", status="rejected", is_superseded=False,
             payload=json.dumps(payload, ensure_ascii=False),
             content="订单", raw_input="", evidence_json="{}",
             repo_id=repo.id,
@@ -137,7 +137,7 @@ async def test_rejected_purge_then_regeneration_routes_to_conflict_when_non_git_
         await db.refresh(manual_canonical)
         manual_id = manual_canonical.id
 
-        # purge: 只动 git, manual canonical 保留
+        # purge: 只动 code_extract, manual canonical 保留
         await purge_legacy_for_full_rebuild(db, repo.id, ns.id)
         await db.commit()
         assert await db.get(KnowledgeEntry, manual_id) is not None
@@ -150,7 +150,7 @@ async def test_rejected_purge_then_regeneration_routes_to_conflict_when_non_git_
         )).scalar_one()
         result = await upsert_terminology_with_validation(
             db, ns_id=ns.id, payload_dict=payload,
-            source="git", repo_id=repo.id,
+            source="code_extract", repo_id=repo.id,
         )
         await db.commit()
 

@@ -75,11 +75,7 @@ class _SemanticBudget:
 async def _call_llm(prompt: str) -> str:
     """调用 LLM 获取语义等价判定结果 (raw JSON string).
 
-    关闭思考模式 (extra_body thinking=disabled): 本判定只需输出小 JSON
-    ({equivalent, confidence, reason}), 不需要思维链. DeepSeek 思考默认开启,
-    会把 max_tokens=200 预算全耗在 CoT 上导致 content 为空 (finish_reason=length)
-    → 空响应 + 无谓重试 + 降级成人工 conflict. 实测关闭后 200 token 即稳定返回。
-    Claude provider 不受影响 (extra_body 仅 openai 路径透传, Claude 思考本就默认关)。
+    思考由全局默认关闭 (settings.llm_thinking_enabled=False), max_tokens=200 足够。
     """
     import asyncio
 
@@ -90,8 +86,7 @@ async def _call_llm(prompt: str) -> str:
         chat_completion,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
-        max_tokens=200,
-        extra_body={"thinking": {"type": "disabled"}},
+        max_tokens=200, thinking=False,
     )
 
 

@@ -89,7 +89,7 @@ class BulkOperationGuard:
     用法:
         guard = BulkOperationGuard(
             op_name="git_reparse_clean",
-            scope_filter={"source": ["git"], "repo_id": 7},
+            scope_filter={"source": ["code_extract"], "repo_id": 7},
             dry_run=False, actor_id=user.id, reason="re-parse repo #7",
         )
         report = await guard.execute(db, slug="orders")

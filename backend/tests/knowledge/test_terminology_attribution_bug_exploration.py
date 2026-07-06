@@ -18,7 +18,7 @@
   **CRITICAL**: 本测试在未修复代码上 *预期 FAIL* —— 失败即确认 bug 存在.
   未修复路径 `refresh_terms_for_repo(db, ns_id, repo_id)` →
   `_upsert_terminology_ke(ns_id, repo_id, t)` →
-  `upsert_terminology_with_validation(..., source="git", repo_id=repo_id)` 把任取的
+  `upsert_terminology_with_validation(..., source="code_extract", repo_id=repo_id)` 把任取的
   parsed repo id (`repos[0].id`) 一路透传到 `KnowledgeEntry.repo_id` 与
   `TerminologyConflict.candidate_repo_id`, 构造出与实际抽词无关的虚构 repo 关联.
 
@@ -245,7 +245,7 @@ async def test_terminology_conflict_has_null_candidate_repo_id(
             tier="normal",
             content="存量实体",
             payload=existing_payload,
-            source="git",
+            source="code_extract",
             is_superseded=False,
         ))
         await db.commit()

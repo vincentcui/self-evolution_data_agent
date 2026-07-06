@@ -2,6 +2,7 @@
 Self-Evolution Data Agent — FastAPI 入口
 """
 
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -12,15 +13,59 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import auth as auth_api
-from app.api import audit as audit_api
-from app.api import history, knowledge, namespace, query, share
-from app.api import terminology_conflict as terminology_conflict_api
-from app.api import users as users_api
-from app.knowledge.equivalence import checkers as _equivalence_checkers  # noqa: F401 — side-effect register
+from app.api import (
+    agent_traces as agent_traces_api,
+)
+from app.api import (
+    audit as audit_api,
+)
+from app.api import (
+    auth as auth_api,
+)
+from app.api import (
+    enum_dictionary as enum_dictionary_api,
+)
+from app.api import (
+    feedback as feedback_api,
+)
+from app.api import (
+    extraction_failure as extraction_failure_api,
+)
+from app.api import (
+    history,
+    knowledge,
+    namespace,
+    query,
+    session,
+    share,
+)
+from app.api import (
+    model_config as model_config_api,
+)
+from app.api import (
+    profile as profile_api,
+)
+from app.api import (
+    schema_canonical as schema_canonical_api,
+)
+from app.api import (
+    schema_canonical_v2 as schema_canonical_v2_api,
+)
+from app.api import (
+    terminology_conflict as terminology_conflict_api,
+)
+from app.api import (
+    terminology_refresh as terminology_refresh_api,
+)
+from app.api import (
+    users as users_api,
+)
 from app.auth import hash_password
 from app.db.metadata import async_session, engine, get_db
 from app.db.schema_migrations import run_all as run_schema_migrations
+from app.knowledge.equivalence import (
+    checkers as _equivalence_checkers,  # noqa: F401 — side-effect register
+)
 from app.logging_config import get_logger, setup_logging, trace_id_var
 from app.models.base import Base
 from app.models.user import User
@@ -130,6 +175,10 @@ async def lifespan(_app: FastAPI):
     await _init_admin()
     log.info("管理员账户就绪")
 
+    # ── 模型注册中心：从 DB 恢复激活配置（热切换状态重启不丢失）──
+    from app.engine.model_registry import registry as _model_registry
+    await _model_registry.load_from_db()
+
     # ── Langfuse 追踪初始化 ──
     from app.tracing import init_langfuse
     init_langfuse()
@@ -141,6 +190,7 @@ async def lifespan(_app: FastAPI):
 
     # ── P3: pending_clarifications TTL 清理后台任务 ──
     import asyncio as _asyncio
+
     from app.engine.pending_cleanup import pending_cleanup_loop
     _cleanup_task = _asyncio.create_task(
         pending_cleanup_loop(), name="pending_cleanup",
@@ -235,10 +285,44 @@ _QUIET_SUFFIXES = ("/progress",)
 # Body / Response 截断上限 (字符) - 仅日志格式, 非业务阈值
 _MAX_BODY_LOG = 1024  # noqa: hardcode
 _MAX_RESP_LOG = 512  # noqa: hardcode
+_SENSITIVE_LOG_FIELDS = {
+    "api_key",
+    "password",
+    "proxy_password",
+    "refresh_token",
+    "secret",
+    "token",
+}
+_SENSITIVE_BODY_PREFIXES = ("/api/model-config",)
 
 
 def _truncate(s: str, limit: int) -> str:
     return s if len(s) <= limit else s[:limit] + f"...({len(s)})"
+
+
+def _redact_json_value(value):
+    if isinstance(value, dict):
+        return {
+            key: "***REDACTED***"
+            if str(key).lower() in _SENSITIVE_LOG_FIELDS
+            else _redact_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_json_value(item) for item in value]
+    return value
+
+
+def _redact_request_body_for_log(path: str, body: str) -> str:
+    if not body:
+        return body
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        if path.startswith(_SENSITIVE_BODY_PREFIXES):
+            return "<redacted>"
+        return body
+    return json.dumps(_redact_json_value(parsed), ensure_ascii=False)
 
 
 @app.middleware("http")
@@ -280,7 +364,10 @@ async def access_log_middleware(request: Request, call_next):
         if method in ("POST", "PUT", "PATCH"):
             try:
                 raw = await request.body()
-                req_body = raw.decode("utf-8", errors="replace")
+                req_body = _redact_request_body_for_log(
+                    path,
+                    raw.decode("utf-8", errors="replace"),
+                )
             except Exception:
                 req_body = "<read-error>"
 
@@ -372,38 +459,36 @@ app.include_router(query.router)
 app.include_router(namespace.router)
 app.include_router(knowledge.router)
 app.include_router(history.router)
+app.include_router(session.router)
 app.include_router(share.router)
 app.include_router(audit_api.router)
 app.include_router(terminology_conflict_api.router)
 
-# 术语手动刷新 API
-from app.api import terminology_refresh as terminology_refresh_api
 app.include_router(terminology_refresh_api.router)
 
 # Phase 2: EnumDictionary CRUD
-from app.api import enum_dictionary as enum_dictionary_api
 app.include_router(enum_dictionary_api.router)
 
 # Extraction failure log API
-from app.api import extraction_failure as extraction_failure_api
 app.include_router(extraction_failure_api.router)
 
 # Stage 2 抓手 E: agent_traces API
-from app.api import agent_traces as agent_traces_api
 app.include_router(agent_traces_api.router)
 
 # Stage 2: 通用 schema canonical API
-from app.api import schema_canonical as schema_canonical_api
-
 # Phase 1: schema canonical v2 (promote / conflicts / candidates / evidence / etc.)
 # 注: v2 必须在 v1 之前注册, 因为 v1 有 /{sco_id} 路径参数会吞掉 /conflicts 等路径
-from app.api import schema_canonical_v2 as schema_canonical_v2_api
 app.include_router(schema_canonical_v2_api.router)
 app.include_router(schema_canonical_api.router)
 
 # agentic-repo-extractor: Profile CRUD
-from app.api import profile as profile_api
 app.include_router(profile_api.router)
+
+# model-management: 模型配置 CRUD + 激活 + 测试连接
+app.include_router(model_config_api.router)
+
+# P0 对话体验: 答案反馈
+app.include_router(feedback_api.router)
 
 
 @app.get("/api/health")

@@ -127,24 +127,136 @@ def extract_db_context(tool_trace: list[dict]) -> tuple[str | None, str | None]:
 
 
 # ════════════════════════════════════════════
-#  primary query_json 抽取 (example 用)
+#  query_plan / join_keys 抽取 (example payload 统一)
 # ════════════════════════════════════════════
 
-def extract_primary_query_json(tool_trace: list[dict]) -> dict | None:
-    """抽最具代表性的 query_json — 优先 execute_plan 末次, 兜底 execute_query 末次 single mode.
+def normalize_query_plan(tool_trace: list[dict]) -> dict | None:
+    """Unified query plan extractor covering both execute_plan and execute_query.
 
-    Returns: dict 或 None (trace 中无可用 query).
+    Priority: execute_plan (multi-step).  Fallback: last successful execute_query (single-step).
+    Returns None when neither is found in the trace.
     """
-    fp = extract_final_pipeline(tool_trace)
-    if fp and fp.get("steps"):
-        return fp
+    from app.engine.db_types import SQL_DB_TYPES, DOCUMENT_DB_TYPES
+
+    # ── Priority 1: execute_plan (multi-step) ──
+    for call in reversed(tool_trace or []):
+        if call.get("name") == "execute_plan":
+            plan = (call.get("input") or {}).get("plan") or {}
+            if plan.get("steps"):
+                return {"steps": list(plan["steps"])}
+            return None
+
+    # ── Fallback: execute_query (single-step, MySQL/MongoDB direct) ──
     for call in reversed(tool_trace or []):
         if call.get("name") != "execute_query":
             continue
         inp = call.get("input") or {}
-        if inp.get("mode") and inp.get("mode") != "single":
+        query = inp.get("query")
+        target = inp.get("target") or inp.get("collection") or ""
+        database = inp.get("database") or ""
+        db_type = str(inp.get("db_type", "mysql"))
+        if not query or not isinstance(query, dict):
             continue
-        q = inp.get("query")
-        if isinstance(q, dict) and q:
-            return q
+        if db_type in SQL_DB_TYPES:
+            operation = "sql"
+        elif db_type in DOCUMENT_DB_TYPES:
+            operation = "aggregate"
+        else:
+            operation = "unknown"  # future paradigm: graph / time-series / etc.
+        return {
+            "steps": [{
+                "db_type": db_type,
+                "database": database,
+                "collection": target,
+                "operation": operation,
+                "query": dict(query),
+            }]
+        }
     return None
+
+
+def extract_join_keys(final_query_plan: dict | None) -> list[dict]:
+    """Extract join keys — MySQL JOIN ON + MongoDB $lookup.
+
+    Both sides of each join are collection.field — symmetric.
+    MySQL JOINs are within one schema, MongoDB $lookups within one database.
+    No db-prefix needed on either side.
+    Returns [{"from": "orders.user_id", "to": "users.id"}, ...].
+    """
+    if not final_query_plan:
+        return []
+    out: list[dict] = []
+    from app.engine.db_types import SQL_DB_TYPES, DOCUMENT_DB_TYPES
+
+    for step in final_query_plan.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        db_type = str(step.get("db_type", ""))
+
+        if db_type in SQL_DB_TYPES:
+            sql = (step.get("query") or {}).get("sql", "")
+            out.extend(_extract_mysql_joins(sql))
+        elif db_type in DOCUMENT_DB_TYPES:
+            out.extend(_extract_mongo_lookups(step))
+        # else: unknown paradigm → skip join extraction (no known join syntax)
+    return out
+
+
+def _extract_mysql_joins(sql: str) -> list[dict]:
+    """Parse JOIN (含 STRAIGHT_JOIN) ... ON a.col = b.col from SQL.
+
+    Resolves table aliases: JOIN orders o ON o.uid = users.id → orders.uid, not o.uid.
+    """
+    import re
+    result: list[dict] = []
+    pattern = re.compile(
+        r'\b(?:STRAIGHT_)?JOIN\s+(?:\w+\.)?(\w+)\s+(?:AS\s+)?(\w+)?\s*ON\s+'
+        r'(\w+\.\w+)\s*=\s*(\w+\.\w+)',
+        re.IGNORECASE,
+    )
+    for m in pattern.finditer(sql):
+        table_name = m.group(1)
+        alias = m.group(2)
+        left = m.group(3)
+        right = m.group(4)
+        if alias:
+            left = _resolve_alias(left, alias, table_name)
+            right = _resolve_alias(right, alias, table_name)
+        result.append({"from": left, "to": right})
+    return result
+
+
+def _resolve_alias(col_ref: str, alias: str, table_name: str) -> str:
+    """If col_ref starts with alias., replace with table_name."""
+    prefix = alias + "."
+    if col_ref.startswith(prefix):
+        return table_name + "." + col_ref[len(prefix):]
+    return col_ref
+
+
+def _extract_mongo_lookups(step: dict) -> list[dict]:
+    """Extract $lookup join keys from a MongoDB plan step.
+
+    Both sides are collection.field — symmetric.
+    MongoDB $lookup operates within the same database, so no db prefix needed.
+    """
+    result: list[dict] = []
+    pipeline = (step.get("query") or {}).get("pipeline") or step.get("pipeline") or []
+    stages = pipeline if isinstance(pipeline, list) else []
+    coll = step.get("collection", "")
+
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        lookup = stage.get("$lookup")
+        if not isinstance(lookup, dict):
+            continue
+        local_field = lookup.get("localField")
+        foreign_field = lookup.get("foreignField")
+        from_coll = lookup.get("from")
+        if local_field and foreign_field and from_coll:
+            result.append({
+                "from": f"{coll}.{local_field}",
+                "to": f"{from_coll}.{foreign_field}",
+            })
+    return result

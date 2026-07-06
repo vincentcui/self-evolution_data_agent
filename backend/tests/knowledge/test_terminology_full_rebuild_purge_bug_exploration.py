@@ -17,16 +17,16 @@
   **NOTE**: 这是按用户「清场需清术语」反馈修订后 *新增* 的修复要求; 未修复代码
   无 ns 级术语清场.
 
-  未修复代码: `purge_legacy_for_full_rebuild` 只调 per-repo 的 `_delete_legacy_kes`
-  (`WHERE repo_id=:R AND source IN("git","mybatis_extract")`). 修复后术语 KE 是
+  未修复代码: `purge_legacy_for_full_rebuild` 只调 per-repo 的 `_delete_repo_extracted_kes`
+  (`WHERE repo_id=:R AND source IN("code_extract")`). 修复后术语 KE 是
   ns 级 (`repo_id=NULL`, `source="schema"`), per-repo 清场 *天然不命中*, 术语残留.
 
   反例形态: terminology KE (source="schema", repo_id=NULL) 在 purge 后仍存在
             (未被删除), 且其 ChromaDB 向量未被清理.
 
   场景构造 (同一 ns):
-    - example     (source="git",            repo_id=R)  ← per-repo 清场命中
-    - route_hint  (source="mybatis_extract", repo_id=R)  ← per-repo 清场命中
+    - example     (source="code_extract",     repo_id=R)  ← per-repo 清场命中
+    - route_hint  (source="code_extract",     repo_id=R)  ← per-repo 清场命中
     - terminology (source="schema",          repo_id=NULL) ← ns 级清场目标 (修复后)
     - open TerminologyConflict (candidate_source="schema") ← open 冲突清场目标
 
@@ -120,11 +120,11 @@ async def test_full_rebuild_purges_schema_terminology(
 ):
     """全量重建 SHALL ns 级删 source="schema" 术语 KE + 向量, 并清 open 冲突.
 
-    同时保留 (per-repo 行为不变): example/route_hint(source∈git/mybatis_extract,
+    同时保留 (per-repo 行为不变): example/route_hint(source∈code_extract,
     repo_id=R) 被 per-repo 清场删除.
 
-    EXPECTED OUTCOME on unfixed code: FAIL —— per-repo 的 `_delete_legacy_kes`
-    (`WHERE repo_id=:R AND source IN("git","mybatis_extract")`) 天然不命中
+    EXPECTED OUTCOME on unfixed code: FAIL —— per-repo 的 `_delete_repo_extracted_kes`
+    (`WHERE repo_id=:R AND source IN("code_extract")`) 天然不命中
     ns 级术语 (repo_id=NULL, source="schema"), 术语 KE 与其向量残留.
     """
     from app.knowledge import trainer_purge
@@ -160,14 +160,14 @@ async def test_full_rebuild_purges_schema_terminology(
         await db.commit()
         await db.refresh(repo)
 
-        # ── per-repo 清场目标 (非术语, source∈git/mybatis_extract, repo_id=R) ──
+        # ── per-repo 清场目标 (非术语, source∈code_extract, repo_id=R) ──
         example_ke = _mk_ke(
-            ns.id, entry_type="example", source="git",
-            repo_id=repo.id, content="git example",
+            ns.id, entry_type="example", source="code_extract",
+            repo_id=repo.id, content="code_extract example",
         )
         route_hint_ke = _mk_ke(
-            ns.id, entry_type="route_hint", source="mybatis_extract",
-            repo_id=repo.id, content="mybatis route_hint",
+            ns.id, entry_type="route_hint", source="code_extract",
+            repo_id=repo.id, content="code_extract route_hint",
         )
         # ── ns 级清场目标 (术语, source="schema", repo_id=NULL) ──
         term_ke = _mk_ke(
@@ -202,18 +202,18 @@ async def test_full_rebuild_purges_schema_terminology(
     async with async_session() as db:
         # per-repo 非术语条目被删 (基线, 不变)
         assert await db.get(KnowledgeEntry, example_id) is None, (
-            "per-repo example(source=git) 应被全量重建清场删除"
+            "per-repo example(source=code_extract) 应被全量重建清场删除"
         )
         assert await db.get(KnowledgeEntry, route_hint_id) is None, (
-            "per-repo route_hint(source=mybatis_extract) 应被全量重建清场删除"
+            "per-repo route_hint(source=code_extract) 应被全量重建清场删除"
         )
 
         # ns 级 schema 术语被删 (修复目标 —— 未修复代码上此断言 FAIL)
         surviving_term = await db.get(KnowledgeEntry, term_id)
         assert surviving_term is None, (
             "ns 级 schema 术语 KE 未被全量重建清场删除 (应执行先清后建). "
-            "per-repo 的 _delete_legacy_kes(WHERE repo_id=R AND source IN(git,"
-            "mybatis_extract)) 天然不命中 repo_id=NULL/source=schema 的术语. "
+            "per-repo 的 _delete_repo_extracted_kes(WHERE repo_id=R AND source IN("
+            "code_extract)) 天然不命中 repo_id=NULL/source=schema 的术语. "
             f"残留 KE id={term_id}, source={surviving_term.source!r}, "
             f"repo_id={surviving_term.repo_id!r}"
         )

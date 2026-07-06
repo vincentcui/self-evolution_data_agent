@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 import re as _re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -89,6 +90,15 @@ class DataSourceCreate(BaseModel):
     username: str
     password: str  # 明文传入, 服务端加密存储
     description: str = ""  # 用户填写: 这个库是干嘛的, 给 LLM 看
+    timezone: str
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_is_valid_iana(cls, v: str) -> str:
+        from zoneinfo import available_timezones
+        if v not in available_timezones():
+            raise ValueError(f"非法 IANA 时区名: {v!r}")
+        return v
 
 
 class DataSourceOut(BaseModel):
@@ -100,6 +110,7 @@ class DataSourceOut(BaseModel):
     username: str
     description: str
     db_profile: dict
+    timezone: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -115,8 +126,34 @@ class DataSourceOut(BaseModel):
             id=ds.id, db_type=ds.db_type, host=ds.host, port=ds.port,
             database=ds.database, username=ds.username,
             description=ds.description, db_profile=profile,
-            created_at=ds.created_at,
+            timezone=ds.timezone, created_at=ds.created_at,
         )
+
+
+class DataSourceProbeIn(BaseModel):
+    """probe 端点入参: 连通+时区探测, 不含 timezone (detected_timezone 是探测输出)."""
+    db_type: str
+
+    @field_validator("db_type")
+    @classmethod
+    def _db_type_is_supported(cls, v: str) -> str:
+        from app.engine.db_types import SUPPORTED_DB_TYPES
+        if v not in SUPPORTED_DB_TYPES:
+            raise ValueError(f"不支持的 db_type: {v!r}, 仅支持: {sorted(SUPPORTED_DB_TYPES)}")
+        return v
+
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    description: str = ""
+
+
+class DataSourceProbeOut(BaseModel):
+    connected: bool
+    detected_timezone: str | None = None
+    failure_reason: str | None = None
 
 
 class SchemaRefreshResult(BaseModel):
@@ -619,6 +656,56 @@ from app.schemas.query_stream import (  # noqa: E402
     CorrectionRequest,
     QueryStreamRequest,
 )
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Feedback
+# ════════════════════════════════════════════
+
+class FeedbackCreate(BaseModel):
+    history_id: int
+    rating: Literal["like", "dislike"]
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Readiness
+# ════════════════════════════════════════════
+
+class BlockerOut(BaseModel):
+    type: str  # no_datasource | no_api_key | no_schema | no_access
+    message: str
+    admin_action: str
+    admin_route: str = ""
+    user_action: str
+
+
+class ReadinessOut(BaseModel):
+    ready: bool
+    checks: dict[str, bool]
+    blockers: list[BlockerOut]
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Session
+# ════════════════════════════════════════════
+
+class SessionCreate(BaseModel):
+    namespace_id: int
+
+
+class SessionUpdate(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class SessionOut(BaseModel):
+    id: UUID  # Pydantic auto-serializes to str in JSON
+    namespace_id: int
+    title: str
+    created_by: int
+    created_at: datetime
+    updated_at: datetime | None
+
+    model_config = {"from_attributes": True}
 
 
 # ════════════════════════════════════════════

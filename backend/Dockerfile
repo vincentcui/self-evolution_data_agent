@@ -15,6 +15,28 @@ RUN sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g; s|security.debian.org|
     git curl \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Oracle Instant Client (Thick mode: 连 Oracle 11g+; Thin mode 仅 12.1+, 旧库报 DPY-3010) ──
+#  libaio: Instant Client 链接的系统异步 IO 库. Debian Trixie 64-bit time_t 迁移将
+#  libaio.so.1 → libaio.so.1t64, 双 fallback + 条件 symlink 兼容 Bookworm/Trixie.
+#  此层独立 (不并入上方 apt 层) 以保依赖层缓存: pyproject 改动不触发 Instant Client 重下.
+#  IC 版本参数化 (ARG): 避免源码 x.x.x.x 字面量触发 publish-github 脱敏 IP 正则误报.
+ARG IC_MAJOR=21
+ARG IC_MINOR=15
+RUN apt-get update \
+    && (apt-get install -y --no-install-recommends unzip libaio1 \
+        || (apt-get install -y --no-install-recommends unzip libaio1t64 \
+            && ln -sf libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1)) \
+    && curl -fsSL -o /tmp/ic.zip \
+        "https://download.oracle.com/otn_software/linux/instantclient/${IC_MAJOR}${IC_MINOR}000/instantclient-basiclite-linux.x64-${IC_MAJOR}.${IC_MINOR}.0.0.0dbru.zip" \
+    && unzip -q /tmp/ic.zip -d /opt/oracle \
+    && rm /tmp/ic.zip \
+    && rm -rf /var/lib/apt/lists/*
+
+#  Thick mode 由 IS_ORACLE_THICK_MODE_LIB_DIR 触发 (oracle.py:_maybe_init_thick_mode).
+#  镜像级默认; .env.prod 同值覆盖 (compose env_file 优先级高于 ENV).
+ENV IS_ORACLE_THICK_MODE_LIB_DIR=/opt/oracle/instantclient_21_15 \
+    LD_LIBRARY_PATH=/opt/oracle/instantclient_21_15
+
 # ── 依赖层 (仅 keyed on pyproject.toml: 改 app 代码不会令此层失效, 跨部署复用缓存) ──
 #  只装第三方依赖, 不装本包; 本包留到下一层经 --no-deps 安装 (避免改代码即重装全部依赖)。
 COPY pyproject.toml .

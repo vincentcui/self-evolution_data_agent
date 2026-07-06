@@ -46,10 +46,53 @@ def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
     if entry_type != "example":
         # 语义文本类 payload 原样保留
         return payload
-    # example.query_json 是唯一含数据快照的字段, 单独深度压缩
+    # example.query_json + final_query_plan 含数据快照, 深度压缩
     out = dict(payload)
+    if "final_query_plan" in out and isinstance(out["final_query_plan"], dict):
+        out["final_query_plan"] = _compact_query_plan(out["final_query_plan"])
     if "query_json" in out:
         out["query_json"] = _walk(out["query_json"])
+    return out
+
+
+# ── query plan 联动压缩 ─────────────────────────────────────
+
+
+def _compact_query_plan(plan: dict) -> dict:
+    """Compress query plan by step.db_type: SQL literal stripping, Mongo _walk."""
+    from app.engine.db_types import SQL_DB_TYPES, DOCUMENT_DB_TYPES
+
+    out = dict(plan)
+    steps: list[dict] = []
+    for step in out.get("steps") or []:
+        if not isinstance(step, dict):
+            steps.append(step)
+            continue
+        s = dict(step)
+        db_type = str(s.get("db_type", "mongodb"))
+        query = s.get("query")
+        if isinstance(query, dict):
+            if db_type in SQL_DB_TYPES:
+                s["query"] = _compact_sql_query(query)
+            elif db_type in DOCUMENT_DB_TYPES:
+                s["query"] = _walk(query)
+            # else: unknown paradigm → leave query as-is (no known compaction)
+        steps.append(s)
+    out["steps"] = steps
+    return out
+
+
+def _compact_sql_query(query: dict) -> dict:
+    """Strip SQL string literals and numeric constants, preserve structure."""
+    import re
+    out = dict(query)
+    sql = out.get("sql")
+    if isinstance(sql, str):
+        sql = re.sub(r"'[^']*'", "'...'", sql)
+        sql = re.sub(r'"[^"]*"', '"..."', sql)
+        sql = re.sub(r'(?<=[=<>]\s)\d+', 'N', sql)
+        sql = re.sub(r"\bIN\s*\([\d,\s]+\)", "IN(...)", sql)
+        out["sql"] = sql
     return out
 
 

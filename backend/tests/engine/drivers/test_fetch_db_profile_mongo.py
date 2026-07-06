@@ -90,3 +90,51 @@ async def test_get_client_rejects_unsaved_ds():
     driver = MongoDriver()
     with pytest.raises(ValueError, match="未落库"):
         driver._get_client(ds)  # 同步方法, 不 await
+
+
+@pytest.mark.asyncio
+async def test_mongo_fetch_db_profile_includes_caps(monkeypatch):
+    """Mock Motor 确认 fetch_db_profile 落库四能力限制字段."""
+
+    class _FakeAdmin:
+        async def command(self, cmd: str) -> dict:
+            if cmd == "buildInfo":
+                return {"version": "5.0", "gitVersion": "abc123", "modules": []}
+            raise ValueError(f"Unexpected admin command: {cmd}")
+
+    class _FakeDatabase:
+        async def command(self, cmd: str) -> dict:
+            if cmd == "ping":
+                return {"ok": 1}
+            raise ValueError(f"Unexpected db command: {cmd}")
+
+        async def list_collection_names(self) -> list:
+            return []
+
+    class _FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            self.admin = _FakeAdmin()
+            self._db = _FakeDatabase()
+
+        def __getitem__(self, _key: str) -> _FakeDatabase:
+            return self._db
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("app.engine.drivers.mongo.AsyncIOMotorClient", _FakeClient)
+
+    ds = DataSource(
+        id=999, namespace_id=0, db_type="mongodb",
+        host="localhost", port=27017, database="test_db",
+        username="u", password="p",
+    )
+    driver = MongoDriver()
+    profile = await driver.fetch_db_profile(ds)
+
+    assert profile["connected"] is True
+    assert profile["flavor"] == "mongodb"  # 5.0 native
+    for key in ("unsupported_ops", "unsupported_stage_variants",
+                 "syntax_constraints", "equivalent_hints"):
+        assert key in profile, f"profile 缺少 {key}"
+        assert isinstance(profile[key], list), f"{key} 应为 list"

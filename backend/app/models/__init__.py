@@ -8,6 +8,8 @@ from app.models.extractor_profile import ExtractorProfile
 from app.models.git_repo import GitRepo
 from app.models.knowledge_audit_log import KnowledgeAuditLog
 from app.models.knowledge_entry import KnowledgeEntry
+from app.models.model_config import ModelConfig
+from app.models.model_config_audit_log import ModelConfigAuditLog
 from app.models.namespace import DataSource, Namespace
 from app.models.pending_clarification import PendingClarification
 from app.models.query_history import QueryHistory
@@ -50,6 +52,8 @@ __all__ = [
     "GitRepo",
     "KnowledgeAuditLog",
     "KnowledgeEntry",
+    "ModelConfig",
+    "ModelConfigAuditLog",
     "Namespace",
     "PendingClarification",
     "QueryHistory",

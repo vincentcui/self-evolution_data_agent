@@ -209,7 +209,7 @@ async def test_refine_collides_with_terminology_unique_index(fn_session, fn_admi
         tier="normal",
         status="canonical",
         is_superseded=False,
-        source="git",
+        source="code_extract",
         payload=_json.dumps({
             "term": "订单",
             "primary_collection": "c_orders",
@@ -395,3 +395,119 @@ async def test_refine_route_hint_passes_schema_gate(fn_session, fn_admin_client)
     # 无 LLM 自由发挥 extra 字段 (闸门拒)
     assert "cross_database_strategy" not in payload
     assert "route" not in payload
+
+
+@pytest.mark.asyncio
+async def test_detail_returns_tool_trace_compact(db, admin_client):
+    """GET /api/agent-traces/{id} 响应含 tool_trace_compact, 复用 compact_tool_call 投影."""
+    tr = AgentTrace(
+        trace_id="compact-1",
+        namespace_id=None,
+        user_query="订单数",
+        status="completed",
+        trace_json=_json.dumps({
+            "tool_trace": [
+                {"name": "fetch_schema", "input": {"target": "c_orders"},
+                 "output": {"fields": [{"name": "oid"}]}},
+                {"name": "execute_query",
+                 "input": {"target": "c_orders", "mode": "count", "query": {"filter": {}}},
+                 "output": {"count": 7}},
+            ]
+        }, ensure_ascii=False),
+    )
+    db.add(tr)
+    await db.commit()
+
+    resp = await admin_client.get("/api/agent-traces/compact-1")
+    assert resp.status_code == 200
+    data = resp.json()
+    compact = data["tool_trace_compact"]
+    assert isinstance(compact, list) and len(compact) == 2
+    assert compact[0]["step"] == 0 and compact[0]["tool"] == "fetch_schema"
+    assert compact[0]["target"] == "c_orders"
+    assert compact[0]["schema_field_count"] == 1
+    assert compact[1]["mode"] == "count"
+    assert compact[1]["count_returned"] == 7
+    # trace_json / reflection_log_json 原样透传不变
+    assert "trace_json" in data and "reflection_log_json" in data
+
+
+@pytest.mark.asyncio
+async def test_detail_compact_empty_when_trace_json_garbage(db, admin_client):
+    """trace_json 为空/非法 JSON 时 tool_trace_compact=[], 不抛异常."""
+    tr = AgentTrace(
+        trace_id="compact-2", namespace_id=None, user_query="x",
+        status="completed", trace_json="not-json{",
+    )
+    db.add(tr)
+    await db.commit()
+    resp = await admin_client.get("/api/agent-traces/compact-2")
+    assert resp.status_code == 200
+    assert resp.json()["tool_trace_compact"] == []
+
+
+@pytest.mark.asyncio
+async def test_detail_compact_tolerates_non_dict_elements(db, admin_client):
+    """trace_json.tool_trace 含非字典元素 (null/"bad") 时 compact 不抛, 跳过为空 tool 行.
+
+    根因: compact_tool_call 开头 call.get("name","") 对非字典抛 AttributeError,
+    违背其 docstring "不会抛异常". 历史脏数据/并发截断可能产出非字典元素.
+    """
+    tr = AgentTrace(
+        trace_id="compact-3", namespace_id=None, user_query="x",
+        status="completed",
+        trace_json=_json.dumps({
+            "tool_trace": [
+                None,
+                "bad",
+                {"name": "fetch_schema", "input": {"target": "c_orders"}, "output": {}},
+            ]
+        }, ensure_ascii=False),
+    )
+    db.add(tr)
+    await db.commit()
+    resp = await admin_client.get("/api/agent-traces/compact-3")
+    assert resp.status_code == 200
+    compact = resp.json()["tool_trace_compact"]
+    assert len(compact) == 3
+    assert compact[0]["tool"] == "" and compact[1]["tool"] == ""   # 非字典 → 空 tool 行
+    assert compact[2]["tool"] == "fetch_schema"
+
+
+@pytest.mark.asyncio
+async def test_list_trace_damaged_signal(db, admin_client):
+    """trace_json 损坏 (非法 JSON) → 列表返 trace_damaged=true, tool_call_count=null."""
+    db.add(AgentTrace(
+        trace_id="trace-damaged-list",
+        namespace_id=None,
+        user_query="damaged",
+        trace_json='{"tool_trace": [{"name":"execute_query","output":{"rows":[{"id":1},',  # 腰斩
+        reflection_log_json="[]",
+        status="completed",
+    ))
+    await db.commit()
+    resp = await admin_client.get("/api/agent-traces", params={"size": 200})
+    assert resp.status_code == 200
+    items = resp.json()
+    item = next(i for i in items if i["trace_id"] == "trace-damaged-list")
+    assert item["trace_damaged"] is True
+    assert item["tool_call_count"] is None
+
+
+@pytest.mark.asyncio
+async def test_detail_trace_damaged_signal(db, admin_client):
+    """trace_json 损坏 → 详情返 trace_damaged=true, tool_trace_compact=[]."""
+    db.add(AgentTrace(
+        trace_id="trace-damaged-detail",
+        namespace_id=None,
+        user_query="damaged",
+        trace_json='{"tool_trace": [{"name":"list_databases",',  # 腰斩
+        reflection_log_json="[]",
+        status="completed",
+    ))
+    await db.commit()
+    resp = await admin_client.get("/api/agent-traces/trace-damaged-detail")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trace_damaged"] is True
+    assert body["tool_trace_compact"] == []

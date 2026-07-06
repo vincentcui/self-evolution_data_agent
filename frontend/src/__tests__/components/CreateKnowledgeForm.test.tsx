@@ -25,12 +25,12 @@ describe("CreateKnowledgeForm", () => {
         onSubmitted={() => {}}
       />,
     );
-    expect(await screen.findByLabelText("term")).toBeInTheDocument();
+    expect(await screen.findByLabelText("术语")).toBeInTheDocument();
     // antd Select 容器与内部 input 同时承载 aria-label, 故用 getAllByLabelText 断言存在.
-    expect(screen.getAllByLabelText("database").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("db_type")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("collection").length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText("synonyms").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("数据库").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("数据库类型")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("集合/表").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("同义词").length).toBeGreaterThan(0);
   });
 
   it("terminology 缺 db_type 不能提交 — 不调 createKnowledge", async () => {
@@ -44,7 +44,7 @@ describe("CreateKnowledgeForm", () => {
         onSubmitted={() => {}}
       />,
     );
-    const term = await screen.findByLabelText("term");
+    const term = await screen.findByLabelText("术语");
     await user.type(term, "GMV");
     await user.click(screen.getByRole("button", { name: /确定|OK/ }));
     expect(createKnowledge).not.toHaveBeenCalled();
@@ -69,10 +69,10 @@ describe("CreateKnowledgeForm", () => {
     const typeSelectors = document.querySelectorAll(".ant-select-selector");
     // 第一个 Select = "类型" (Form 顺序: 类型 / 生效范围 / 优先级 / [type-specific])
     fireEvent.mouseDown(typeSelectors[0]);
-    const ruleOption = await screen.findByText(/查询规则.*rule/);
+    const ruleOption = await screen.findByText(/查询规则.*查询约束/);
     await user.click(ruleOption);
 
-    const ruleText = await screen.findByLabelText("rule_text");
+    const ruleText = await screen.findByLabelText("规则文本");
     await user.type(ruleText, "查订单按下单时间倒序");
 
     await user.click(screen.getByRole("button", { name: /确定|OK/ }));
@@ -100,13 +100,13 @@ describe("CreateKnowledgeForm", () => {
     const { fireEvent } = await import("@testing-library/dom");
     const typeSelectors = document.querySelectorAll(".ant-select-selector");
     fireEvent.mouseDown(typeSelectors[0]);
-    const opt = await screen.findByText(/示例查询.*example/);
+    const opt = await screen.findByText(/示例查询.*成功查询案例/);
     await user.click(opt);
 
-    await user.type(await screen.findByLabelText("question"), "Q1");
-    await user.type(screen.getByLabelText("target_collection"), "orders");
+    await user.type(await screen.findByLabelText("问题模式"), "Q1");
+    await user.type(screen.getByLabelText("涉及集合"), "shop.orders");
     // userEvent.type 把 `{` 解析为修饰符, 需 `{{` 转义.
-    await user.type(screen.getByLabelText("query_json"), "{{ this is not json");
+    await user.type(screen.getByLabelText("查询计划"), "{{ this is not json");
 
     await user.click(screen.getByRole("button", { name: /确定|OK/ }));
 

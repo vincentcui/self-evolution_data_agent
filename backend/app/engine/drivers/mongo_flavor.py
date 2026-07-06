@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-from app.engine.drivers.base import ServerCapabilities
 from app.engine.drivers.mongo_capabilities import compute_unsupported_ops
 from app.engine.drivers.mongo_flavor_predicate import (
     KNOWN_PREDICATE_KEYS,
@@ -166,7 +165,7 @@ def compute_capabilities(
     flavor: str,
     version: str,
     registry: ProfileRegistry | None = None,
-) -> ServerCapabilities:
+) -> dict:
     """按已判定 flavor 计算三类能力限制 (R2)。始终令 agg_ops_unsupported == unsupported_ops。"""
     reg = registry or get_profile_registry()
     profile = reg.get(flavor)
@@ -184,20 +183,20 @@ def compute_capabilities(
         syntax_constraints = list(restrictions.get("syntax_constraints", []))
         hints = list(profile.equivalent_hints)
         resolved_flavor = profile.flavor
-    return ServerCapabilities(
-        version=version,
-        flavor=resolved_flavor,
-        unsupported_ops=unsupported_ops,
-        unsupported_stage_variants=stage_variants,
-        syntax_constraints=syntax_constraints,
-        equivalent_hints=hints,
-        agg_ops_unsupported=unsupported_ops,  # deprecated alias, 同值
-    )
+    return {
+        "version": version,
+        "flavor": resolved_flavor,
+        "unsupported_ops": unsupported_ops,
+        "unsupported_stage_variants": stage_variants,
+        "syntax_constraints": syntax_constraints,
+        "equivalent_hints": hints,
+        "agg_ops_unsupported": unsupported_ops,  # deprecated alias, 同值
+    }
 
 
 # ── A5: build_capabilities (失败安全包装) ────────────────
 
-def build_capabilities(build_info: dict, version: str) -> ServerCapabilities:
+def build_capabilities(build_info: dict, version: str) -> dict:
     """flavor 探测 + 能力计算的失败安全包装 (R3.5 / R4.6 / R4.7)。
 
     探测/计算/档案加载异常 → 先成功写错误日志 → 回退原生 mongodb 能力计算。
@@ -213,12 +212,12 @@ def build_capabilities(build_info: dict, version: str) -> ServerCapabilities:
         )
         # 回退: 直接走原生路径 (不再触发 profile 加载)
         unsupported_ops = compute_unsupported_ops(version)
-        return ServerCapabilities(
-            version=version,
-            flavor=NATIVE_FLAVOR,
-            unsupported_ops=unsupported_ops,
-            unsupported_stage_variants=[],
-            syntax_constraints=[],
-            equivalent_hints=[],
-            agg_ops_unsupported=unsupported_ops,
-        )
+        return {
+            "version": version,
+            "flavor": NATIVE_FLAVOR,
+            "unsupported_ops": unsupported_ops,
+            "unsupported_stage_variants": [],
+            "syntax_constraints": [],
+            "equivalent_hints": [],
+            "agg_ops_unsupported": unsupported_ops,
+        }

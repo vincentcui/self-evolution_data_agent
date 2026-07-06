@@ -1,11 +1,12 @@
 """MongoDB 异步驱动 — motor AsyncIOMotorClient + aggregation 执行."""
 from __future__ import annotations
 
+import json as _json
 import logging
 import time
 from typing import Any
 
-from bson import DBRef, ObjectId
+from bson import DBRef, ObjectId, json_util
 from bson.decimal128 import Decimal128
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -19,8 +20,8 @@ from app.engine.drivers.base import (
     ExecuteMode,
     ExecuteResult,
     FieldDef,
+    ProbeResult,
     SchemaSnapshot,
-    ServerCapabilities,
 )
 from app.models import DataSource
 from app.models.base import local_now
@@ -96,6 +97,30 @@ def _normalize_bson(value: object, _depth: int = 0) -> object:
     return value
 
 
+def _decode_extended_json(payload: dict) -> dict:
+    """把 LLM 输出的 Extended JSON ($date/$oid/$numberLong/...) 解码成 BSON 原生类型.
+
+    根因 (trace 6de74455): LLM 在 pipeline/filter 里用 {"$date":"2026-...Z"} 表达
+    日期, parse_llm_json 走纯 json.loads 不认这层包装, 原样作为 Python dict 透传到
+    motor. pymongo 只在 bson.json_util.loads 时才把 {"$date":...} 转成 datetime,
+    对已解析的 dict 会按 BSON 编码规则编码成子文档 (Object, type 3) 而非 Date (type 9).
+    $match 跨类型比较 (BSON 类型序 Object < Date) 使 $gte/$lt 恒假 → 0 行.
+
+    仅在 mongo 驱动边界解码, 不上提全局 parser: 否则 datetime 渗入 knowledge /
+    trace_json 等结构, 下游 json.dumps 会炸 (datetime 不可序列化). 见 design ADR-1.
+
+    json_util 只转换类型 marker key ($date/$oid/...), 不碰管道操作符 key
+    ($match/$group/$gte/$sum), 后者原样透传 — 故无需手写 walker 枚举类型. 见 ADR-2.
+
+    失败安全: 解码异常原样返回 payload (不阻断查询, 仅 log.warning).
+    """
+    try:
+        return json_util.loads(_json.dumps(payload))
+    except Exception as exc:  # noqa: BLE001 — 解码失败不阻业务, 回退原 payload
+        log.warning("[mongo_driver] extended-json decode failed, passthrough: %s", exc)
+        return payload
+
+
 def _classify_query_shape(query: dict) -> tuple[str, Any]:
     """聚合 vs 过滤的形态判定唯一来源 (scope C).
 
@@ -137,7 +162,6 @@ class MongoDriver:
 
     def __init__(self) -> None:
         self._clients: dict[int, AsyncIOMotorClient] = {}
-        self._caps_cache: dict[int, ServerCapabilities] = {}
 
     def _get_client(self, ds: DataSource) -> AsyncIOMotorClient:
         """获取或创建 ds 对应的 motor client."""
@@ -276,6 +300,8 @@ class MongoDriver:
         query: dict,
     ) -> CostEstimate:
         log.info("[mongo_driver] estimate_cost ds=%d target=%s", ds.id, target)
+        # Extended JSON ($date/...) 解码 — 与 execute_query 同源, 防 explain 吃错配值
+        query = _decode_extended_json(query)
         client = self._get_client(ds)
         db = client[ds.database]
         coll = db[target]
@@ -333,6 +359,9 @@ class MongoDriver:
                 suggestion="payload 必须包含 'pipeline' (聚合) 或 'filter' (查询)",
             )
 
+        # Extended JSON ($date/...) 解码为 BSON 原生类型 — trace 6de74455 根因修复
+        query = _decode_extended_json(query)
+
         client = self._get_client(ds)
         db = client[ds.database]
         coll = db[target]
@@ -373,7 +402,7 @@ class MongoDriver:
 
         # 确定 limit
         if mode == "probe":
-            limit = 10
+            limit = settings.probe_row_limit
         elif mode == "batched":
             limit = batch_size
         elif mode == "render":
@@ -433,34 +462,13 @@ class MongoDriver:
         client = self._get_client(ds)
         return sorted(await client[ds.database].list_collection_names())
 
-    # ── get_server_capabilities ──────────────────────────
+    # ── fetch_foreign_keys ─────────────────────────────────
 
-    async def get_server_capabilities(
-        self, ds: DataSource,
-    ) -> ServerCapabilities | None:
-        """Return server version + flavor-aware capability restrictions.
-
-        Cached per-ds (driver lifetime). buildInfo failure → None
-        (never block primary read/write paths, 不缓存 None).
-        flavor 探测 + 三类能力计算下沉到 mongo_flavor.build_capabilities (失败安全)。
-        """
-        cached = self._caps_cache.get(ds.id)
-        if cached is not None:
-            return cached
-        try:
-            client = self._get_client(ds)
-            info = await client.admin.command("buildInfo")
-        except Exception as exc:  # noqa: BLE001 — buildInfo 失败不阻业务
-            log.warning("[mongo_driver] buildInfo failed ds=%d: %s", ds.id, exc)
-            return None  # 不缓存 None (R3.6)
-        version = info.get("version", "")
-        if not version:
-            return None  # 无版本 → 不缓存 (与现状一致)
-        # flavor 探测 + 能力计算 (失败安全, 内部回退原生)
-        from app.engine.drivers.mongo_flavor import build_capabilities
-        caps = build_capabilities(dict(info), version)
-        self._caps_cache[ds.id] = caps  # 仅缓存成功结果 (R3.2)
-        return caps
+    async def fetch_foreign_keys(
+        self, ds: DataSource, target: str | None = None,
+    ) -> list[dict]:
+        """MongoDB 无外键概念,返 []. 零连库."""
+        return []
 
     # ── fetch_db_profile ─────────────────────────────────
 
@@ -495,6 +503,12 @@ class MongoDriver:
                     from app.engine.drivers.mongo_flavor import build_capabilities
                     caps = build_capabilities(dict(info), version)
                     profile["flavor"] = caps["flavor"]
+                    profile["unsupported_ops"] = caps.get("unsupported_ops", [])
+                    profile["unsupported_stage_variants"] = caps.get(
+                        "unsupported_stage_variants", []
+                    )
+                    profile["syntax_constraints"] = caps.get("syntax_constraints", [])
+                    profile["equivalent_hints"] = caps.get("equivalent_hints", [])
             except Exception:  # noqa: BLE001 — 降级
                 pass
             # 对象数量 (collection 数, 只要数字不要清单)
@@ -510,18 +524,36 @@ class MongoDriver:
                 client.close()
         return profile
 
+    # ── probe_connectivity ───────────────────────────────
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """一次性临时连接: 探测连通. MongoDB 不暴露时区设置, detected_timezone 始终 None."""
+        client = None
+        try:
+            client = AsyncIOMotorClient(
+                host=ds.host, port=ds.port,
+                username=ds.username, password=ds.password,
+                authSource=ds.database,
+                serverSelectionTimeoutMS=settings.mongo_connect_timeout_ms,
+            )
+            await client[ds.database].command("ping")
+            return ProbeResult(connected=True, detected_timezone=None)
+        except Exception as exc:
+            return ProbeResult(connected=False, failure_reason=str(exc)[:300])
+        finally:
+            if client:
+                client.close()
+
     # ── lifecycle ────────────────────────────────────────
 
     async def invalidate_client(self, ds_id: int) -> None:
-        """关闭并移除指定 ds 的 motor client + caps 缓存 (DataSource 删除/变更时调用)."""
+        """关闭并移除指定 ds 的 motor client (DataSource 删除/变更时调用)."""
         client = self._clients.pop(ds_id, None)
         if client is not None:
             client.close()
-        self._caps_cache.pop(ds_id, None)
 
     async def close_all(self) -> None:
         """关闭所有 motor client."""
         for client in self._clients.values():
             client.close()
         self._clients.clear()
-        self._caps_cache.clear()

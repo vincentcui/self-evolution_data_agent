@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from unittest.mock import AsyncMock
 
 import anthropic
@@ -29,7 +30,7 @@ from app.models.namespace import Namespace
 
 
 def _claude_available() -> bool:
-    return bool(settings.claude_api_key)
+    return bool(os.environ.get('IS_CLAUDE_API_KEY'))
 
 
 @pytest.mark.skipif(not _claude_available(), reason="IS_CLAUDE_API_KEY 未配置")

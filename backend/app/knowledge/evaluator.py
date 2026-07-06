@@ -10,7 +10,7 @@ from langfuse import observe
 
 from app.config import settings
 from app.engine.json_parser import parse_llm_json
-from app.engine.llm import THINKING_DISABLED, chat_completion_checked
+from app.engine.llm import chat_completion_checked
 from app.knowledge.parse_result import ParseReport
 
 logger = logging.getLogger(__name__)
@@ -109,13 +109,11 @@ def evaluate_parse_quality(
 
         # 首次尝试 evaluator_max_tokens_first, 截断则以 retry 上限重试一次
         resp = chat_completion_checked(messages=messages, temperature=0.1,
-                                       max_tokens=settings.evaluator_max_tokens_first,
-                                       extra_body=THINKING_DISABLED)
+                                       max_tokens=settings.evaluator_max_tokens_first, thinking=False)
         if resp.truncated:
             logger.warning("评估输出被截断 (len=%d), 以 max_tokens=%d 重试", len(resp.text), settings.evaluator_max_tokens_retry)
             resp = chat_completion_checked(messages=messages, temperature=0.1,
-                                           max_tokens=settings.evaluator_max_tokens_retry,
-                                           extra_body=THINKING_DISABLED)
+                                           max_tokens=settings.evaluator_max_tokens_retry, thinking=False)
             if resp.truncated:
                 logger.warning("重试仍截断 (len=%d), 尝试修复 JSON", len(resp.text))
 

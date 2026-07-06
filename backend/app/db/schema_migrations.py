@@ -26,7 +26,8 @@ _KNOWLEDGE_ENTRY_NEW_COLS: list[ColumnSpec] = [
     ("reviewed",      "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
-# SchemaCanonicalObject(db_type='mongodb') 语义层字段 (2026-04-22 Schema 管理; 已统一替代旧 MongoCanonicalCollection)
+# SchemaCanonicalObject(db_type='mongodb') 语义层字段
+# (2026-04-22 Schema 管理; 已统一替代旧 MongoCanonicalCollection)
 _MONGO_CANONICAL_NEW_COLS: list[ColumnSpec] = [
     ("description",    "TEXT NOT NULL DEFAULT ''"),
     ("purpose_detail", "TEXT NOT NULL DEFAULT ''"),
@@ -125,8 +126,14 @@ async def _ensure_pending_clarifications_table(engine: AsyncEngine) -> None:
         expires_at TIMESTAMP NOT NULL
     )
     """
-    ddl_idx1 = "CREATE INDEX IF NOT EXISTS idx_pending_session ON pending_clarifications(session_id, status)"
-    ddl_idx2 = "CREATE INDEX IF NOT EXISTS idx_pending_expires ON pending_clarifications(expires_at)"
+    ddl_idx1 = (
+        "CREATE INDEX IF NOT EXISTS idx_pending_session "
+        "ON pending_clarifications(session_id, status)"
+    )
+    ddl_idx2 = (
+        "CREATE INDEX IF NOT EXISTS idx_pending_expires "
+        "ON pending_clarifications(expires_at)"
+    )
     async with engine.begin() as conn:
         await conn.execute(text(ddl_table))
         await conn.execute(text(ddl_idx1))
@@ -382,11 +389,83 @@ async def _ensure_extractor_profiles_table(engine: AsyncEngine) -> None:
         UNIQUE (name, namespace_id)
     )
     """
-    ddl_idx = "CREATE INDEX IF NOT EXISTS idx_profile_langs ON extractor_profiles USING GIN (languages)"
+    ddl_idx = (
+        "CREATE INDEX IF NOT EXISTS idx_profile_langs "
+        "ON extractor_profiles USING GIN (languages)"
+    )
     async with engine.begin() as conn:
         await conn.execute(text(ddl_table))
         await conn.execute(text(ddl_idx))
     log.info("[schema_migrations] extractor_profiles table ensured")
+
+
+async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
+    """migration_023 (model-management): model_configs 表.
+
+    存储多厂商 LLM / Embedding 配置，支持运行时热切换。
+    api_key 由 EncryptedString TypeDecorator 在应用层 Fernet 加密后入库。
+    """
+    ddl = """
+    CREATE TABLE IF NOT EXISTS model_configs (
+        id                SERIAL PRIMARY KEY,
+        provider          VARCHAR(64)   NOT NULL,
+        base_url          VARCHAR(512)  NOT NULL,
+        api_key           TEXT          NOT NULL,
+        model_name        VARCHAR(128)  NOT NULL,
+        model_type        VARCHAR(20)   NOT NULL DEFAULT 'CHAT',
+        temperature       NUMERIC(4,2)  NULL DEFAULT 0.00,
+        max_tokens        INTEGER       NULL DEFAULT 12288,
+        completions_path  VARCHAR(256)  NULL,
+        embeddings_path   VARCHAR(256)  NULL,
+        proxy_enabled     BOOLEAN       NOT NULL DEFAULT FALSE,
+        proxy_host        VARCHAR(256)  NULL,
+        proxy_port        INTEGER       NULL,
+        proxy_username    VARCHAR(128)  NULL,
+        proxy_password    TEXT          NULL,
+        is_active         BOOLEAN       NOT NULL DEFAULT FALSE,
+        is_deleted        BOOLEAN       NOT NULL DEFAULT FALSE,
+        created_at        TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
+        updated_at        TIMESTAMP     NULL
+    )
+    """
+    idx_type = (
+        "CREATE INDEX IF NOT EXISTS idx_model_configs_type_active "
+        "ON model_configs (model_type, is_active) WHERE is_deleted = FALSE"
+    )
+    dedupe_active = """
+    WITH ranked AS (
+        SELECT
+            id,
+            ROW_NUMBER() OVER (
+                PARTITION BY model_type
+                ORDER BY updated_at DESC NULLS LAST, id DESC
+            ) AS rn
+        FROM model_configs
+        WHERE is_active = TRUE AND is_deleted = FALSE
+    )
+    UPDATE model_configs AS mc
+    SET
+        is_active = FALSE,
+        updated_at = (now() AT TIME ZONE 'Asia/Shanghai')
+    FROM ranked
+    WHERE mc.id = ranked.id AND ranked.rn > 1
+    """
+    unique_active = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
+        "ON model_configs (model_type) "
+        "WHERE is_active = TRUE AND is_deleted = FALSE"
+    )
+    alter_max_tokens_default = (
+        "ALTER TABLE model_configs "
+        "ALTER COLUMN max_tokens SET DEFAULT 12288"
+    )
+    async with engine.begin() as conn:
+        await conn.execute(text(ddl))
+        await conn.execute(text(dedupe_active))
+        await conn.execute(text(idx_type))
+        await conn.execute(text(unique_active))
+        await conn.execute(text(alter_max_tokens_default))
+    log.info("[schema_migrations] model_configs table ensured (migration_023)")
 
 
 async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
@@ -414,7 +493,8 @@ async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
                 SELECT 1 FROM knowledge_entries ke WHERE ke.id = tc.existing_entry_id
             );
             IF con_name IS NOT NULL THEN
-                EXECUTE 'ALTER TABLE terminology_conflicts DROP CONSTRAINT ' || quote_ident(con_name);
+                EXECUTE 'ALTER TABLE terminology_conflicts DROP CONSTRAINT '
+                    || quote_ident(con_name);
             END IF;
             ALTER TABLE terminology_conflicts
                 ADD CONSTRAINT terminology_conflicts_existing_entry_id_fkey
@@ -424,7 +504,10 @@ async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
     """
     async with engine.begin() as conn:
         await conn.execute(text(ddl))
-    log.info("[schema_migrations] terminology_conflicts existing_entry_id FK ensured ON DELETE CASCADE")
+    log.info(
+        "[schema_migrations] terminology_conflicts existing_entry_id FK ensured "
+        "ON DELETE CASCADE"
+    )
 
 
 async def run_all(engine: AsyncEngine) -> None:
@@ -483,9 +566,6 @@ async def run_all(engine: AsyncEngine) -> None:
     # 列. /collections 接口 mysql+mongodb 已统一走 SchemaCanonicalObject 真相源,
     # snapshot 列 0 读 0 写, 永久退役.
     await _drop_datasource_schema_snapshot_column(engine)
-    # migration_020 (terminology-schema-attribution): 存量术语 KE/冲突回填.
-    # 术语只归属 schema/namespace: source git→schema, repo_id→NULL. 幂等纯 UPDATE.
-    await _migrate_terminology_source_to_schema(engine)
     # migration_021 (three-tier-rbac): role 扩列 + ns.created_by + admin 升级 + 回填 + FK 修复
     await _migrate_rbac_three_tier(engine)
     # migration_022 (datasource-catalog): DataSource 加 description + db_profile_json.
@@ -502,6 +582,44 @@ async def run_all(engine: AsyncEngine) -> None:
     await ensure_extractor_profile_seeds(engine)
     # 修复 terminology_conflicts.existing_entry_id FK 缺失 ON DELETE CASCADE (长生命周期库漂移)
     await _repair_terminology_conflict_cascade_fk(engine)
+    # migration_023 (model-management): model_configs 表 — 多厂商模型配置持久化 + 热切换
+    await _ensure_model_configs_table(engine)
+    # migration_024 (model-config-protocol): model_configs.protocol 列 — openai | anthropic
+    await _ensure_model_config_protocol_column(engine)
+    # migration_025 (model-management): model_config_audit_logs 审计日志表
+    await _ensure_model_config_audit_logs_table(engine)
+    # migration_026 (P0 对话体验优化): sessions 表 — 对话会话持久化
+    await _create_sessions_table(engine)
+    # migration_027 (P0 对话体验优化): query_history.feedback_rating 列 — 答案反馈
+    await _add_missing(engine, "query_history", [
+        ("feedback_rating", "VARCHAR(10)"),
+    ])
+    # migration_028 (timezone): datasources.timezone 列 + 存量回填
+    await _ensure_datasources_timezone_column(engine)
+
+
+async def _create_sessions_table(engine: AsyncEngine) -> None:
+    """migration_026: sessions 表 — 会话 CRUD, 绑定命名空间, 软删不实施.
+
+    时区说明: created_at/updated_at server_default 硬编码 'Asia/Shanghai' —
+    与 models/base.py LOCAL_NOW 一致 (默认 IS_APP_TIMEZONE).
+    若需改变时区, 迁移已应用的表需手工 ALTER COLUMN.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            "    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),"
+            "    namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,"
+            "    title VARCHAR(255) NOT NULL DEFAULT '新会话',"
+            "    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "    created_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),"
+            "    updated_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_namespace_updated"
+            "    ON sessions(namespace_id, updated_at DESC)"
+        ))
 
 
 async def _migrate_rbac_three_tier(engine: AsyncEngine) -> None:
@@ -809,27 +927,6 @@ async def _drop_datasource_schema_snapshot_column(engine: AsyncEngine) -> None:
     )
 
 
-async def _migrate_terminology_source_to_schema(engine: AsyncEngine) -> None:
-    """migration_020 (terminology-schema-attribution): 存量术语 KE/冲突回填.
-
-    术语只归属 schema/namespace: source git→schema, repo_id→NULL.
-    幂等: 二次运行 WHERE 命中 0 行.
-    """
-    async with engine.begin() as conn:
-        await conn.execute(text(
-            "UPDATE knowledge_entries SET source='schema', repo_id=NULL "
-            "WHERE entry_type='terminology' AND source='git'"
-        ))
-        await conn.execute(text(
-            "UPDATE terminology_conflicts SET candidate_source='schema', "
-            "candidate_repo_id=NULL "
-            "WHERE candidate_source='git'"
-        ))
-    log.info(
-        "[schema_migrations] terminology source git→schema migrated (migration_020)"
-    )
-
-
 async def _drop_mongo_canonical_layer(engine: AsyncEngine) -> None:
     """migration_013 (mongo-canonical-retirement): drop 中间层三张表.
 
@@ -845,6 +942,24 @@ async def _drop_mongo_canonical_layer(engine: AsyncEngine) -> None:
         "mongo_knowledge_conflicts + mongo_canonical_collections + mongo_source_fragments "
         "(migration_013)"
     )
+
+
+async def _ensure_model_config_protocol_column(engine: AsyncEngine) -> None:
+    """migration_024 (model-config-protocol): 幂等为 model_configs 加 protocol 列.
+
+    - ADD COLUMN IF NOT EXISTS protocol VARCHAR(32) NOT NULL DEFAULT 'openai'
+    - 回填: provider ILIKE 'anthropic' → protocol = 'anthropic'
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS "
+            "protocol VARCHAR(32) NOT NULL DEFAULT 'openai'"
+        ))
+        await conn.execute(text(
+            "UPDATE model_configs SET protocol = 'anthropic' "
+            "WHERE LOWER(provider) = 'anthropic'"
+        ))
+    log.info("[schema_migrations] model_configs.protocol column ensured (migration_024)")
 
 
 async def _ensure_agent_traces_table(engine: AsyncEngine) -> None:
@@ -886,3 +1001,56 @@ async def _ensure_agent_traces_table(engine: AsyncEngine) -> None:
         await conn.execute(text(alter_session))
         await conn.execute(text(idx_session))
     log.info("[schema_migrations] agent_traces table ensured (migration_017+018 session_id)")
+
+
+async def _ensure_model_config_audit_logs_table(engine: AsyncEngine) -> None:
+    """migration_025 (model-management): model_config_audit_logs 审计日志表."""
+    ddl = """
+    CREATE TABLE IF NOT EXISTS model_config_audit_logs (
+        id           SERIAL PRIMARY KEY,
+        config_id    INTEGER NULL REFERENCES model_configs(id) ON DELETE SET NULL,
+        actor_id     INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+        action       VARCHAR(40) NOT NULL,
+        model_type   VARCHAR(20) NULL,
+        provider     VARCHAR(64) NULL,
+        protocol     VARCHAR(32) NULL,
+        model_name   VARCHAR(128) NULL,
+        before_json  TEXT NULL,
+        after_json   TEXT NULL,
+        reason       TEXT NULL,
+        created_at   TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')
+    )
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(ddl))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_model_config_audit_config_id "
+            "ON model_config_audit_logs(config_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_model_config_audit_actor_id "
+            "ON model_config_audit_logs(actor_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_model_config_audit_created_at "
+            "ON model_config_audit_logs(created_at DESC)"
+        ))
+    log.info("[schema_migrations] model_config_audit_logs table ensured (migration_025)")
+
+
+async def _ensure_datasources_timezone_column(engine: AsyncEngine) -> None:
+    """migration_028 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
+
+    照抄 migration_024 范式: ADD COLUMN ... NOT NULL DEFAULT 一步原子 (存量行填 Asia/Shanghai),
+    随后 DROP DEFAULT 强制建源时显式给值
+    (DataSourceCreate.timezone 必填, 用户确认是真相, 不靠 DB 默认兜底).
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE datasources ADD COLUMN IF NOT EXISTS "
+            "timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE datasources ALTER COLUMN timezone DROP DEFAULT"
+        ))
+    log.info("[schema_migrations] datasources.timezone column ensured (migration_026)")

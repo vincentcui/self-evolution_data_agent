@@ -8,28 +8,42 @@
 """
 from __future__ import annotations
 
-ASYNC_EXTRACT_PROMPT = """你是查询知识沉淀编辑. 一次完整的查询刚结束, 请只完成两个语义任务.
+ASYNC_EXTRACT_PROMPT = """\
+<role>你是查询知识沉淀编辑. 一次完整查询刚结束, 你从中提取可复用的查询模式.</role>
 
-【上下文】
+<context>
 用户问题: {question}
 涉及集合 (来自实际 tool 调用, 不可修改): {collections}
 tool_trace 摘要 (按时间序):
 {tool_trace_summary}
+</context>
 
-【任务 1 — 骨架重写 (question_pattern)】
-把用户原问题改写为可复用骨架, 给未来"像这类问题"做检索:
+<tasks>
+<task id="1" name="question_pattern">把用户原问题改写为可复用语义骨架:
 - 删: 一次性具体值 (ID / 记录名 / 数字 / 日期) → 替换成 "某<集合业务名>" / "某时段" / "若干"
 - 保: 业务名词、聚合动作 (统计/分组/排序/过滤)、修饰关系
-
-举例 (仅示范骨架重写风格, 不代表实际业务域):
-  原问题: "黄金会员 (ID: 5f8a1b2c) 在 2025 年 3 月下的所有订单, 按商品类目分组统计金额"
+举例 (通用电商域, 仅示范骨架重写风格):
+  原问题: "某等级会员 (ID: abc123) 在某时段下的所有订单, 按商品类目分组统计金额"
   question_pattern: "某用户等级在某时段下的所有订单, 按商品类目分组统计金额"
+</task>
 
-【任务 2 — 路径理由 (route_hint_reason)】
-仅当涉及集合数 >= 2 时填. 用一句 ≤30 字概括为何走这条集合路径
+<task id="2" name="route_hint_reason">仅当涉及集合数 >= 2 时填.
+用一句 ≤30 字概括为何走这条集合路径
 (如"用户→订单→商品三层关联以聚合金额").
-单集合查询返回 null.
+单集合查询填 null.
+</task>
 
-【输出】严格 JSON, 不要任何额外文本:
-{{"question_pattern": "...", "route_hint_reason": "..." 或 null}}
+<task id="3" name="result_summary">用一句 ≤120 字自然语言描述做了什么过滤/关联/聚合, 不做具体数值说明.
+单集合 group/aggregate 用"按 X 字段分组统计 Y".
+单步 filter+sort 用"在 X 集合上按 Y 条件过滤, 按 Z 排序".
+举例: "在 orders 上按 status 分组, $sum 统计各状态数量"
+举例: "在 orders 上按 user_id 过滤, 按 created_at 降序排列"
+</task>
+</tasks>
+
+<output>严格 JSON, 无代码围栏, 无额外文本:
+{{"question_pattern": "...", "route_hint_reason": "..." 或 null, "result_summary": "..."}}
+</output>
+
+<escape>若 tool_trace 信息不足以推断 result_summary (如 trace 截断 / 仅有元数据调用), result_summary 可填 null. 禁止编造未在 trace 中出现的结果形态.</escape>\
 """

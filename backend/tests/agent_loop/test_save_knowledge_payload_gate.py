@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 from app.engine.tools.knowledge_tools import save_knowledge
 from app.models.knowledge_entry import KnowledgeEntry
 from app.models.namespace import Namespace
+from app.schemas.knowledge_payload import ExamplePayload
 
 
 @pytest.mark.asyncio
@@ -94,8 +95,8 @@ async def test_save_knowledge_route_hint_valid_payload_persists(db_session):
 
 
 @pytest.mark.asyncio
-async def test_save_knowledge_example_extra_field_rejected(db_session):
-    """ExamplePayload extra='forbid' 拦 extra 字段."""
+async def test_save_knowledge_example_extra_field_accepted(db_session):
+    """ExamplePayload extra='allow' — 未知字段被接受不过滤."""
     ns = Namespace(name="schema-gate-test4", slug="schema-gate-test4", description="")
     db_session.add(ns)
     await db_session.flush()
@@ -104,14 +105,56 @@ async def test_save_knowledge_example_extra_field_rejected(db_session):
         db=db_session, namespace_id=ns.id, ns_slug=ns.slug,
         sse_emit=AsyncMock(),
         entry_type="example",
-        content="示例",
+        content="订单关联用户",
         payload={
-            "question": "本月订单数",
-            "target_collection": "c_orders",
-            "query_json": {"aggregate": []},
-            "bogus_field": "should_be_rejected",
+            "question_pattern": "订单关联用户",
+            "collections": ["shop.orders", "shop.users"],
+            "join_keys": [{"from": "orders.user_id", "to": "users.id"}],
+            "final_query_plan": {"steps": [{"db_type": "mysql", "operation": "sql"}]},
+            "bogus_field": "should_be_accepted_now",
         },
         evidence={},
     )
-    assert result.get("success") is False
-    assert result.get("reason") == "validation_failed"
+    assert "entry_id" in result, f"extra='allow' 应接受 bogus_field, got {result}"
+
+
+@pytest.mark.asyncio
+async def test_save_knowledge_example_new_format():
+    """ExamplePayload 五字段 schema 验证."""
+    payload = ExamplePayload(
+        question_pattern="订单关联用户",
+        collections=["shop.orders", "shop.users"],
+        join_keys=[{"from": "orders.user_id", "to": "users.id"}],
+        final_query_plan={
+            "steps": [{"db_type": "mysql", "database": "shop", "collection": "orders",
+                       "operation": "sql", "query": {"sql": "SELECT ..."}}],
+        },
+    )
+    assert payload.question_pattern == "订单关联用户"
+    assert len(payload.join_keys) == 1
+
+
+# ════════════════════════════════════════════
+#  result_summary null→str coercion
+# ════════════════════════════════════════════
+
+
+def test_result_summary_null_coerced_to_empty_str():
+    """LLM 返回 result_summary: null 时被转换为空字符串."""
+    llm_output = {"question_pattern": "查询订单", "route_hint_reason": None, "result_summary": None}
+    result_summary = llm_output.get("result_summary") or ""
+    assert result_summary == ""
+
+
+def test_result_summary_missing_coerced_to_empty_str():
+    """LLM 输出完全不包含 result_summary key 时，or '' 返回 ''."""
+    llm_output = {"question_pattern": "查询订单", "route_hint_reason": None}
+    result_summary = llm_output.get("result_summary") or ""
+    assert result_summary == ""
+
+
+def test_result_summary_valid_preserved():
+    """正常 result_summary 字符串原值保留."""
+    llm_output = {"question_pattern": "查询订单", "result_summary": "在orders上按status分组"}
+    result_summary = llm_output.get("result_summary") or ""
+    assert result_summary == "在orders上按status分组"

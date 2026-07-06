@@ -57,53 +57,51 @@ def test_build_example_content_no_question():
 # ════════════════════════════════════════════
 
 
-def test_example_payload_new_fields_have_defaults():
-    """所有新增字段有默认值, 不破坏现有消费方"""
+# ════════════════════════════════════════════
+#  ExamplePayload 五字段 schema (Phase 1)
+# ════════════════════════════════════════════
+
+
+def test_example_payload_five_field_defaults():
+    """五字段 schema: question_pattern 必填，其余有默认值."""
+    p = ExamplePayload(question_pattern="按状态统计订单数")
+    assert p.question_pattern == "按状态统计订单数"
+    assert p.collections == []
+    assert p.join_keys == []
+    assert p.final_query_plan is None
+    assert p.result_summary == ""
+
+
+def test_example_payload_five_field_full():
+    """新字段可正常赋值."""
     p = ExamplePayload(
-        question="昨天订单数",
-        target_collection="c_product",
-        query_json={"find": {}},
+        question_pattern="订单关联用户",
+        collections=["orders", "users"],
+        join_keys=[{"from": "orders.user_id", "to": "users.id"}],
+        final_query_plan={
+            "steps": [{"db_type": "mysql", "database": "shop", "collection": "orders",
+                       "operation": "sql", "query": {"sql": "SELECT ..."}}],
+        },
+        result_summary="在orders上JOIN users关联",
     )
-    assert p.nl_paraphrases == []
-    assert p.dynamic_variants == []
-    assert p.extraction_source == "qmql_history"
-    assert p.source_mapper is None
-    assert p.source_method is None
-    assert p.source_repo_id is None
-    assert p.explain_verified is False
+    assert p.collections == ["orders", "users"]
+    assert len(p.join_keys) == 1
+    assert p.join_keys[0]["from"] == "orders.user_id"
+    assert p.final_query_plan["steps"][0]["db_type"] == "mysql"
+    assert p.result_summary == "在orders上JOIN users关联"
 
 
-def test_example_payload_with_new_fields():
-    """新字段可正常赋值"""
+def test_example_payload_extra_allow_accepts_unknown():
+    """extra='allow' — 未知字段被接受，存入 model_extra."""
     p = ExamplePayload(
-        question="查用户",
-        target_collection="c_user",
-        query_json={"find": {"status": 1}},
-        nl_paraphrases=["查询用户列表", "list users"],
-        dynamic_variants=[{"sql": "SELECT *", "branch_conditions": ["id非空"]}],
-        extraction_source="mybatis_extract",
-        source_mapper="com.example.UserMapper",
-        source_method="selectAll",
-        source_repo_id=42,
-        explain_verified=True,
+        question_pattern="查询用户",
+        unknown_field="should_be_accepted_now",
+        legacy_col="c_product",
     )
-    assert p.nl_paraphrases == ["查询用户列表", "list users"]
-    assert p.extraction_source == "mybatis_extract"
-    assert p.source_mapper == "com.example.UserMapper"
-    assert p.source_method == "selectAll"
-    assert p.source_repo_id == 42
-    assert p.explain_verified is True
-
-
-def test_example_payload_rejects_extra_fields():
-    """extra=forbid 仍生效"""
-    with pytest.raises(ValidationError):
-        ExamplePayload(
-            question="q",
-            target_collection="c",
-            query_json={},
-            unknown_field="x",  # type: ignore[call-arg]
-        )
+    assert p.question_pattern == "查询用户"
+    assert p.model_extra is not None
+    assert p.model_extra["unknown_field"] == "should_be_accepted_now"
+    assert p.model_extra["legacy_col"] == "c_product"
 
 
 # ════════════════════════════════════════════

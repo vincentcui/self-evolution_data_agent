@@ -23,6 +23,7 @@ from app.models import (
     SchemaCanonicalConflict,
     SchemaCanonicalObject,
 )
+from app.models.base import local_now
 from app.models.git_repo import GitRepo
 
 log = logging.getLogger(__name__)
@@ -418,15 +419,25 @@ async def _apply_to_canonical(
             sco.fields_json, field_path, "enum_values", value.get("enum_values", [])
         )
     elif kind == "relationship":
+        # sources from evidence — promote 回填
+        ev = json.loads(cand.evidence_sources_json or "[]")
+        srcs: list[str] = []
+        for s in ev:
+            st = s.get("source", "")
+            if st in ("code_jpa", "code_mongo", "code_relation"):
+                srcs.append("code")
+            elif st == "introspect_fk":
+                srcs.append("introspect_fk")
+        value["sources"] = list(set(srcs))
         sco.relationships_json = _upsert_relationship(sco.relationships_json, value)
     elif kind == "sample_values":
         sco.sample_values_json = json.dumps(
             value.get("sample_values", []), ensure_ascii=False
         )
 
-    sco.updated_at = datetime.now()
+    sco.updated_at = local_now()
     cand.status = "active"
-    cand.promoted_at = datetime.now()
+    cand.promoted_at = local_now()
     await db.flush()
 
     await write_canonical_audit_log(
@@ -461,25 +472,52 @@ def _upsert_field_attr(fields_json: str, field_path: str, attr: str, val: Any) -
     return json.dumps(fields, ensure_ascii=False)
 
 
-def _upsert_relationship(relationships_json: str, value: dict) -> str:
-    """按 (from_field, to_target, to_field, relation_type) 去重更新.
+def _merge_relationship_into(r: dict, value: dict) -> None:
+    """把 value merge 进已存在条目 r — sources 积累 + to_field 非空胜出."""
+    existing_to_field = r.get("to_field")
+    existing_src = set(r.get("sources", []))
+    new_src = set(value.get("sources", []))
+    r.update(value)
+    r["sources"] = list(existing_src | new_src)
+    if not value.get("to_field") and existing_to_field:
+        r["to_field"] = existing_to_field
 
-    与 _upsert_field_attr 对称 — 同一对关系被多源发现时 merge 而非重复追加.
+
+def _upsert_relationship(relationships_json: str, value: dict) -> str:
+    """按 5 身份键去重更新.
+
+    dedup key: (from_field, to_db_type, to_database, to_target, relation_type).
+    to_field 是可 merge 的 quality signal (非空胜出), 不参与 dedup.
+    跨库同名表不误 merge; 同 key 时 merge (sources 积累 + to_field 非空胜出).
+    Legacy 条目 (无 to_db_type/to_database) 按 3-key 匹配升级.
     """
     rels = json.loads(relationships_json) if relationships_json else []
     key = (
-        value.get("from_field"), value.get("to_target"),
-        value.get("to_field"), value.get("relation_type"),
+        value.get("from_field"), value.get("to_db_type"),
+        value.get("to_database"), value.get("to_target"),
+        value.get("relation_type"),
     )
+    # ── 5-key exact match ──
     for r in rels:
         if (
             r.get("from_field") == key[0]
-            and r.get("to_target") == key[1]
-            and r.get("to_field") == key[2]
-            and r.get("relation_type") == key[3]
+            and r.get("to_db_type") == key[1]
+            and r.get("to_database") == key[2]
+            and r.get("to_target") == key[3]
+            and r.get("relation_type") == key[4]
         ):
-            r.update(value)  # merge 更新, 不追加
+            _merge_relationship_into(r, value)
             return json.dumps(rels, ensure_ascii=False)
+    # ── legacy fallback: to_db_type/to_database 为空 → 3-key match ──
+    for r in rels:
+        if not r.get("to_db_type") or not r.get("to_database"):
+            if (
+                r.get("from_field") == key[0]
+                and r.get("to_target") == key[3]
+                and r.get("relation_type") == key[4]
+            ):
+                _merge_relationship_into(r, value)
+                return json.dumps(rels, ensure_ascii=False)
     rels.append(value)
     return json.dumps(rels, ensure_ascii=False)
 

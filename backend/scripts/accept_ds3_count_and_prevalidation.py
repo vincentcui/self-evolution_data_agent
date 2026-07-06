@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json as _json
 import re
 import sys
 
@@ -40,6 +41,7 @@ from sqlalchemy import select
 from app.db.metadata import async_session
 from app.engine.drivers.mongo import MongoDriver
 from app.engine.plan_executor import validate_pipeline_against_caps
+from app.engine.tools._db_profile_projector import _project_db_profile
 from app.models.namespace import DataSource
 
 _COLLECTION = "c_brand"
@@ -215,18 +217,20 @@ async def main(ds_id: int, brand_regex: str | None) -> int:
 
         # ── (B) Pre-validation rejection ────────────────────────────────────────
         print("\n--- (B) Pre-validation rejects embedded-$ fieldpath (Req 5.2, 5.3) ---")
-        caps = await driver.get_server_capabilities(ds)
-        if caps is None:
-            failures.append("get_server_capabilities(ds=3) 返回 None — 无法做能力预校验")
+        profile = _json.loads(ds.db_profile_json or "{}")
+        caps = _project_db_profile(profile, "caps")
+        version = profile.get("version", "?")
+        if not caps or not profile.get("version"):
+            failures.append("db_profile_json 为空/无 version — 建源时 buildInfo 可能失败, 无法做能力预校验")
         else:
-            print(f"resolved caps: flavor={caps.get('flavor')} version={caps.get('version')}")
+            print(f"resolved caps: flavor={caps.get('flavor')} version={version}")
             print(f"syntax_constraints = {caps.get('syntax_constraints')}")
             bad_pipeline = [
                 {"$match": {}},
                 {"$project": {"x": "$module.$id_str"}},
                 {"$limit": 1},
             ]
-            violation = validate_pipeline_against_caps(bad_pipeline, dict(caps))
+            violation = validate_pipeline_against_caps(bad_pipeline, caps)
             print(f"bad pipeline = {bad_pipeline}")
             if violation is None:
                 failures.append("validate_pipeline_against_caps 未拦截 embedded-$ fieldpath (期望 violation)")

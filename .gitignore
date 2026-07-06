@@ -10,9 +10,11 @@ data/
 !.env.example
 !.env.prod.example
 !.env.test.example
+!backend/.env.prod
 *.db
 node_modules/
 dist/
+*.tsbuildinfo
 .vite/
 coverage/
 playwright-report/

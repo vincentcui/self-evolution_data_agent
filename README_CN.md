@@ -34,7 +34,7 @@ Self-Evolution Data Agent 消除这些瓶颈：
 
 - **零 SQL 门槛** —— 业务人员用自然语言自助取数。
 - **无需 BI 团队、无需预建模** —— Agent 从你的代码仓库自动学习 schema 与业务术语。
-- **模型自由、不绑死** —— Qwen / GPT / DeepSeek / Claude / 本地 vLLM·Ollama，改一个环境变量即切换。
+- **模型自由、不绑死** —— Qwen / GPT / DeepSeek / Claude / 本地 vLLM·Ollama，通过 Web UI（模型管理页面）配置，支持热切换免重启。
 - **对生产库零侵入** —— 只读连接、不改表结构、不装插件、不动业务代码。
 
 ---
@@ -198,7 +198,7 @@ text-to-SQL 库把一个 prompt 翻译成一句 SQL。Self-Evolution Data Agent 
 不需要。业务人员用自然语言提问，Agent 自动为 MySQL 或 MongoDB 生成并执行查询。
 
 **支持哪些 LLM？**
-支持任何 OpenAI 兼容或 Anthropic 兼容端点的模型。`IS_LLM_PROVIDER` 按线协议选路 —— `openai`（GPT、Qwen/DashScope、DeepSeek、本地 vLLM / Ollama，或任意 OpenAI 兼容端点，配合 `IS_LLM_BASE_URL`）或 `anthropic`（Claude，配合 `IS_CLAUDE_API_KEY`）。
+支持任何 OpenAI 兼容或 Anthropic 兼容端点的模型。通过 Web UI（模型管理页面）配置 —— 填入 API Key、端点 URL 和模型名，激活即可使用，支持热切换免重启。
 
 **我的生产库安全吗？**
 连接为只读。Agent 永不修改表结构、不装插件、不动业务代码。SQL 仅 `SELECT`，并强制行数上限与执行前行数预检。

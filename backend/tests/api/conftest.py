@@ -64,7 +64,7 @@ async def seeded_open_conflict(db) -> tuple[int, int, int]:
         namespace_id=ns.id,
         existing_entry_id=existing.id,
         candidate_payload=json.dumps(CANDIDATE_PAYLOAD),
-        candidate_source="git",
+        candidate_source="code_extract",
         status="open",
     )
     db.add(conflict)

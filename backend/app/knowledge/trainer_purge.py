@@ -4,7 +4,7 @@
 #  When this runs
 # ════════════════════════════════════════════
 # trainer 在执行 git 仓库的"全量重建"模式前调用本模块, 用于清扫上轮残留:
-#   1) 删除 source=git 的全部 KE (含 canonical — spec 2026-05-21 决策 1)
+#   1) 删除 source ∈ REPO_REBUILDABLE_SOURCES 的全部 KE (含 canonical — 重建必清)
 #   2) 删除 namespace 内所有 open 状态的 Terminology 冲突 (重新解析后再产生)
 #   3) 写一条 audit_log (action='purge_for_full_rebuild', to_status='purged')
 #      含 cascade_audit_deleted / cascade_conflict_deleted 合规留痕
@@ -34,18 +34,25 @@ log = get_logger("trainer.purge")
 AUDIT_ACTION_PURGE = "purge_for_full_rebuild"
 PURGED_STATUS = "purged"
 OPEN_CONFLICT_STATUS = "open"
+REPO_REBUILDABLE_SOURCES: frozenset[str] = frozenset({"code_extract"})
+"""per-repo 重建时可清场的 source 集合 (source ∧ repo_id 全删, 不分 status).
+
+KnowledgeSource 的子集 (当前仅 code_extract 属"repo 提取可重建"渠道);
+新增可重建渠道时此处同步加, KnowledgeSource Literal 扩展时审视此闭集.
+"""
 
 
-async def _delete_legacy_kes(db: AsyncSession, repo_id: int) -> list[tuple[int, int | None, str]]:
-    """删 source∈{git, mybatis_extract} ∧ repo_id 的全部 KE — 不分 status (G1).
+async def _delete_repo_extracted_kes(
+    db: AsyncSession, repo_id: int,
+) -> list[tuple[int, int | None, str]]:
+    """删 source ∈ REPO_REBUILDABLE_SOURCES ∧ repo_id 的全部 KE — 不分 status (G1).
 
     Returns: [(entry_id, namespace_id, entry_type), ...] 供 ChromaDB 清理.
 
-    设计契约 (spec 2026-05-21-git-source-full-purge 决策 1):
-        git 是真相源, 从 git 推导的所有知识应随 git 重新推导.
-        mybatis_extract 同理, 从 mybatis XML 推导的 example/route_hint 应随重建清除.
+    设计契约:
+        code_extract 是 agentic 仓库提取的 example/rule/route_hint, 应随重建清除.
         canonical 状态由人审标记, 但人审的对象 (上一轮 LLM 产出) 已过时,
-        保留 = 把 git 旧解读冻结成永恒. 推翻旧 "canonical 永不动" 宪章.
+        保留 = 把旧解读冻结成永恒. 推翻旧 "canonical 永不动" 宪章.
     """
     rows = (await db.execute(
         select(
@@ -54,7 +61,7 @@ async def _delete_legacy_kes(db: AsyncSession, repo_id: int) -> list[tuple[int, 
             KnowledgeEntry.entry_type,
         ).where(
             KnowledgeEntry.repo_id == repo_id,
-            KnowledgeEntry.source.in_(["git", "mybatis_extract"]),
+            KnowledgeEntry.source.in_(REPO_REBUILDABLE_SOURCES),
         )
     )).all()
     if not rows:
@@ -75,8 +82,8 @@ async def _delete_schema_terminology(
 
     设计契约 (spec terminology-schema-attribution 改动 4b):
         术语只归属 schema/namespace (repo_id=NULL, source=schema), 是 ns 级条目,
-        per-repo 的 _delete_legacy_kes 天然不命中. 全量重建需补一条 ns 维度术语清场,
-        与 per-repo 非术语清场并存 (source 集合不相交: git/mybatis_extract vs schema),
+        per-repo 的 _delete_repo_extracted_kes 天然不命中. 全量重建需补一条 ns 维度术语清场,
+        与 per-repo 非术语清场并存 (source 集合不相交: code_extract vs schema),
         无重叠删除; 纯 DELETE 幂等.
     """
     rows = (await db.execute(
@@ -115,7 +122,7 @@ async def _delete_legacy_candidates(db: AsyncSession, repo_id: int) -> int:
 
     仅删 status='pending': promoted 后的候选状态为 'active' (人审确认),
     rejected/superseded/in_conflict 是人类决策痕迹, 全部保留审计轨迹。
-    根因: schema_canonical_candidates 无 source 列, _delete_legacy_kes 的
+    根因: schema_canonical_candidates 无 source 列, _delete_repo_extracted_kes 的
     source 过滤器对其无效; write_canonical_candidate 按 value_hash UPSERT,
     重提取产出"不同" schema 时旧 pending 候选不被覆盖 → 堆积, 需显式清。
     返回删除行数。
@@ -167,7 +174,7 @@ async def purge_legacy_for_full_rebuild(
         preview_ke_ids = (await db.execute(
             select(KnowledgeEntry.id).where(
                 KnowledgeEntry.repo_id == repo_id,
-                KnowledgeEntry.source.in_(["git", "mybatis_extract"]),
+                KnowledgeEntry.source.in_(REPO_REBUILDABLE_SOURCES),
             )
         )).scalars().all()
         # 按 source 分别计数 (审计可追溯) — 单次 GROUP BY
@@ -177,12 +184,11 @@ async def purge_legacy_for_full_rebuild(
                 func.count(KnowledgeEntry.id),
             ).where(
                 KnowledgeEntry.repo_id == repo_id,
-                KnowledgeEntry.source.in_(["git", "mybatis_extract"]),
+                KnowledgeEntry.source.in_(REPO_REBUILDABLE_SOURCES),
             ).group_by(KnowledgeEntry.source)
         )).all()
         source_counts: dict[str, int] = {row[0]: row[1] for row in _count_rows}
-        git_ke_count = source_counts.get("git", 0)
-        mybatis_ke_count = source_counts.get("mybatis_extract", 0)
+        code_extract_ke_count = source_counts.get("code_extract", 0)
         if preview_ke_ids:
             cascade_audit_n = (await db.execute(
                 select(func.count(KnowledgeAuditLog.id)).where(
@@ -198,8 +204,8 @@ async def purge_legacy_for_full_rebuild(
             cascade_audit_n = 0
             cascade_conflict_n = 0
 
-        # ── 删 KE (G1: source∈{git, mybatis_extract} ∧ repo_id 全删, 不分 status) ──
-        deleted_ke_ids = await _delete_legacy_kes(db, repo_id)
+        # ── 删 KE (G1: source ∈ REPO_REBUILDABLE_SOURCES ∧ repo_id 全删, 不分 status) ──
+        deleted_ke_ids = await _delete_repo_extracted_kes(db, repo_id)
 
         # ── 删 ns 级 schema 术语 (改动 4b: 全量重建需清并重抽术语) ──
         # 合并进 deleted_ke_ids, 使步骤 4 ChromaDB 向量清理一并覆盖术语向量.
@@ -214,7 +220,7 @@ async def purge_legacy_for_full_rebuild(
 
         reason = (
             f"trainer_full_rebuild repo={repo_id} ns={ns_id} "
-            f"ke_deleted={len(deleted_ke_ids)} (git={git_ke_count}, mybatis_extract={mybatis_ke_count}) "
+            f"ke_deleted={len(deleted_ke_ids)} (code_extract={code_extract_ke_count}) "
             f"schema_terminology_deleted={len(schema_term_rows)} "
             f"candidates_deleted={cand_count} "
             f"cascade_audit_deleted={cascade_audit_n} "

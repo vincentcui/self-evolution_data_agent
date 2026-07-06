@@ -79,7 +79,7 @@ async def test_dry_run_returns_protected_count(client, db_session):
                 namespace_id=ns.id,
                 entry_type="schema_summary",
                 content="x",
-                source="git",
+                source="code_extract",
                 status="canonical",
                 tier="normal",
             ),
@@ -100,7 +100,7 @@ async def test_dry_run_returns_protected_count(client, db_session):
     body = resp.json()
     assert body["op_name"] == "namespace_delete"
     assert body["affected_count"] == 2
-    assert body["by_source"] == {"git": 1, "manual": 1}
+    assert body["by_source"] == {"code_extract": 1, "manual": 1}
     assert body["by_entry_type"]["schema_summary"] == 1
     assert body["by_entry_type"]["terminology"] == 1
     assert body["confirm_required"] is False  # 2 ≤ 默认阈值 100
@@ -132,7 +132,7 @@ async def test_above_threshold_requires_confirm_token(
                 namespace_id=ns.id,
                 entry_type="schema_summary",
                 content=f"x{i}",
-                source="git",
+                source="code_extract",
                 status="canonical",
                 tier="normal",
             )
@@ -183,7 +183,7 @@ async def test_correct_token_executes_delete(client, db_session, monkeypatch):
                 namespace_id=ns.id,
                 entry_type="schema_summary",
                 content=f"y{i}",
-                source="git",
+                source="code_extract",
                 status="canonical",
                 tier="normal",
             )

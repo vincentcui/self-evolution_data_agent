@@ -17,12 +17,12 @@
 
   **CRITICAL**: 本测试在未修复代码上 *预期 FAIL* —— 失败即确认 bug 存在.
   未修复代码:
-    - 写入: `_upsert_terminology_ke` → upsert_terminology_with_validation(..., source="git")
-    - 清场: `_purge_git_terminology` 按 KnowledgeEntry.source == "git" 筛选
-    二者虽一致 (都 "git"), 但均 != "schema" —— 写入标签与"反映 schema 自省抽取
-    机制"的真相不符, 清场标签随之耦合于 "git".
+    - 写入: `_upsert_terminology_ke` → upsert_terminology_with_validation(..., source="code_extract")
+    - 清场: `_purge_git_terminology` 按 KnowledgeEntry.source == "code_extract" 筛选
+    二者虽一致 (都 "code_extract"), 但均 != "schema" —— 写入标签与"反映 schema 自省抽取
+    机制"的真相不符, 清场标签随之耦合于 "code_extract".
 
-  反例形态: write_tag == "git" 且 purge_tag == "git" (均 != "schema").
+  反例形态: write_tag == "code_extract" 且 purge_tag == "code_extract" (均 != "schema").
 
   方法论: 这是 *静态断言* 测试 —— 直接对两个函数的源码做 AST 提取, 取写入用的
   source 字面量与清场筛选用的 source 字面量, 无需运行抽词链路.

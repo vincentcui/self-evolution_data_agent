@@ -10,11 +10,13 @@ def test_create_accepts_description_optional():
     c = DataSourceCreate(
         db_type="mysql", host="h", port=3306,
         database="d", username="u", password="p",
+        timezone="Asia/Shanghai",
     )
     assert c.description == ""
     c2 = DataSourceCreate(
         db_type="mysql", host="h", port=3306,
         database="d", username="u", password="p", description="电力库",
+        timezone="Asia/Shanghai",
     )
     assert c2.description == "电力库"
 
@@ -32,6 +34,7 @@ def test_create_oracle_db_type_accepted():
     c = DataSourceCreate(
         db_type="oracle", host="db.example.com", port=1521,
         database="orclpdb", username="hr", password="p1",
+        timezone="Asia/Shanghai",
     )
     assert c.db_type == "oracle"
     assert c.port == 1521
@@ -43,4 +46,5 @@ def test_create_unsupported_db_type_rejected():
         DataSourceCreate(
             db_type="postgresql", host="h", port=5432,
             database="d", username="u", password="p1",
+            timezone="Asia/Shanghai",
         )

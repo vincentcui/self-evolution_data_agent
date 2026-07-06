@@ -118,11 +118,18 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
     entry_type: "example",
     content: "统计品牌名称包含A级的品牌数量",
     payload: {
-      question: "统计品牌名称包含A级的品牌数量",
-      target_collection: "c_brand",
-      target_database: "db_rp_resources_20220305",
-      query_json: { pipeline: [{ $match: {} }] },
+      question_pattern: "统计品牌名称包含A级的品牌数量",
+      collections: ["shop_db.products"],
+      join_keys: [],
+      final_query_plan: {
+        steps: [{ db_type: "mongodb", collection: "products", query: { pipeline: [{ $match: {} }] } }],
+      },
       result_summary: "按名称过滤统计",
+      // legacy
+      question: "统计品牌名称包含A级的品牌数量",
+      target_collection: "products",
+      target_database: "shop_db",
+      query_json: { pipeline: [{ $match: {} }] },
     },
   } as unknown as KnowledgeEntry;
 
@@ -142,8 +149,8 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
   it("example 类型挂 ExampleEditPanel", () => {
     render(<EditCanonicalForm entry={exampleEntry} />);
     // ExampleEditPanel 特征 label
-    expect(screen.getByText(/目标集合/)).toBeInTheDocument();
-    expect(screen.getByText(/查询 JSON/)).toBeInTheDocument();
+    expect(screen.getByText(/涉及集合/)).toBeInTheDocument();
+    expect(screen.getByText(/查询计划/)).toBeInTheDocument();
   });
 
   it("route_hint 类型挂 RouteHintEditPanel", () => {

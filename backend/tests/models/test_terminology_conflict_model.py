@@ -26,7 +26,7 @@ async def test_create_conflict_default_status_open(async_session, seeded_ns_and_
             namespace_id=ns_id,
             existing_entry_id=existing_id,
             candidate_payload=json.dumps({"term": "单子"}),
-            candidate_source="git",
+            candidate_source="code_extract",
         )
         db.add(c)
         await db.commit()
@@ -72,7 +72,7 @@ async def test_namespace_delete_cascades_conflicts(async_session, seeded_ns_and_
                 namespace_id=ns_id,
                 existing_entry_id=existing_id,
                 candidate_payload="{}",
-                candidate_source="git",
+                candidate_source="code_extract",
             )
         )
         await db.commit()
@@ -97,7 +97,7 @@ async def test_repo_delete_sets_candidate_repo_null(async_session, seeded_ns_and
                 namespace_id=ns_id,
                 existing_entry_id=existing_id,
                 candidate_payload="{}",
-                candidate_source="git",
+                candidate_source="code_extract",
                 candidate_repo_id=repo.id,
             )
         )

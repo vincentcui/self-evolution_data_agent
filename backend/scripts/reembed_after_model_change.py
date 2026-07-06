@@ -132,8 +132,8 @@ async def _amain() -> int:
         nargs="?",
         const=True,
         type=lambda x: str(x).lower() not in ("false", "0", "no"),
-        default=settings.migration_dry_run,
-        help="default from IS_MIGRATION_DRY_RUN (true unless --dry-run=false)",
+        default=True,
+        help="dry-run 默认开, 传 --dry-run=false 真执行",
     )
     parser.add_argument(
         "--from-id", type=int, default=None,

@@ -1,4 +1,4 @@
-"""Auto-verification report for mongo server_capabilities.
+"""Auto-verification report for mongo db_profile caps.
 
 Outputs verification_report.md under backend/ with:
 - Per-datasource: version + unsupported ops
@@ -35,7 +35,9 @@ def _run_pytest(target: str, marker: str | None = None) -> tuple[int, str]:
 
 
 async def _per_ds_report() -> list[dict]:
-    from app.engine.drivers.mongo import MongoDriver
+    import json as _json
+
+    from app.engine.tools._db_profile_projector import _project_db_profile
     from app.models import DataSource
 
     url = os.environ.get("IS_METADATA_DB_URL")
@@ -49,23 +51,24 @@ async def _per_ds_report() -> list[dict]:
             rows = (await s.execute(
                 select(DataSource).where(DataSource.db_type == "mongodb")
             )).scalars().all()
-        driver = MongoDriver()
         for ds in rows:
             try:
-                caps = await driver.get_server_capabilities(ds)
+                profile = _json.loads(ds.db_profile_json or "{}")
+                caps = _project_db_profile(profile, "caps")
             except Exception as exc:  # noqa: BLE001
                 out.append({"ds_id": ds.id, "error": repr(exc)})
                 continue
-            if caps is None:
-                out.append({"ds_id": ds.id, "error": "buildInfo returned None"})
+            if not profile.get("version"):
+                _err = "db_profile_json 无 version — 建源时 buildInfo 可能失败"
+                out.append({"ds_id": ds.id, "error": _err})
                 continue
             out.append({
                 "ds_id": ds.id,
                 "host": ds.host,
                 "database": ds.database,
-                "version": caps["version"],
-                "agg_ops_unsupported": caps["agg_ops_unsupported"],
-                "round_blocked": "$round" in caps["agg_ops_unsupported"],
+                "version": profile["version"],
+                "unsupported_ops": caps.get("unsupported_ops", []),
+                "round_blocked": "$round" in caps.get("unsupported_ops", []),
             })
     finally:
         await engine.dispose()
@@ -111,7 +114,7 @@ def main() -> int:
             f"- ds={entry['ds_id']} {entry['host']}/{entry['database']} "
             f"version=**{entry['version']}** "
             f"$round_blocked={flag} "
-            f"unsupported_ops={entry['agg_ops_unsupported']}\n"
+            f"unsupported_ops={entry['unsupported_ops']}\n"
         )
 
     # trace 173dff87 conclusion

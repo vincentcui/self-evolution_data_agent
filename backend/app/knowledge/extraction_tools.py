@@ -312,10 +312,10 @@ EXTRACTION_TOOL_SPECS: list[dict[str, Any]] = [
                         "type": "object",
                         "required": ["from_field", "to_object", "to_field"],
                         "properties": {
-                            "from_field": {"type": "string"},
-                            "to_object": {"type": "string"},
-                            "to_field": {"type": "string"},
-                            "relation_type": {"type": "string"}
+                            "from_field": {"type": "string", "description": "持有外键的列名"},
+                            "to_object": {"type": "string", "description": "被引用的目标表/集合名"},
+                            "to_field": {"type": "string", "description": "被引用的列名(如 id)。复合主键选最常用的那列"},
+                            "relation_type": {"type": "string", "description": "基数类型: many_to_one / one_to_many / one_to_one"}
                         }
                     }
                 },

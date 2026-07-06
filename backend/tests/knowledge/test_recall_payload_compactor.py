@@ -348,3 +348,98 @@ def test_instance_alias_payload_preserved():
     }
     out = compact_payload_for_recall("instance_alias", payload)
     assert out == payload
+
+
+# ════════════════════════════════════════════
+#  final_query_plan 压缩
+# ════════════════════════════════════════════
+
+def test_compact_final_query_plan_mysql():
+    payload = {
+        "final_query_plan": {
+            "steps": [{
+                "db_type": "mysql", "database": "shop", "collection": "orders",
+                "operation": "sql",
+                "query": {"sql": "SELECT * FROM orders WHERE user_id = 42 AND name = 'Alice'"},
+            }],
+        },
+    }
+    out = compact_payload_for_recall("example", payload)
+    sql = out["final_query_plan"]["steps"][0]["query"]["sql"]
+    assert "Alice" not in sql
+
+
+def test_compact_final_query_plan_oracle():
+    """Oracle SQL literal stripping — same regex as MySQL."""
+    payload = {
+        "final_query_plan": {
+            "steps": [{
+                "db_type": "oracle", "database": "SHOP", "collection": "ORDERS",
+                "operation": "sql",
+                "query": {"sql": "SELECT * FROM ORDERS WHERE status = 'ACTIVE' AND qty > 100"},
+            }],
+        },
+    }
+    out = compact_payload_for_recall("example", payload)
+    sql = out["final_query_plan"]["steps"][0]["query"]["sql"]
+    assert "ACTIVE" not in sql
+    assert "100" not in sql
+
+
+def test_compact_final_query_plan_mongo(monkeypatch):
+    """_walk 对长列表触发 placeholder 替换.
+
+    用 monkeypatch 钉死 RECALL_PAYLOAD_MAX_LIST_LEN=8, 不受生产环境配置影响.
+    """
+    monkeypatch.setattr(
+        "app.config.settings.recall_payload_max_list_len", 8
+    )
+
+    payload = {
+        "final_query_plan": {
+            "steps": [{
+                "db_type": "mongodb", "database": "shop", "collection": "orders",
+                "operation": "aggregate",
+                "query": {"pipeline": [
+                    {"$match": {"docId": {"$in": ["oid_001", "oid_002", "oid_003"] * 30}}},
+                ]},
+            }],
+        },
+    }
+    out = compact_payload_for_recall("example", payload)
+    query = out["final_query_plan"]["steps"][0]["query"]
+    assert "__placeholder__" in str(query) or "list_of_str" in str(query)
+
+
+def test_compact_sql_in_numeric_list():
+    """SQL IN (1, 2, 3) 数值列表被替换为 IN(...), 保留运算符结构."""
+    payload = {
+        "final_query_plan": {
+            "steps": [{
+                "db_type": "mysql", "database": "shop", "collection": "orders",
+                "operation": "sql",
+                "query": {"sql": "SELECT * FROM orders WHERE status IN (1, 2, 3) AND user_id = 42"},
+            }],
+        },
+    }
+    out = compact_payload_for_recall("example", payload)
+    sql = out["final_query_plan"]["steps"][0]["query"]["sql"]
+    assert "IN(...)" in sql
+    assert "1, 2, 3" not in sql
+    assert "user_id = N" in sql  # = 42 → N
+
+
+def test_compact_sql_not_in_preserved():
+    """NOT IN (1, 2) — IN 锚定词边界, NOT IN(...) 中 IN 被独立替换."""
+    payload = {
+        "final_query_plan": {
+            "steps": [{
+                "db_type": "mysql", "database": "shop", "collection": "orders",
+                "operation": "sql",
+                "query": {"sql": "SELECT * FROM orders WHERE status NOT IN (1, 2)"},
+            }],
+        },
+    }
+    out = compact_payload_for_recall("example", payload)
+    sql = out["final_query_plan"]["steps"][0]["query"]["sql"]
+    assert "NOT IN(...)" in sql

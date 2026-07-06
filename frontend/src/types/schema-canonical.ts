@@ -42,6 +42,8 @@ export interface SchemaCanonicalField {
 export interface SchemaCanonicalRelationship {
   from_target: string;
   from_field: string;
+  to_db_type: string;
+  to_database: string;
   to_target: string;
   to_field: string;
   relation_type: string;

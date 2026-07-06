@@ -87,7 +87,7 @@ export default function TerminologyEditPanel({
 
   // ── label 按 db_type 的 isSql 区分: document 用"集合/collection", relational 用"表/table" ──
   const collectionLabel =
-    !DB_TYPE_META[value.db_type as keyof typeof DB_TYPE_META]?.isSql ? "集合 (collection)" : "表 (table)";
+    !DB_TYPE_META[value.db_type as keyof typeof DB_TYPE_META]?.isSql ? "集合" : "表";
   const collectionPlaceholder =
     !DB_TYPE_META[value.db_type as keyof typeof DB_TYPE_META]?.isSql ? "选择集合" : "选择表";
 
@@ -103,12 +103,12 @@ export default function TerminologyEditPanel({
   return (
     <>
       <Form.Item
-        label="term"
+        label="术语"
         validateStatus={termError ? "error" : ""}
         help={termError}
       >
         <Input
-          aria-label="term"
+          aria-label="术语"
           value={value.term ?? ""}
           placeholder="单一业务名词 (≤20 字)"
           onChange={(e) => onChange({ ...value, term: e.target.value })}
@@ -116,9 +116,9 @@ export default function TerminologyEditPanel({
         />
       </Form.Item>
 
-      <Form.Item label="database">
+      <Form.Item label="数据库">
         <Select
-          aria-label="database"
+          aria-label="数据库"
           value={value.primary_database || undefined}
           placeholder="选择 database"
           onChange={handleDatabaseChange}
@@ -131,9 +131,9 @@ export default function TerminologyEditPanel({
         />
       </Form.Item>
 
-      <Form.Item label="db_type">
+      <Form.Item label="数据库类型">
         <Input
-          aria-label="db_type"
+          aria-label="数据库类型"
           value={value.db_type ?? ""}
           disabled
           placeholder="自动同步"
@@ -143,7 +143,7 @@ export default function TerminologyEditPanel({
 
       <Form.Item label={collectionLabel}>
         <Select
-          aria-label="collection"
+          aria-label="集合/表"
           value={value.primary_collection || undefined}
           placeholder={collectionPlaceholder}
           onChange={(c) => onChange({ ...value, primary_collection: c })}
@@ -153,10 +153,10 @@ export default function TerminologyEditPanel({
         />
       </Form.Item>
 
-      <Form.Item label="synonyms">
+      <Form.Item label="同义词">
         {/* antd Select tags 模式 — 回车 / 逗号自动转 tag, 比纯 Input 体验好且无逗号被吞 bug */}
         <Select
-          aria-label="synonyms"
+          aria-label="同义词"
           mode="tags"
           value={value.synonyms ?? []}
           onChange={(next: string[]) =>

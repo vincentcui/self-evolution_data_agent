@@ -27,6 +27,31 @@ _parse_semaphore = asyncio.Semaphore(PARSE_CONCURRENCY)
 # ── 活跃 worker 注册表 ──
 _active_workers: dict[str, asyncio.Task] = {}
 
+# ════════════════════════════════════════════
+#  全量重建清场注册表 (ns_id → 清场进行中)
+#
+#  清场是 worker 启动「之前」的阶段, 此时 repo.worker_id 仍为空,
+#  靠 worker_id 无法感知。注册表填补这段可见性盲区:
+#  batch_parse_repos(force) 同步标记 → list_repos 读取 → 前端轮询启动,
+#  worker 起来后清标记, 进度条无缝接管。
+# ════════════════════════════════════════════
+_rebuilding_namespaces: set[int] = set()
+
+
+def mark_rebuilding(ns_id: int) -> None:
+    """标记 ns 进入全量清场窗口。须在派发后台 task 「之前」同步调用。"""
+    _rebuilding_namespaces.add(ns_id)
+
+
+def clear_rebuilding(ns_id: int) -> None:
+    """清场结束 (worker 已启动 / 异常退出) 时清标记。"""
+    _rebuilding_namespaces.discard(ns_id)
+
+
+def is_rebuilding(ns_id: int) -> bool:
+    """ns 是否处于全量清场窗口 (worker 尚未起来的中间态)。"""
+    return ns_id in _rebuilding_namespaces
+
 
 # ════════════════════════════════════════════
 #  公共查询接口 (P1-19 A3: api 层走此函数, 不直读私有 dict)
@@ -78,6 +103,7 @@ async def start_parse_worker(repo_id: int, ns_id: int) -> str:
                 ns = await db.get(Namespace, ns_id)
                 if not repo or not ns:
                     log.error("Worker 中止 worker_id=%s — repo 或 namespace 不存在", worker_id)
+                    clear_rebuilding(ns_id)  # 未落库 worker_id, 清标记防全量清场悬挂
                     return
 
                 # 提取标量, session 关闭后仍可用 (expire_on_commit=False)
@@ -92,9 +118,16 @@ async def start_parse_worker(repo_id: int, ns_id: int) -> str:
                 repo.progress_message = "排队等待中..."
                 await db.commit()
             # ← session 关闭, 连接归还
+
+            # worker_id 已落库, 全量清场的可见性盲区到此结束 —
+            # 移交 worker_id 接管前端轮询。clear 与落库同协程顺序执行,
+            # 保证 clear 之后 worker_id 必已可见, 无时序缝隙。
+            # (单 / 增量解析时 ns 无清场标记, discard 幂等 no-op)
+            clear_rebuilding(ns_id)
         except Exception as e:
             log.error("Worker Phase1 失败 worker_id=%s repo_id=%d error=%s",
                       worker_id, repo_id, e, exc_info=True)
+            clear_rebuilding(ns_id)  # 未落库 worker_id, 清标记防全量清场悬挂
             try:
                 await _update_repo(
                     repo_id, parse_status="error", error_message=f"初始化失败: {e}",

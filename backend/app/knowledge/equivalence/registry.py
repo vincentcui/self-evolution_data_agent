@@ -45,7 +45,10 @@ def applicable_rules(db_type: str, kind: str) -> list[EquivalenceRule]:
     匹配逻辑:
     - rule.db_type == db_type OR rule.db_type == "*"
     - rule.kind == kind OR rule.kind == "*"
+    - kind=="relationship" → 多源分歧不走语义等价 (semantic_llm 吞 conflict)
     """
+    if kind == "relationship":
+        return []
     return [
         r for r in _REGISTRY
         if (r.db_type == db_type or r.db_type == "*")

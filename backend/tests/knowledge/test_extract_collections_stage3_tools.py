@@ -130,11 +130,25 @@ def test_final_pipeline_from_execute_plan_steps():
 
 
 def test_final_pipeline_none_when_only_execute_query():
-    """走 execute_query 路径不写 example KE 是设计意图: 单一 collection 无需 example."""
+    """走 execute_query 路径仍返 None — _extract_final_pipeline wrapper 未改."""
     trace = [
         {"name": "execute_query", "input": {"target": "c_product", "mode": "single"}, "output": {}},
     ]
-    assert _extract_final_pipeline(trace) is None
+    assert _extract_final_pipeline(trace) is None  # ← still passes, wrapper untouched
+
+
+def test_normalize_query_plan_from_execute_query_returns_plan():
+    """Phase 2: normalize_query_plan (new) returns valid plan from execute_query trace."""
+    from app.knowledge.trace_extractor import normalize_query_plan
+    trace = [
+        {"name": "execute_query", "input": {
+            "db_type": "mysql", "database": "db", "target": "t",
+            "query": {"sql": "SELECT 1"},
+        }},
+    ]
+    result = normalize_query_plan(trace)
+    assert result is not None
+    assert len(result["steps"]) == 1
 
 
 def test_final_pipeline_takes_last_execute_plan():

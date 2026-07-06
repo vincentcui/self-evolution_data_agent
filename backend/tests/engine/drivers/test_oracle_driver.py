@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -207,12 +207,20 @@ def test_mysql_driver_exposes_strip_outer_row_limit():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  C3: Thin mode fetch_db_profile — connect_async 必须被 await（离线 monkeypatch）
+#  C3: Thick/Thin 统一走 _run_in_executor + sync connect 的 fetch_db_profile
 #
 #  历史 bug: connect_async() 返回的 AsyncConnection 有 __await__，
 #  不 await 则对象未连接，所有查询均报 DPY-1001: not connected to database，
 #  但 connected=True 被无条件写入，导致错误凭据的数据源通过建源校验并落库。
+#
+#  当前实现: Thick/Thin 统一走 _run_in_executor(sync oracledb.connect),
+#  测试用 _direct_executor patch 绕线程池, 直接同步调用 _fetch_db_profile_sync.
 # ══════════════════════════════════════════════════════════════════════════════
+
+async def _direct_executor(self_inner, func, *args):
+    """_run_in_executor 替身: 直接同步调用, 绕开线程池 (单元测试专用)."""
+    return func(*args)
+
 
 def _make_fake_ds(host: str = "fake-host") -> MagicMock:
     ds = MagicMock()
@@ -227,52 +235,126 @@ def _make_fake_ds(host: str = "fake-host") -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_thin_fetch_db_profile_connected_on_success():
-    """Thin mode: connect_async 被 await → connected=True + 基础 profile 字段."""
-    # 构造模拟 AsyncConnection
+    """sync connect → connected=True + 基础 profile 字段 (含 charset/nchar_charset)."""
     fake_cur = MagicMock()
-    fake_cur.execute = AsyncMock()
-    fake_cur.fetchone = AsyncMock(
-        side_effect=[
-            ("Oracle Database 19c",),
-            ("TEST_SCHEMA",),
-            (12,),
-        ]
-    )
+    fake_cur.execute = MagicMock()
+    # 5 queries: version / schema / object_count / charset / nchar_charset
+    fake_cur.fetchone = MagicMock(side_effect=[
+        ("Oracle Database 19c",),
+        ("TEST_SCHEMA",),
+        (12,),
+        ("AL32UTF8",),
+        ("AL16UTF16",),
+    ])
     fake_cur.close = MagicMock()
 
     fake_conn = MagicMock()
     fake_conn.cursor = MagicMock(return_value=fake_cur)
-    fake_conn.close = AsyncMock()
+    fake_conn.close = MagicMock()
 
-    # connect_async 是同步函数，但返回值必须可 await（有 __await__）
-    async def _fake_connect_async(**_kw):
-        return fake_conn
-
-    with patch("app.engine.drivers.oracle._is_thick", return_value=False), \
-         patch("app.engine.drivers.oracle.oracledb.connect_async",
-               side_effect=_fake_connect_async):
+    with patch("app.engine.drivers.oracle.oracledb.connect", return_value=fake_conn), \
+         patch.object(OracleDriver, "_run_in_executor", _direct_executor):
         driver = OracleDriver()
         profile = await driver.fetch_db_profile(_make_fake_ds())
 
-    assert profile["connected"] is True, "connect_async 被 await → 应连通"
+    assert profile["connected"] is True, "connect 成功 → 应连通"
     assert "profiled_at" in profile
     assert profile["version"] == "Oracle Database 19c"
     assert profile["schema"] == "TEST_SCHEMA"
     assert profile["object_count"] == 12
-    assert fake_cur.execute.await_count == 3
+    assert profile["charset"] == "AL32UTF8", "NLS_CHARACTERSET 应写入 charset"
+    assert profile["nchar_charset"] == "AL16UTF16", "NLS_NCHAR_CHARACTERSET 应写入 nchar_charset"
+    assert fake_cur.execute.call_count == 5
 
 
 @pytest.mark.asyncio
 async def test_thin_fetch_db_profile_connected_false_on_error():
-    """Thin mode: connect_async 抛异常 → connected=False，不置 True。"""
-    async def _fail(**_kw):
-        raise OSError("connect refused")
-
-    with patch("app.engine.drivers.oracle._is_thick", return_value=False), \
-         patch("app.engine.drivers.oracle.oracledb.connect_async",
-               side_effect=_fail):
+    """sync connect 抛异常 → connected=False，不置 True。"""
+    with patch("app.engine.drivers.oracle.oracledb.connect",
+               side_effect=OSError("connect refused")), \
+         patch.object(OracleDriver, "_run_in_executor", _direct_executor):
         driver = OracleDriver()
         profile = await driver.fetch_db_profile(_make_fake_ds())
 
     assert profile["connected"] is False, "连接失败 → 不得写入 connected=True"
     assert "error" in profile
+
+
+# ══ 三态行数保护 (Oracle ROWNUM/FETCH) — 生产 trace 60fc1016 对称防线 ══
+from app.config import settings as _settings  # noqa: E402
+from app.engine.drivers.oracle import (  # noqa: E402
+    OracleDriver,
+    _apply_rownum_limit,
+    _extract_outer_rownum_value,
+)
+
+
+def test_oracle_extract_rownum_wrapper_value():
+    sql = "SELECT * FROM (SELECT a FROM t) WHERE ROWNUM <= 500"
+    assert _extract_outer_rownum_value(sql) == 500
+
+
+def test_oracle_extract_fetch_first_value():
+    sql = "SELECT a FROM t FETCH FIRST 5000 ROWS ONLY"
+    assert _extract_outer_rownum_value(sql) == 5000
+
+
+def test_oracle_extract_none_when_no_limit():
+    assert _extract_outer_rownum_value("SELECT a FROM t") is None
+
+
+def test_oracle_apply_no_limit_wraps_with_cap():
+    out = _apply_rownum_limit("SELECT a FROM t", 1000)
+    assert "ROWNUM <= 1000" in out
+
+
+def test_oracle_apply_over_cap_rewrapped():
+    # FETCH 5000 > cap 1000 → strip + ROWNUM 1000
+    out = _apply_rownum_limit("SELECT a FROM t FETCH FIRST 5000 ROWS ONLY", 1000)
+    assert "ROWNUM <= 1000" in out
+    assert "5000" not in out
+
+
+def test_oracle_apply_under_cap_preserved():
+    # FETCH 10 ≤ cap 1000 → 保留原值 (尊重 LLM 小样本)
+    sql = "SELECT a FROM t FETCH FIRST 10 ROWS ONLY"
+    out = _apply_rownum_limit(sql, 1000)
+    assert out == sql
+
+
+def test_oracle_wrap_single_uses_query_row_limit():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t", "single", 1000)
+    assert f"ROWNUM <= {_settings.query_row_limit}" in out
+
+
+def test_oracle_wrap_probe_uses_probe_row_limit():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t", "probe", 1000)
+    assert f"ROWNUM <= {_settings.probe_row_limit}" in out
+
+
+def test_oracle_count_strips_and_wraps():
+    out = OracleDriver._wrap_by_mode("SELECT a FROM t FETCH FIRST 50 ROWS ONLY", "count", 1000)
+    assert out.startswith("SELECT COUNT(*) AS cnt FROM (")
+    assert "50" not in out
+
+
+# ── 尾注释对称硬化 (Claim 3, 与 MySQL 对称) ──
+def test_oracle_extract_fetch_ignores_trailing_comment():
+    # 击穿防线: FETCH 5000 后带注释, 剥注释后仍能提取 5000
+    sql = "SELECT a FROM t FETCH FIRST 5000 ROWS ONLY -- c"
+    assert _extract_outer_rownum_value(sql) == 5000
+
+
+def test_oracle_apply_over_cap_with_trailing_comment_capped():
+    out = _apply_rownum_limit("SELECT a FROM t FETCH FIRST 5000 ROWS ONLY -- c", 1000)
+    assert "ROWNUM <= 1000" in out
+    assert "5000" not in out
+    assert "--" not in out
+
+
+def test_oracle_string_literal_dashes_not_stripped():
+    # tokenizer 尊重字面量: 引号内 '-- x' 不被当注释
+    sql = "SELECT a, '-- x' AS c FROM t FETCH FIRST 5000 ROWS ONLY"
+    out = _apply_rownum_limit(sql, 1000)
+    assert "'-- x'" in out
+    assert "ROWNUM <= 1000" in out

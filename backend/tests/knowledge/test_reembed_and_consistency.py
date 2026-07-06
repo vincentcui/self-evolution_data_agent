@@ -25,7 +25,7 @@ async def test_reembed_dry_run_counts_candidates(db_session, chroma_isolated):
     db_session.add_all([
         KnowledgeEntry(
             namespace_id=ns.id, entry_type="terminology", content=f"x{i}",
-            source="git", status="canonical", tier="normal",
+            source="code_extract", status="canonical", tier="normal",
         )
         for i in range(3)
     ])
@@ -50,7 +50,7 @@ async def test_reembed_real_replaces_chromadb_docs(db_session, chroma_isolated):
     for i in range(3):
         ke = KnowledgeEntry(
             namespace_id=ns.id, entry_type="rule", content=f"y{i}",
-            source="git", status="canonical", tier="normal",
+            source="code_extract", status="canonical", tier="normal",
         )
         db_session.add(ke)
         await db_session.commit()
@@ -78,7 +78,7 @@ async def test_verify_detects_db_only_inconsistency(db_session, chroma_isolated)
     await db_session.refresh(ns)
     ke = KnowledgeEntry(
         namespace_id=ns.id, entry_type="terminology", content="z",
-        source="git", status="canonical", tier="normal",
+        source="code_extract", status="canonical", tier="normal",
     )
     db_session.add(ke)
     await db_session.commit()

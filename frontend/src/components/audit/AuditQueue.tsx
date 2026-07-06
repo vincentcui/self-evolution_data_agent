@@ -23,10 +23,10 @@ const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const STATUS_OPTIONS: { label: string; value: StatusValue }[] = [
-  { label: "proposed", value: "proposed" },
-  { label: "canonical", value: "canonical" },
-  { label: "rejected", value: "rejected" },
-  { label: "superseded", value: "superseded" },
+  { label: "待审", value: "proposed" },
+  { label: "已通过", value: "canonical" },
+  { label: "已拒绝", value: "rejected" },
+  { label: "已替代", value: "superseded" },
 ];
 
 export default function AuditQueue({
@@ -90,25 +90,28 @@ export default function AuditQueue({
         />
         <Select placeholder="类型" allowClear value={entryType} onChange={setEntryType}
           options={[
-            { label: "术语", value: "terminology" },
+            { label: "业务术语", value: "terminology" },
             { label: "实例别名", value: "instance_alias" },
-            { label: "示例", value: "example" },
-            { label: "规则", value: "rule" },
-            { label: "路由", value: "route_hint" },
+            { label: "示例查询", value: "example" },
+            { label: "查询规则", value: "rule" },
+            { label: "路由偏好", value: "route_hint" },
           ]} style={{ width: 120 }} />
         <Select placeholder="来源" allowClear value={source} onChange={setSource}
           options={[
+            { label: "Schema 抽取", value: "schema" },
             { label: "手动", value: "manual" },
-            { label: "对话", value: "conversation" },
-            { label: "Git", value: "git" },
-            { label: "Agent", value: "agent_learn" },
-            { label: "迁移", value: "migration" },
-          ]} style={{ width: 120 }} />
+            { label: "Agent 学习", value: "agent_learn" },
+            { label: "代码提取", value: "code_extract" },
+          ]} style={{ width: 130 }} />
         {showStatusFilter && !status && (
           <Select placeholder="状态" allowClear value={statusFilter} onChange={setStatusFilter}
             options={STATUS_OPTIONS} style={{ width: 140 }} />
         )}
-        {showLockedStatusTag && <Tag color="blue">{status}</Tag>}
+        {showLockedStatusTag && (
+          <Tag color="blue">
+            {STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status}
+          </Tag>
+        )}
         <Tag>共 {data?.total ?? 0} 条</Tag>
       </Space>
 

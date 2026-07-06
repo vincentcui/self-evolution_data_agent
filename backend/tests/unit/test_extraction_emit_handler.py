@@ -21,6 +21,7 @@ class _TC:
 class _Resp:
     text: str = ""
     tool_calls: list = None
+    reasoning_content: str | None = None
 
 
 async def test_emit_handler_appends_valid_and_rejects_invalid():

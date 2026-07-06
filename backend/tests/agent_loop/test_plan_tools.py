@@ -206,7 +206,7 @@ async def test_execute_plan_overrides_planner_limit_and_counts_true_total(monkey
             steps=[PlanStep(
                 step_idx=1, database="shop_db", collection="orders", operation="sql",
                 query={"sql": "SELECT d, SUM(v) AS v FROM orders GROUP BY d LIMIT 1000"},
-                pipeline=[], projection={}, sort=[], limit=1000, exports=[], db_type="mysql",
+                pipeline=[], projection={}, sort=[], exports=[], db_type="mysql",
             )],
             post_process="", raw_llm_output="",
         )
@@ -249,7 +249,7 @@ async def test_execute_plan_exact_limit_not_truncated(monkeypatch):
             steps=[PlanStep(
                 step_idx=1, database="d", collection="t", operation="sql",
                 query={"sql": "SELECT a FROM t LIMIT 1000"},
-                pipeline=[], projection={}, sort=[], limit=1000, exports=[], db_type="mysql",
+                pipeline=[], projection={}, sort=[], exports=[], db_type="mysql",
             )],
             post_process="", raw_llm_output="",
         )

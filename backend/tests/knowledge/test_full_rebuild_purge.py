@@ -27,10 +27,10 @@ from app.models.terminology_conflict import TerminologyConflict
 # ════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_purge_deletes_all_git_kes_including_canonical(
+async def test_purge_deletes_all_code_extract_kes_including_canonical(
     seeded_repo_with_mixed_kes, async_session, chroma_isolated,
 ):
-    """G1: source=git ∧ repo_id 全删, 含 canonical (spec 2026-05-21 决策 1)."""
+    """G1: source=code_extract ∧ repo_id 全删, 含 canonical."""
     from app.knowledge.trainer import purge_legacy_for_full_rebuild
 
     ns_id, repo_id = seeded_repo_with_mixed_kes
@@ -140,7 +140,7 @@ async def test_purge_failure_aborts_atomically(
 
 
 # ════════════════════════════════════════════
-#  G2 / G4 / G5 / G7 — spec 2026-05-21-git-source-full-purge
+#  G2 / G4 / G5 / G7 — spec code_extract-source-full-purge
 # ════════════════════════════════════════════
 
 
@@ -160,8 +160,8 @@ def _mk_ke(ns_id, repo_id, source, status, entry_type="rule"):
 
 
 @pytest.mark.asyncio
-async def test_purge_preserves_non_git_canonical_4_sources(async_session, chroma_isolated):
-    """G2: 非 git canonical 4 个来源全不删."""
+async def test_purge_preserves_non_rebuildable_canonical_4_sources(async_session, chroma_isolated):
+    """G2: 非 code_extract (REPO_REBUILDABLE_SOURCES) canonical 4 个来源全不删."""
     from app.knowledge.trainer_purge import purge_legacy_for_full_rebuild
     from app.models import Namespace
     from app.models.git_repo import GitRepo
@@ -177,17 +177,17 @@ async def test_purge_preserves_non_git_canonical_4_sources(async_session, chroma
         await db.refresh(repo)
 
         seeded_ids = []
-        for src in ("manual", "agent_learn", "clarify", "conversation"):
+        for src in ("manual", "agent_learn", "schema", "agent_learn"):
             ke = _mk_ke(ns.id, None, src, "canonical")
             db.add(ke)
             await db.flush()
             seeded_ids.append(ke.id)
-        # 种 1 个 git canonical 应被删
-        git_ke = _mk_ke(ns.id, repo.id, "git", "canonical")
-        db.add(git_ke)
+        # 种 1 个 code_extract canonical 应被删
+        code_extract_ke = _mk_ke(ns.id, repo.id, "code_extract", "canonical")
+        db.add(code_extract_ke)
         await db.commit()
-        await db.refresh(git_ke)
-        git_ke_id = git_ke.id
+        await db.refresh(code_extract_ke)
+        code_extract_ke_id = code_extract_ke.id
 
         await purge_legacy_for_full_rebuild(db, repo.id, ns.id)
         await db.commit()
@@ -195,8 +195,10 @@ async def test_purge_preserves_non_git_canonical_4_sources(async_session, chroma
     async with async_session() as db:
         for kid in seeded_ids:
             ke = await db.get(KnowledgeEntry, kid)
-            assert ke is not None, f"非 git canonical id={kid} 被误删"
-        assert await db.get(KnowledgeEntry, git_ke_id) is None, "git canonical 未删"
+            assert ke is not None, f"非 code_extract canonical id={kid} 被误删"
+        assert await db.get(KnowledgeEntry, code_extract_ke_id) is None, (
+            "code_extract canonical 未删"
+        )
 
 
 @pytest.mark.asyncio
@@ -216,7 +218,7 @@ async def test_purge_cascade_deletes_resolved_conflicts(async_session, chroma_is
         await db.commit()
         await db.refresh(repo)
 
-        canonical = _mk_ke(ns.id, repo.id, "git", "canonical", "terminology")
+        canonical = _mk_ke(ns.id, repo.id, "code_extract", "canonical", "terminology")
         db.add(canonical)
         await db.commit()
         await db.refresh(canonical)
@@ -225,7 +227,7 @@ async def test_purge_cascade_deletes_resolved_conflicts(async_session, chroma_is
             namespace_id=ns.id,
             existing_entry_id=canonical.id,
             candidate_payload="{}",
-            candidate_source="git",
+            candidate_source="code_extract",
             status="resolved",
             resolution_choice="merge_both",
         )
@@ -267,7 +269,7 @@ async def test_purge_chromadb_failure_does_not_block_sql_commit(
         await db.refresh(repo)
 
         for st in ("proposed", "canonical"):
-            db.add(_mk_ke(ns.id, repo.id, "git", st))
+            db.add(_mk_ke(ns.id, repo.id, "code_extract", st))
         await db.commit()
 
         def boom(**kwargs):
@@ -282,7 +284,7 @@ async def test_purge_chromadb_failure_does_not_block_sql_commit(
         remaining = (await db.execute(
             select(KnowledgeEntry).where(
                 KnowledgeEntry.repo_id == repo.id,
-                KnowledgeEntry.source == "git",
+                KnowledgeEntry.source == "code_extract",
             )
         )).scalars().all()
         assert len(remaining) == 0, "SQL 已 commit 不回滚, KE 应删干净"

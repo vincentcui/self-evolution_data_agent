@@ -1,0 +1,512 @@
+/* ════════════════════════════════════════════════════════
+ *  ModelForm — 完全对齐 DataAgent 设计稿 styles.css
+ *  CSS 变量映射（与设计稿 :root 一致）：
+ *    --bg-base      #f5f7fa
+ *    --bg-elevated  #f0f2f5
+ *    --bg-surface   #ffffff
+ *    --border       #e5e8ed
+ *    --border-light #eef1f5
+ *    --text-primary   #1a2332
+ *    --text-secondary #5a6878
+ *    --text-muted     #9ba5b2
+ *    --accent         #4f6ef7
+ *    --accent-subtle  rgba(79,110,247,0.08)
+ *    --accent-light   rgba(79,110,247,0.05)
+ *    --radius    8px   --radius-lg 12px  --radius-xl 16px
+ *    --shadow-lg 0 10px 40px rgba(0,0,0,0.1)
+ * ════════════════════════════════════════════════════════ */
+
+/* ── 遮罩 ──────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mfFadeIn 0.2s ease;
+}
+@keyframes mfFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── modal — 对应设计稿 .modal.modal-xl ─────────────────── */
+.modal {
+  width: 100%;
+  max-width: 600px;
+  background: #ffffff;
+  border: 1px solid #e5e8ed;
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: mfSlideUp 0.22s ease;
+}
+@keyframes mfSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── modal-head ───────────────────────────────────────── */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid #eef1f5;
+}
+.head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a2332;
+}
+.closeBtn {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: #9ba5b2;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.closeBtn:hover { background: #f0f2f5; color: #1a2332; }
+
+/* ── mf-body ──────────────────────────────────────────── */
+.body {
+  display: flex;
+  flex-direction: row;
+  min-height: 200px;
+  max-height: 320px;
+}
+
+/* ── mf-tabs ──────────────────────────────────────────── */
+.tabs {
+  flex: 0 0 110px;
+  background: #f0f2f5;
+  border-right: 1px solid #eef1f5;
+  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #5a6878;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 2.5px solid transparent;
+  white-space: nowrap;
+}
+.tab:hover { color: #1a2332; background: rgba(79, 110, 247, 0.03); }
+.tab svg { flex-shrink: 0; }
+.tabActive {
+  color: #4f6ef7 !important;
+  background: rgba(79, 110, 247, 0.05) !important;
+  border-left-color: #4f6ef7 !important;
+  font-weight: 600 !important;
+}
+.tabActive svg { color: #4f6ef7; }
+
+/* ── mf-panels ────────────────────────────────────────── */
+.panels {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 20px;
+  scroll-behavior: smooth;
+  background: #ffffff;
+}
+
+/* ── mf-section ───────────────────────────────────────── */
+.section {
+  padding-bottom: 14px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #e5e8ed;
+}
+.section:last-child { border-bottom: none; margin-bottom: 0; }
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a2332;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #e5e8ed;
+}
+
+/* ── mf-row ───────────────────────────────────────────── */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 8px;
+}
+.row:last-child { margin-bottom: 0; }
+.rowTop { align-items: flex-start; }
+
+/* ── mf-row-label ─────────────────────────────────────── */
+.rowLabel {
+  flex: 0 0 95px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #5a6878;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 32px;
+  padding-top: 0;
+}
+.req { color: #ef4444; }
+
+/* ── mf-row-ctrl ──────────────────────────────────────── */
+.rowCtrl { flex: 1; min-width: 0; }
+
+/* 普通输入框 */
+.rowCtrl input[type="text"],
+.rowCtrl input[type="password"],
+.rowCtrl input[type="number"] {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e5e8ed;
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: #1a2332;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+.rowCtrl input[type="text"]:focus,
+.rowCtrl input[type="password"]:focus,
+.rowCtrl input[type="number"]:focus {
+  border-color: #4f6ef7;
+  box-shadow: 0 0 0 3px rgba(79, 110, 247, 0.08);
+  background: #ffffff;
+}
+.rowCtrl input::placeholder { color: #9ba5b2; }
+
+/* ── mf-provider-select ───────────────────────────────── */
+.provSelect {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e5e8ed;
+  border-radius: 8px;
+  background: #f5f7fa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 8px;
+  user-select: none;
+  position: relative;
+  overflow: visible;
+}
+.provSelect:hover { border-color: rgba(79, 110, 247, 0.35); }
+.provSelectOpen {
+  border-color: #4f6ef7;
+  box-shadow: 0 0 0 3px rgba(79, 110, 247, 0.08);
+  background: #ffffff;
+}
+.provDisplay { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.provPlaceholder { font-size: 13px; color: #9ba5b2; }
+
+.provDropdown {
+  display: block;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e8ed;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
+  z-index: 200;
+  padding: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.provOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1a2332;
+  transition: background 0.15s;
+}
+.provOption:hover { background: rgba(79, 110, 247, 0.05); }
+.provOptionActive { background: rgba(79, 110, 247, 0.06) !important; font-weight: 600; }
+
+/* Provider logo */
+.provLogo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: -0.3px;
+}
+.logoDeepseek { background: linear-gradient(135deg, #4361ee, #3a86ff); }
+.logoQwen     { background: linear-gradient(135deg, #6c38f5, #9b5de5); }
+.logoOpenai   { background: linear-gradient(135deg, #10a37f, #19c99d); }
+.logoSilicon  { background: linear-gradient(135deg, #f77f00, #fcbf49); }
+.logoZhipu    { background: linear-gradient(135deg, #14b8a6, #06b6d4); }
+.logoCustom   { background: linear-gradient(135deg, #6b7280, #9ca3af); }
+
+/* ── mf-tooltip ───────────────────────────────────────── */
+.tooltip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e8ecf0;
+  color: #9ba5b2;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* ── mf-type-cards ────────────────────────────────────── */
+.typeCards { display: flex; gap: 8px; }
+
+.typeCard {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1.5px solid #e5e8ed;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  min-width: 0;
+}
+.typeCard:hover {
+  border-color: rgba(79, 110, 247, 0.3);
+  background: rgba(79, 110, 247, 0.05);
+}
+.typeCardSelected {
+  border-color: #4f6ef7 !important;
+  background: rgba(79, 110, 247, 0.04) !important;
+  box-shadow: 0 0 0 3px rgba(79, 110, 247, 0.08);
+}
+.typeCardDisabled {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+}
+.typeCardDisabled:hover {
+  border-color: #e5e8ed !important;
+  background: #ffffff !important;
+}
+.typeIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.typeIconChat  { background: rgba(79, 110, 247, 0.08); color: #4f6ef7; }
+.typeIconEmbed { background: rgba(139, 92, 246, 0.08); color: #8b5cf6; }
+/* 对应参考 .mf-type-info */
+.typeInfo {
+  flex: 1;
+  min-width: 0;
+}
+.typeName {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a2332;
+  white-space: nowrap;
+}
+.typeCheck {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid #e5e8ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: transparent;
+  flex-shrink: 0;
+}
+.typeCheckSelected {
+  background: #4f6ef7 !important;
+  border-color: #4f6ef7 !important;
+  color: #ffffff !important;
+}
+
+/* ── 步进器 — 对应设计稿 .temp-number-group ──────────── */
+.numGroup {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e5e8ed;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 34px;
+  width: 160px;
+}
+.stepBtn {
+  width: 32px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #f0f2f5;
+  color: #5a6878;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.stepBtn:hover { background: rgba(79, 110, 247, 0.08); color: #4f6ef7; }
+.numInput {
+  flex: 1;
+  height: 34px !important;
+  border: none !important;
+  border-left: 1px solid #e5e8ed !important;
+  border-right: 1px solid #e5e8ed !important;
+  border-radius: 0 !important;
+  text-align: center;
+  font-size: 13px;
+  color: #1a2332;
+  background: #ffffff !important;
+  outline: none;
+  box-shadow: none !important;
+  padding: 0 4px !important;
+  min-width: 0 !important;
+  -moz-appearance: textfield;
+  font-family: inherit;
+}
+.numInput::-webkit-outer-spin-button,
+.numInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ── 代理开关 — 对应设计稿 .mf-toggle-switch ─────────── */
+.proxyToggleRow { display: flex; align-items: center; gap: 10px; }
+.proxyHint { font-size: 11px; color: #9ba5b2; line-height: 1.4; }
+
+.toggleSwitch { position: relative; display: inline-block; flex-shrink: 0; }
+.toggleSwitch input { display: none; }
+.toggleTrack {
+  display: block;
+  width: 36px;
+  height: 20px;
+  background: #e5e8ed;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.toggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.toggleSwitch input:checked + .toggleTrack { background: #4f6ef7; }
+.toggleSwitch input:checked + .toggleTrack .toggleThumb { left: 18px; }
+
+/* ── 嵌入提示 ─────────────────────────────────────────── */
+.embedHint { font-size: 12px; color: #9ba5b2; padding: 6px 0; }
+
+/* ── modal-foot ───────────────────────────────────────── */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 20px;
+  border-top: 1px solid #e5e8ed;
+}
+
+/* 取消 — 对应设计稿 .btn-outline */
+.footBtnCancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid #e5e8ed;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #5a6878;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.footBtnCancel:hover { border-color: #9ba5b2; color: #1a2332; }
+
+/* 创建/保存 — 对应设计稿 .btn-primary */
+.footBtnSave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: #4f6ef7;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.footBtnSave:hover:not(:disabled) {
+  background: #3b5ce6;
+  box-shadow: 0 3px 10px rgba(79, 110, 247, 0.2);
+  transform: translateY(-1px);
+}
+.footBtnSave:disabled { opacity: 0.7; cursor: not-allowed; }
+
+/* ── spinner ──────────────────────────────────────────── */
+.spinIcon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: mfSpin 0.8s linear infinite;
+}
+@keyframes mfSpin { to { transform: rotate(360deg); } }

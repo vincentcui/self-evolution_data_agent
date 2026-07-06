@@ -77,5 +77,8 @@ def test_backward_compat_no_kwargs():
     assert "## 路由提示 (route_hint)" not in prompt
     # 仍然渲染基础 prompt 内容
     assert "lookup_knowledge" in prompt
+    # plan03 Task5: 步骤8 提 db_profile 能力限制 (非 server_capabilities)
+    assert "db_profile" in prompt
+    assert "server_capabilities" not in prompt
     # 2026-05-12 reform: 不再向 LLM 暴露迭代配额
     assert "迭代上限" not in prompt

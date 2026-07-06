@@ -28,7 +28,7 @@ pytestmark = pytest.mark.live
 
 
 def _llm_available() -> bool:
-    return bool(settings.claude_api_key or settings.llm_api_key)
+    return bool(os.environ.get('IS_CLAUDE_API_KEY') or os.environ.get('IS_LLM_API_KEY'))
 
 
 def _src(prefix: str) -> dict | None:

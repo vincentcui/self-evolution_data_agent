@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
-from datetime import datetime as _dt
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -22,6 +21,7 @@ from app.auth import (
 from app.config import settings
 from app.db.metadata import get_db
 from app.models import AgentTrace
+from app.models.base import local_now
 from app.models.user import User
 
 router = APIRouter(tags=["agent-traces"])
@@ -54,6 +54,7 @@ async def list_traces(
     for r in rows:
         # tool_call_count: 解析 trace_json 取 tool_trace 列表长度
         tcc = 0
+        trace_damaged = False
         if r.trace_json:
             try:
                 trace_data = _json.loads(r.trace_json)
@@ -63,7 +64,8 @@ async def list_traces(
                     tt = trace_data.get("tool_trace")
                     tcc = len(tt) if isinstance(tt, list) else 0
             except (_json.JSONDecodeError, TypeError):
-                tcc = 0
+                tcc = None
+                trace_damaged = True
         out.append({
             "id": r.id,
             "trace_id": r.trace_id,
@@ -73,6 +75,7 @@ async def list_traces(
             "refined_at": r.refined_at.isoformat() if r.refined_at else None,
             "created_at": r.created_at.isoformat(),
             "tool_call_count": tcc,
+            "trace_damaged": trace_damaged,
         })
     return out
 
@@ -95,6 +98,24 @@ async def get_trace_detail(
             raise HTTPException(403, "No access")
     else:
         await assert_ns_access(db, actor, row.namespace_id)
+
+    # ── tool_trace_compact: trace_json.tool_trace → compact_tool_call 只读投影 ──
+    # 唯一真相源是 trace_json.tool_trace; compact 是纯投影, 不碰 reflection
+    # (reflection 合并放前端, 保持 compact_tool_call 与提取器 inflection_points 产线解耦).
+    from app.knowledge.trace_compression import compact_tool_call
+
+    tool_trace_raw: list = []
+    trace_damaged = False
+    try:
+        tj = _json.loads(row.trace_json) if row.trace_json else {}
+        raw = tj.get("tool_trace") if isinstance(tj, dict) else None
+        if isinstance(raw, list):
+            tool_trace_raw = raw
+    except (ValueError, TypeError):
+        tool_trace_raw = []
+        trace_damaged = True
+    tool_trace_compact = [compact_tool_call(i, c) for i, c in enumerate(tool_trace_raw)]
+
     return {
         "id": row.id,
         "trace_id": row.trace_id,
@@ -102,6 +123,8 @@ async def get_trace_detail(
         "user_query": row.user_query,
         "trace_json": row.trace_json,
         "reflection_log_json": row.reflection_log_json,
+        "tool_trace_compact": tool_trace_compact,
+        "trace_damaged": trace_damaged,
         "status": row.status,
         "refined_at": row.refined_at.isoformat() if row.refined_at else None,
         "refined_summary": row.refined_summary,
@@ -162,10 +185,10 @@ async def refine_traces_endpoint(
         )).scalar_one_or_none()
         ns_slug = ns.slug if ns else None
 
-    from app.knowledge.trace_refiner import refine_traces
-
     # ── 拉 critical rules 注入 trace_refiner 已知禁区, 防 LLM 重复总结 ──
     from sqlalchemy import select as _select
+
+    from app.knowledge.trace_refiner import refine_traces
     from app.models.knowledge_entry import KnowledgeEntry
     critical_rules: list[str] = []
     if ns_id is not None:
@@ -197,7 +220,8 @@ async def refine_traces_endpoint(
         extract_db_context,
         extract_final_pipeline,
         extract_join_fields,
-        extract_primary_query_json,
+        extract_join_keys,
+        normalize_query_plan,
     )
 
     # LLM 语义字段 allowlist — 多塞字段静默丢弃
@@ -208,8 +232,8 @@ async def refine_traces_endpoint(
         "route_hint": {"question_pattern", "reason", "avoid_path"},
         "rule": {"rule_text", "rule_kind", "applies_to_collections",
                  "priority", "evidence"},
-        "example": {"question", "result_summary", "nl_paraphrases",
-                    "schema_hash", "extraction_source"},
+        "example": {"question_pattern", "result_summary",
+                    "collections", "join_keys", "final_query_plan"},
     }
 
     trace_by_id: dict[str, "AgentTrace"] = {r.trace_id: r for r in rows}
@@ -254,13 +278,14 @@ async def refine_traces_endpoint(
             if not p.payload.get("target_collection") and collections:
                 p.payload["target_collection"] = collections[0]
         elif p.entry_type == "example":
-            if not p.payload.get("target_collection") and collections:
-                p.payload["target_collection"] = collections[0]
-            if database:
-                p.payload["target_database"] = database
-            qj = extract_primary_query_json(tool_trace)
-            if qj is not None:
-                p.payload["query_json"] = qj
+            qplan = normalize_query_plan(tool_trace)
+            if qplan is not None:
+                p.payload["final_query_plan"] = qplan
+            if collections:
+                p.payload["collections"] = collections
+            joins = extract_join_keys(qplan)
+            if joins:
+                p.payload["join_keys"] = joins
         elif p.entry_type == "route_hint":
             if collections:
                 p.payload["collection_path"] = collections
@@ -316,7 +341,7 @@ async def refine_traces_endpoint(
     # 标 traces 为 refined
     for r in rows:
         r.status = "refined"
-        r.refined_at = _dt.now()
+        r.refined_at = local_now()
         r.refined_summary = _json.dumps({
             "proposed_ke_ids": new_ids,
             "count": len(proposed),

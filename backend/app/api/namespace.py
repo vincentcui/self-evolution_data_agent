@@ -10,12 +10,13 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
     ROLE_ADMIN,
     accessible_namespace_ids,
+    assert_ns_access,
     assert_ns_owner,
     get_current_user,
     require_admin_or_above,
@@ -27,14 +28,20 @@ from app.engine.drivers import get_driver
 from app.engine.registry import delete_knowledge_collection
 from app.knowledge.bulk_guard import BulkOperationGuard
 from app.models import DataSource, Namespace
+from app.models.model_config import ModelConfig
+from app.models.schema_canonical_object import SchemaCanonicalObject
 from app.models.user import User, UserNamespaceAccess
 from app.schemas import (
+    BlockerOut,
     DataSourceCreate,
     DataSourceOut,
+    DataSourceProbeIn,
+    DataSourceProbeOut,
     NamespaceCreate,
     NamespaceDeletePreview,
     NamespaceOut,
     NamespaceUpdate,
+    ReadinessOut,
     SchemaRefreshResult,
 )
 
@@ -329,6 +336,7 @@ async def add_datasource(
         username=body.username,
         password=body.password,
         description=body.description,
+        timezone=body.timezone,
     )
     # 连通才存: fetch_db_profile 的 connected 标志为连通判据 (降级安全, 永不抛).
     # 用 connected 而非 "version in profile": 受限账号能连但读不到 version 时不应误拒 (D4).
@@ -347,6 +355,36 @@ async def add_datasource(
     await db.commit()
     await db.refresh(ds)
     return DataSourceOut.from_orm_ds(ds)
+
+
+@router.post("/{ns_id}/datasources/probe", response_model=DataSourceProbeOut)
+async def probe_datasource(
+    ns_id: int,
+    body: DataSourceProbeIn,
+    _user: User = Depends(require_ns_manage),
+    db: AsyncSession = Depends(get_db),
+):
+    """测试连通性 + 时区探测. 不落库. 返回 DataSourceProbeOut."""
+    await _get_namespace(db, ns_id)
+    # timezone 用 settings.app_timezone 占位: probe_connectivity 不读 ds.timezone, 不落库
+    ds = DataSource(
+        namespace_id=ns_id,
+        db_type=body.db_type,
+        host=body.host,
+        port=body.port,
+        database=body.database,
+        username=body.username,
+        password=body.password,
+        description=body.description,
+        timezone=settings.app_timezone,
+    )
+    driver = get_driver(body.db_type)
+    result = await driver.probe_connectivity(ds)
+    return DataSourceProbeOut(
+        connected=result.connected,
+        detected_timezone=result.detected_timezone,
+        failure_reason=result.failure_reason,
+    )
 
 
 @router.post("/{ns_id}/datasources/{ds_id}/refresh-schema", response_model=SchemaRefreshResult)
@@ -424,6 +462,98 @@ async def delete_datasource(
     # driver 连接池清理: 防 ds 删除后 pool/client 残留持有 TCP 连接
     from app.engine.drivers import evict_datasource
     await evict_datasource(ds_id)
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Readiness
+# ════════════════════════════════════════════
+
+@router.get("/{namespace_id}/readiness", response_model=ReadinessOut)
+async def get_readiness(
+    namespace_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """检查命名空间是否可问数。返回 ready 状态 + 阻塞原因."""
+    # has_access
+    has_access = True
+    try:
+        await assert_ns_access(db, user, namespace_id)
+    except HTTPException:
+        has_access = False
+
+    # has_datasource
+    ds_count = await db.scalar(
+        select(func.count()).select_from(DataSource).where(
+            DataSource.namespace_id == namespace_id,
+        )
+    )
+    has_datasource = (ds_count or 0) > 0
+
+    # has_global_api_key
+    chat_active = await db.scalar(
+        select(func.count()).select_from(ModelConfig).where(
+            ModelConfig.model_type == "CHAT",
+            ModelConfig.is_active.is_(True),
+            ModelConfig.is_deleted.is_(False),
+        )
+    )
+    has_global_api_key = (chat_active or 0) > 0
+
+    # has_valid_schema
+    schema_count = await db.scalar(
+        select(func.count()).select_from(SchemaCanonicalObject).where(
+            SchemaCanonicalObject.namespace_id == namespace_id,
+        )
+    )
+    has_valid_schema = (schema_count or 0) > 0
+
+    ready = has_access and has_datasource and has_global_api_key and has_valid_schema
+
+    blockers: list[BlockerOut] = []
+    if not has_access:
+        blockers.append(BlockerOut(
+            type="no_access",
+            message="无权访问该空间",
+            admin_action="",
+            admin_route="",
+            user_action="请联系管理员获取空间访问权限",
+        ))
+    if not has_datasource:
+        blockers.append(BlockerOut(
+            type="no_datasource",
+            message="空间没有可用的数据源",
+            admin_action="去添加数据源",
+            admin_route=f"/namespaces/{namespace_id}",
+            user_action="请联系管理员配置数据源",
+        ))
+    if not has_global_api_key:
+        blockers.append(BlockerOut(
+            type="no_api_key",
+            message="未配置全局默认 API Key",
+            admin_action="去配置 API Key",
+            admin_route="/model-management",
+            user_action="请联系管理员配置模型凭证",
+        ))
+    if not has_valid_schema:
+        blockers.append(BlockerOut(
+            type="no_schema",
+            message="Schema 尚未采集",
+            admin_action="去采集 Schema",
+            admin_route=f"/namespaces/{namespace_id}",
+            user_action="请联系管理员完成 Schema 采集",
+        ))
+
+    return ReadinessOut(
+        ready=ready,
+        checks={
+            "has_access": has_access,
+            "has_datasource": has_datasource,
+            "has_global_api_key": has_global_api_key,
+            "has_valid_schema": has_valid_schema,
+        },
+        blockers=blockers,
+    )
 
 
 # ════════════════════════════════════════════

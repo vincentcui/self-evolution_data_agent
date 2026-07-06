@@ -3,8 +3,8 @@
 **Validates: Requirements 3.3, 3.4, 3.5**
 
 These tests encode the EXISTING correct behavior that must be preserved after the fix:
-- _delete_legacy_kes deletes source='git' entries (preservation of existing purge)
-- _delete_legacy_kes does NOT delete source NOT in ['git', 'mybatis_extract'] (Req 3.5)
+- _delete_repo_extracted_kes deletes source='code_extract' entries (preservation of existing purge)
+- _delete_repo_extracted_kes does NOT delete source NOT in ['code_extract'] (Req 3.5)
 
 All tests should PASS on unfixed code — confirming baseline behavior to preserve.
 """
@@ -56,11 +56,11 @@ async def seeded(async_session) -> tuple[int, int, object]:
 # ════════════════════════════════════════════════════════════════
 
 # Strategy: sources that should NOT be deleted by purge
-non_purge_source_st = st.sampled_from(["manual", "conversation", "agent_learn", "self_answer"])
+non_purge_source_st = st.sampled_from(["manual", "schema", "agent_learn"])
 
 
 # ════════════════════════════════════════════════════════════════
-#  Property 2: source='git' entries → _delete_legacy_kes deletes them
+#  Property 2: source='code_extract' entries → _delete_repo_extracted_kes deletes them
 #  (preservation of existing purge behavior)
 # ════════════════════════════════════════════════════════════════
 
@@ -75,15 +75,15 @@ non_purge_source_st = st.sampled_from(["manual", "conversation", "agent_learn", 
     entry_type=st.sampled_from(["example", "rule", "route_hint", "schema_summary", "terminology"]),
     status=st.sampled_from(["proposed", "canonical", "superseded", "rejected"]),
 )
-async def test_delete_legacy_kes_deletes_git_source_entries(
+async def test_delete_repo_extracted_kes_deletes_code_extract_entries(
     seeded: tuple[int, int, object],
     entry_type: str, status: str,
 ):
-    """For all KE with source='git': _delete_legacy_kes deletes them.
+    """For all KE with source='code_extract': _delete_repo_extracted_kes deletes them.
 
     **Validates: Preservation of existing purge behavior**
     """
-    from app.knowledge.trainer_purge import _delete_legacy_kes
+    from app.knowledge.trainer_purge import _delete_repo_extracted_kes
 
     ns_id, repo_id, session_factory = seeded
 
@@ -93,27 +93,27 @@ async def test_delete_legacy_kes_deletes_git_source_entries(
             entry_type=entry_type,
             status=status,
             tier="normal",
-            content="test git entry",
+            content="test code_extract entry",
             payload="{}",
-            source="git",
+            source="code_extract",
             repo_id=repo_id,
         )
         db.add(ke)
         await db.flush()
         ke_id = ke.id
 
-        deleted = await _delete_legacy_kes(db, repo_id)
+        deleted = await _delete_repo_extracted_kes(db, repo_id)
         deleted_ids = [row[0] for row in deleted]
 
         assert ke_id in deleted_ids, (
-            f"_delete_legacy_kes should delete source='git' entry with "
+            f"_delete_repo_extracted_kes should delete source='code_extract' entry with "
             f"entry_type={entry_type!r}, status={status!r}"
         )
         await db.rollback()
 
 
 # ════════════════════════════════════════════════════════════════
-#  Property 3: source NOT in ['git', 'mybatis_extract'] → NOT deleted
+#  Property 3: source NOT in ['code_extract'] → NOT deleted
 #  **Validates: Requirements 3.5**
 # ════════════════════════════════════════════════════════════════
 
@@ -128,16 +128,16 @@ async def test_delete_legacy_kes_deletes_git_source_entries(
     source=non_purge_source_st,
     entry_type=st.sampled_from(["example", "rule", "route_hint", "schema_summary", "terminology"]),
 )
-async def test_delete_legacy_kes_does_not_delete_non_git_sources(
+async def test_delete_repo_extracted_kes_does_not_delete_non_rebuildable_sources(
     seeded: tuple[int, int, object],
     source: str, entry_type: str,
 ):
-    """For all KE with source NOT in ['git', 'mybatis_extract']:
-    _delete_legacy_kes does NOT delete them.
+    """For all KE with source NOT in REPO_REBUILDABLE_SOURCES:
+    _delete_repo_extracted_kes does NOT delete them.
 
     **Validates: Requirements 3.5**
     """
-    from app.knowledge.trainer_purge import _delete_legacy_kes
+    from app.knowledge.trainer_purge import _delete_repo_extracted_kes
 
     ns_id, repo_id, session_factory = seeded
 
@@ -156,11 +156,11 @@ async def test_delete_legacy_kes_does_not_delete_non_git_sources(
         await db.flush()
         ke_id = ke.id
 
-        deleted = await _delete_legacy_kes(db, repo_id)
+        deleted = await _delete_repo_extracted_kes(db, repo_id)
         deleted_ids = [row[0] for row in deleted]
 
         assert ke_id not in deleted_ids, (
-            f"_delete_legacy_kes should NOT delete source={source!r} entry, "
+            f"_delete_repo_extracted_kes should NOT delete source={source!r} entry, "
             f"but it was deleted"
         )
         await db.rollback()

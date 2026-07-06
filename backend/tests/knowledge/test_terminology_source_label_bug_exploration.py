@@ -7,7 +7,7 @@
 ═══════════════════════════════════════════════════════════════════════════════
 
   isBugCondition_source(KE):
-      KE.entry_type == "terminology"  AND  KE.source == "git"
+      KE.entry_type == "terminology"  AND  KE.source == "code_extract"
 
   期望(修复后)行为:
       经术语抽取写入路径产生的所有 terminology KnowledgeEntry SHALL 满足
@@ -16,14 +16,14 @@
       而非 namespace 偶然有无 repo.
 
   **CRITICAL**: 本测试在未修复代码上 *预期 FAIL* —— 失败即确认 bug 存在.
-  未修复代码有两条术语写入路径, 均硬编码 source="git":
+  未修复代码有两条术语写入路径, 均硬编码 source="code_extract":
     1. 手动刷新 / trainer stage 共用: refresh_terms_for_repo →
-       _upsert_terminology_ke → upsert_terminology_with_validation(..., source="git")
+       _upsert_terminology_ke → upsert_terminology_with_validation(..., source="code_extract")
     2. 潜伏路径 (extraction_writer): _write_terminology_ke →
-       upsert_terminology_with_validation(..., source="git")
+       upsert_terminology_with_validation(..., source="code_extract")
   且 `Source` Literal 无 "schema" 成员.
 
-  反例形态: KE.source == "git" (而非 "schema").
+  反例形态: KE.source == "code_extract" (而非 "schema").
 
   覆盖:
     - 触发路径①(手动刷新 / trainer stage 共用写入内核): test_terminology_ke_source_is_schema_*
@@ -207,7 +207,7 @@ async def test_terminology_ke_source_is_schema_with_repo(
     stage 共用的术语写入内核, 故该断言同时覆盖两条触发路径.
 
     EXPECTED OUTCOME on unfixed code: FAIL —— _upsert_terminology_ke 硬编码
-    source="git", 写入的术语 KE source == "git" 而非 "schema".
+    source="code_extract", 写入的术语 KE source == "code_extract" 而非 "schema".
     """
     ns_id, repo_id, session_factory = ns_with_repo
 
@@ -257,9 +257,9 @@ async def test_terminology_ke_source_is_schema_without_repo(
     """无 git repo 的 ns 抽词写入的所有术语 KE 仍应满足 source == "schema".
 
     source 标签反映抽取机制 (schema 自省), 与 namespace 有无 repo 无关 ——
-    未修复路径传 repo_id=None 时 source 仍硬编码 "git", 印证标签与真实抽取机制脱钩.
+    未修复路径传 repo_id=None 时 source 仍硬编码 "code_extract", 印证标签与真实抽取机制脱钩.
 
-    EXPECTED OUTCOME on unfixed code: FAIL —— 术语 KE source == "git" 而非 "schema".
+    EXPECTED OUTCOME on unfixed code: FAIL —— 术语 KE source == "code_extract" 而非 "schema".
     """
     ns_id, _none, session_factory = ns_without_repo
 
@@ -301,10 +301,10 @@ async def test_extraction_writer_terminology_source_is_schema(
 ):
     """extraction_writer._write_terminology_ke 写入的术语 KE 应满足 source == "schema".
 
-    这是第二条 (当前休眠但潜伏) 术语写入路径, 同样硬编码 source="git".
+    这是第二条 (当前休眠但潜伏) 术语写入路径, 同样硬编码 source="code_extract".
     为"彻底不留隐患", 修复需同步纠正该路径标签.
 
-    EXPECTED OUTCOME on unfixed code: FAIL —— source == "git" 而非 "schema".
+    EXPECTED OUTCOME on unfixed code: FAIL —— source == "code_extract" 而非 "schema".
     """
     ns_id, repo_id, session_factory = ns_with_repo
 

@@ -24,6 +24,7 @@ const FAKE_FIELDS: SchemaCanonicalField[] = [
 
 const FAKE_SCO = {
   id: 1,
+  target: "t_order",
   fields: FAKE_FIELDS,
   user_locked: false,
   description: "测试表",

@@ -10,11 +10,13 @@ cd backend && python -m pytest tests/drivers/test_mongo_query_shape.py -q \
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from bson import ObjectId
 
-from app.engine.drivers.mongo import MongoDriver, _classify_query_shape
+from app.engine.drivers.mongo import MongoDriver, _classify_query_shape, _decode_extended_json
 from app.models import DataSource
 
 # ──────────────────────────────────────────────────────────
@@ -370,3 +372,101 @@ class TestEstimateCostShape:
         args, _ = fake_db.command.call_args
         assert "find" in args[1]
         assert args[1]["filter"] == MATCH
+
+
+# ──────────────────────────────────────────────────────────
+#  Extended JSON ($date/...) decode — trace 6de74455 根因
+#  LLM 用 {"$date":"...Z"} 表达日期; parse_llm_json 不解码, 原样
+#  dict 透传给 motor → pymongo 编码成 Object (type 3) 而非 Date (type 9)
+#  → $match 跨类型比较恒假 → 0 行. 驱动入口须解码成真 datetime.
+# ──────────────────────────────────────────────────────────
+
+class TestExtendedJsonDecode:
+    """$date Extended JSON 必须在驱动边界解码为 datetime, 否则 0 行."""
+
+    @pytest.mark.asyncio
+    async def test_execute_query_decodes_dollar_date_to_datetime(self):
+        coll = FakeCollection([])
+        driver = driver_with(coll)
+        query = {
+            "pipeline": [
+                {"$match": {"createTime": {
+                    "$gte": {"$date": "2026-06-01T00:00:00.000Z"},
+                    "$lt": {"$date": "2026-07-01T00:00:00.000Z"},
+                }}},
+                {"$group": {"_id": "$createUser", "courseCount": {"$sum": 1}}},
+                {"$sort": {"courseCount": -1}},
+            ]
+        }
+        await driver.execute_query(make_ds(), "c", query, mode="single")
+        captured = coll.aggregate_pipelines[-1]
+        match = captured[0]["$match"]
+        gte = match["createTime"]["$gte"]
+        lt = match["createTime"]["$lt"]
+        # 修复前: gte/lt 是 dict {"$date":...}; 修复后: 真 datetime
+        assert isinstance(gte, datetime), f"$date 未解码, 仍是 {type(gte)}"
+        assert isinstance(lt, datetime), f"$date 未解码, 仍是 {type(lt)}"
+        # bson.json_util.loads 解码 $date 为 naive datetime (tzinfo=None);
+        # pymongo 4.16 把 naive 与 aware-UTC 编码为同一 BSON instant, 忠实保留 LLM 的 Z 标记.
+        # 精确断言 (非仅 year/month/day) 钉死瞬时值, 防边界漂移.
+        assert gte == datetime(2026, 6, 1)
+        assert lt == datetime(2026, 7, 1)
+
+    @pytest.mark.asyncio
+    async def test_execute_query_preserves_pipeline_operators(self):
+        """解码不能误伤管道操作符 key ($match/$group/$sum 原样保留)."""
+        coll = FakeCollection([])
+        driver = driver_with(coll)
+        query = {"pipeline": [
+            {"$match": {"category": "phone"}},
+            {"$group": {"_id": "$category", "n": {"$sum": 1}}},
+        ]}
+        await driver.execute_query(make_ds(), "c", query, mode="single")
+        captured = coll.aggregate_pipelines[-1]
+        assert captured[0] == {"$match": {"category": "phone"}}
+        assert captured[1] == {"$group": {"_id": "$category", "n": {"$sum": 1}}}
+
+    @pytest.mark.asyncio
+    async def test_count_mode_decodes_dollar_date(self):
+        """count 路径同样共享入口解码 (trace 6de74455 第 3/4 次调用即 count)."""
+        coll = FakeCollection([])
+        driver = driver_with(coll)
+        query = {"pipeline": [{"$match": {"createTime": {
+            "$gte": {"$date": "2026-06-01T00:00:00.000Z"}}}}]}
+        await driver.execute_query(make_ds(), "c", query, mode="count")
+        # count 路径追加 {"$count":"count"} 后送 aggregate; 取首个 $match
+        captured = coll.aggregate_pipelines[-1]
+        gte = captured[0]["$match"]["createTime"]["$gte"]
+        assert isinstance(gte, datetime)
+
+    @pytest.mark.asyncio
+    async def test_estimate_cost_decodes_dollar_date(self):
+        # reuse shared helper instance method from TestEstimateCostShape
+        helper = TestEstimateCostShape()
+        driver, fake_db = helper._driver_with_command_capture()
+        query = {"pipeline": [{"$match": {"createTime": {
+            "$gte": {"$date": "2026-06-01T00:00:00.000Z"}}}}]}
+        await driver.estimate_cost(make_ds(), "c", query)
+        args, _ = fake_db.command.call_args
+        pipe = args[1]["pipeline"]
+        gte = pipe[0]["$match"]["createTime"]["$gte"]
+        assert isinstance(gte, datetime), f"estimate_cost 未解码 $date: {type(gte)}"
+
+    def test_decode_extended_json_handles_oid_and_numberlong(self):
+        """解码非 $date marker 同样生效 — 固化 ADR-2 的更广契约 (LLM 也用 $oid 过滤 _id)."""
+        decoded = _decode_extended_json({
+            "_id": {"$oid": "6008236b737a8f0001fa5e63"},
+            "n": {"$numberLong": "5"},
+            "name": "ok",  # 普通字段原样
+        })
+        assert isinstance(decoded["_id"], ObjectId)
+        assert str(decoded["_id"]) == "6008236b737a8f0001fa5e63"
+        assert decoded["n"] == 5
+        assert decoded["name"] == "ok"
+
+    def test_decode_extended_json_passthrough_on_non_serializable(self):
+        """payload 含原生不可序列化对象 (如已存在的 datetime) 时 fail-safe 回退原 payload."""
+        from datetime import datetime as _dt
+        native = {"t": _dt(2026, 6, 1)}
+        out = _decode_extended_json(native)
+        assert out is native, "fail-safe 应原样返回 (同一对象), 不阻查询"

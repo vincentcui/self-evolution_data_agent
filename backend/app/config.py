@@ -5,8 +5,8 @@ Self-Evolution Data Agent — 配置中心
 
 from pathlib import Path
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
-from pydantic import model_validator
 
 # pydantic-settings env_file 相对 CWD 解析 — 固化为 config.py 所在目录的 ../.env
 # (backend/app/config.py → backend/.env), 无论从项目根还是 backend/ 启动行为一致
@@ -14,36 +14,25 @@ _ENV_FILE = str(Path(__file__).resolve().parents[1] / ".env")
 
 
 class Settings(BaseSettings):
-    model_config = {"env_prefix": "IS_", "env_file": _ENV_FILE}
-
-    # ── LLM 提供商 (按线协议而非厂商分轴) ──
-    #   openai    → OpenAI Chat Completions 协议 (DashScope/Qwen, DeepSeek, vLLM, 官方 OpenAI…)
-    #   anthropic → Anthropic Messages 协议 (Claude)
-    llm_provider: str = "openai"  # openai | anthropic
-
-    # ── Qwen (DashScope) ──
-    llm_api_key: str = ""
-    llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llm_model: str = "qwen-plus"
-
-    # ── Claude (Anthropic) ──
-    claude_api_key: str = ""
-    claude_model: str = "claude-sonnet-4-20250514"
-    claude_base_url: str = "https://api.anthropic.com"
-
-    # ── Embedding (DashScope, OpenAI-compatible /embeddings endpoint) ──
-    # 独立凭证: Claude 线路无 embedding, Anthropic 官方不提供向量模型.
-    # DashScope 一个 key 同时授权 chat/embedding, 但此处与 LLM key 解耦,
-    # 方便未来替换 embedding 厂商而不影响 LLM 路由.
-    embedding_api_key: str = ""
-    embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    embedding_model: str = "text-embedding-v4"
+    model_config = {"env_prefix": "IS_", "env_file": _ENV_FILE, "extra": "ignore"}
 
     # ── 元数据库 ──
     metadata_db_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/self_evolution_data_agent"
     metadata_pool_size: int = 20
     metadata_pool_max_overflow: int = 30
     metadata_pool_timeout_secs: int = 60
+
+    # ── 时区 ──
+    app_timezone: str = "Asia/Shanghai"  # IS_APP_TIMEZONE env
+
+    @field_validator("app_timezone")
+    @classmethod
+    def _app_timezone_is_valid_iana(cls, v: str) -> str:
+        from zoneinfo import available_timezones
+
+        if v not in available_timezones():
+            raise ValueError(f"非法 IANA 时区名: {v!r}")
+        return v
 
     # ── ChromaDB ──
     chroma_persist_dir: str = "./data/chroma"
@@ -57,6 +46,9 @@ class Settings(BaseSettings):
     render_row_limit: int = 20000  # noqa: hardcode
     """渲染源 (plan 末步 mode=render) 专用行上限; 与保护 LLM 上下文的 query_row_limit 分离.
     字节数学: 20000 行聚合数据 ≈2MB, 请求级作用域 (tool_trace 随请求结束 GC)."""
+    probe_row_limit: int = 10  # noqa: hardcode
+    """probe mode (小样本探查) 行上限; 三驱动 (mysql/oracle/mongo) 共用单一真相源,
+    取代原各 driver probe 分支散落的 hardcode 10. 默认 10 保持原语义."""
     agent_tool_result_max_chars: int = 500_000  # noqa: hardcode
     """回喂 LLM 的单条 tool 结果字符预算; 超出则 dict-aware 收缩 + 截断 (tool_trace 不受影响)"""
 
@@ -164,6 +156,10 @@ class Settings(BaseSettings):
     schema_audit_log_page_max: int = 1000  # noqa: hardcode
     """schema canonical audit_log 端点单页上限, env: IS_SCHEMA_AUDIT_LOG_PAGE_MAX"""
 
+    # ── P0 对话体验 — Session ──
+    session_list_max: int = 50  # noqa: hardcode
+    """会话列表端点单页上限 (按 updated_at DESC), env: IS_SESSION_LIST_MAX"""
+
     # ── Phase 2 Terminology Refresh (trainer 末端异步 worker) ──
     terminology_refresh_timeout_secs: int = 300  # noqa: hardcode
     """Phase 2 refresh_namespace_terminology 单 namespace 整体超时, env: IS_TERMINOLOGY_REFRESH_TIMEOUT_SECS"""
@@ -188,14 +184,6 @@ class Settings(BaseSettings):
     knowledge_loader_timeout_secs: int = 10
     """load_all_knowledge 整体超时秒数 (critical SQL + vector retrieve 总和), env: IS_KNOWLEDGE_LOADER_TIMEOUT_SECS"""
 
-    # ── Migration (Stage 1) ──────────────────────────────
-    migration_dry_run: bool = True
-    """数据迁移脚本默认 dry-run, 必须显式 false 才真执行"""
-    migration_backup_dir: str = "./data/backups"
-    """迁移 backup 输出目录"""
-    migration_jaccard_threshold: float = 0.9
-    """迁移后检索一致性最低 Jaccard 分数"""
-
     # ── Agent Loop Tools (Stage 4) ───────────────────────
     agent_learn_source: str = "agent_learn"
     """save_knowledge tool 写入时的 source 字段值"""
@@ -215,6 +203,7 @@ class Settings(BaseSettings):
     """HQItem.q 最大字符数 (IS_HQ_QUESTION_MAX_LEN)."""
     hq_covered_path_max: int = 10
     """HQItem.covered_path 最大长度 (IS_HQ_COVERED_PATH_MAX)."""
+
     hq_text_validation_mode: str = "lenient"
     """HQ 文本子串校验严格度: strict / lenient / off (IS_HQ_TEXT_VALIDATION_MODE)."""
 
@@ -229,10 +218,32 @@ class Settings(BaseSettings):
     """单次批量提炼上限."""
     agent_trace_refine_llm_timeout_secs: int = 60
     """批量提炼单次 LLM 调用超时."""
+    llm_client_timeout_secs: int = 120  # noqa: hardcode
+    """LLM HTTP 客户端超时 (主链路 chat_completion_with_tools). env: IS_LLM_CLIENT_TIMEOUT_SECS.
+    默认 120s: 多轮查询上下文累积 (schema + 多次结果行) 后 LLM 响应远超旧 15s 硬编码."""
+
+    llm_connect_test_timeout_secs: int = 15  # noqa: hardcode
+    """LLM 连接测试 (model_config 测试连接按钮, 一次性 Hello ping) 超时.
+    env: IS_LLM_CONNECT_TEST_TIMEOUT_SECS.
+    默认 15s: ping 性质短超时, 与主链路 120s 区分, 死库不被拖 120s."""
+
+    agent_trace_compact_row_cap: int = 20  # noqa: hardcode
+    """落库 trace_json 结构裁剪时, 单工具大数组保留行数上限. env: IS_AGENT_TRACE_COMPACT_ROW_CAP.
+    触发条件: 序列化后字节数 > agent_trace_max_json_bytes. 裁 execute_query.rows /
+    inspect_values.values / lookup_knowledge 三类大数组."""
+
     agent_trace_max_json_bytes: int = 200_000  # noqa: hardcode
-    """_persist_trace trace_json 截断上限."""
-    agent_trace_max_reflection_bytes: int = 50_000  # noqa: hardcode
-    """_persist_trace reflection_log_json 截断上限."""
+    """trace_json 落库体积预算线 (字节). env: IS_AGENT_TRACE_MAX_JSON_BYTES.
+    序列化后 len(s.encode()) > 此值 → 触发 compact_tool_trace_for_storage 结构裁剪
+    (三类大数组截到 agent_trace_compact_row_cap 行), 裁后不再 [:N] 硬切, 保证产出合法 JSON."""
+
+    llm_max_tokens_default: int = 12288  # noqa: hardcode
+    """LLM 单次响应 max_tokens 统一兜底默认 (Web UI 未按模型显式设值时使用).
+    env: IS_LLM_MAX_TOKENS_DEFAULT. model_registry 构建 chat 参数时 row.max_tokens or 此值."""
+
+    enum_extract_max_tokens: int = 4096  # noqa: hardcode
+    """enum 类专精解析单次 LLM 调用 max_tokens. env: IS_ENUM_EXTRACT_MAX_TOKENS.
+    enum 定义体积有界, 独立于主链路 max_tokens 默认."""
 
     # ── Stage 2 抓手 B: 召回反馈环 + 衰减 ──────────────
     kb_decay_recall_threshold: int = 10
@@ -327,17 +338,24 @@ class Settings(BaseSettings):
     fail-fast 让用户感知需调整问题或拆分会话, 而非看到错误摘要.
     """
 
+    # ── LLM 思考模式全局控制 ──
+    llm_thinking_enabled: bool = False
+    """全局思考模式开关 (默认关), env: IS_LLM_THINKING_ENABLED.
+
+    True 时仅对显式传 thinking=True 的调用方生效 (OpenAI: 不注入 disabled;
+    Claude: 传 enabled + budget_tokens). 绝大多数调用方是确定性抽取/判定,
+    默认关可避免 DeepSeek 思考耗尽 token 预算导致空响应.
+    """
+
+    llm_claude_thinking_budget_tokens: int = 4000  # noqa: hardcode
+    """Claude extended thinking 最小 token 预算, env: IS_LLM_CLAUDE_THINKING_BUDGET_TOKENS.
+
+    Anthropic 要求 >=1024, 默认 4000 为推荐最小值.
+    """
+
     # ── SSE Keepalive (Stage 5) ──────────────────────────
     agent_keepalive_interval_secs: int = 30  # noqa: hardcode
     """SSE 心跳发送间隔, 防客户端连接超时"""
-
-    # ── Q-MQL Extraction (Stage 5) ───────────────────────
-    qmql_extract_interval_hours: int = 24  # noqa: hardcode
-    """Q-MQL 后台提取脚本运行周期 (小时)"""
-    qmql_extract_min_success_age_hours: int = 1  # noqa: hardcode
-    """Q-MQL 提取候选最少保存时长, 低于此值不提取 (防新增 QueryHistory 还未充分冷却)"""
-    qmql_extract_max_per_run: int = 50  # noqa: hardcode
-    """Q-MQL 单次提取最多条数 (避免 LLM token 爆表)"""
 
     # ── Code Parser (Stage 2 Task 8 — hardcode 治理搬 settings) ──
     code_parse_batch_char_limit: int = 48000  # noqa: hardcode
@@ -387,28 +405,6 @@ class Settings(BaseSettings):
     mongo_pool_max_size: int = 100  # noqa: hardcode
     """motor maxPoolSize. env: IS_MONGO_POOL_MAX_SIZE"""
     mongo_connect_timeout_ms: int = 5000  # noqa: hardcode — IS_MONGO_CONNECT_TIMEOUT_MS — 建源/画像探测超时
-
-    # ── Oracle Driver Pool ────────────────────────────────
-    # Thin mode (默认): 不需要 Oracle Instant Client, 支持 Oracle 12.1+.
-    # Thick mode: 需要 Oracle Instant Client; 支持 Oracle 11g+.
-    #   - 设置 IS_ORACLE_THICK_MODE_LIB_DIR 为 Instant Client 目录路径启用.
-    #   - 例: /opt/oracle/instantclient_21_1 (Linux) 或 /usr/local/oracle (macOS x86).
-    oracle_thick_mode_lib_dir: str = ""
-    """Oracle Instant Client 目录 (非空则启用 Thick mode). env: IS_ORACLE_THICK_MODE_LIB_DIR"""
-
-    # min=0: 启动时不预建连接, 按需增长; 生产如需预热可改为 1.
-    oracle_pool_min_size: int = 0
-    """oracledb AsyncConnectionPool min. env: IS_ORACLE_POOL_MIN_SIZE"""
-    oracle_pool_max_size: int = 5
-    """oracledb AsyncConnectionPool max. env: IS_ORACLE_POOL_MAX_SIZE"""
-    oracle_pool_increment: int = 1
-    """oracledb AsyncConnectionPool increment. env: IS_ORACLE_POOL_INCREMENT"""
-    oracle_pool_timeout_secs: int = 10
-    """等待连接超时 (pool wait_timeout = × 1000 ms). env: IS_ORACLE_POOL_TIMEOUT_SECS"""
-    oracle_query_timeout_secs: int = 30
-    """单 SQL 执行超时. env: IS_ORACLE_QUERY_TIMEOUT_SECS"""
-    oracle_connect_timeout_secs: int = 10
-    """TCP 握手超时 (tcp_connect_timeout). env: IS_ORACLE_CONNECT_TIMEOUT_SECS"""
 
     # ── Oracle Driver Pool ────────────────────────────────
     # Thin mode (默认): 不需要 Oracle Instant Client, 支持 Oracle 12.1+.
@@ -509,6 +505,15 @@ class Settings(BaseSettings):
                 "IS_AGENT_LOOP_ERROR_CLASS_WINDOW_SIZE "
                 f"({self.agent_loop_error_class_window_size}); "
                 "否则窗口容量不足以累积到阈值, Forced_Clarify 永不触发。"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_thinking_budget(self) -> "Settings":
+        if self.llm_claude_thinking_budget_tokens < 1024:
+            raise ValueError(
+                f"IS_LLM_CLAUDE_THINKING_BUDGET_TOKENS ({self.llm_claude_thinking_budget_tokens}) "
+                "必须 >= 1024（Anthropic 最小值）"  # noqa: hardcode
             )
         return self
 

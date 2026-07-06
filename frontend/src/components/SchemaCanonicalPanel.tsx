@@ -14,6 +14,7 @@ import type {
   PendingCounts,
   SchemaCanonicalField,
   SchemaCanonicalObject,
+  SchemaCanonicalRelationship,
 } from "@/types/schema-canonical";
 import { AllFieldsTab } from "./schema/AllFieldsTab";
 import { PendingPromoteTab } from "./schema/PendingPromoteTab";
@@ -176,6 +177,7 @@ export const SchemaCanonicalPanel: React.FC<Props> = ({ namespaceId }) => {
   const handleSave = async (payload: {
     description?: string;
     purpose_detail?: string;
+	    relationships?: SchemaCanonicalRelationship[];
     fields?: SchemaCanonicalField[];
   }) => {
     if (!selectedSco) return;

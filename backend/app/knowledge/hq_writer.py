@@ -20,7 +20,6 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.knowledge.hypothetical_queries import generate_hq_with_validation
 from app.knowledge.knowledge_retriever import rewrite_hq_subvectors
 from app.models.knowledge_entry import KnowledgeEntry
@@ -106,7 +105,13 @@ async def rewrite_hq_for_entry(
             route_collection_path=route_path,
             terminology_lookup=terminology_lookup,
         )
-        model_label = settings.llm_model
+        from app.engine.model_registry import registry
+
+        model_label = (
+            registry.chat_config.get("model_name", "unknown")
+            if registry.chat_config
+            else "unknown"
+        )
     else:
         hqs = [s.strip() for s in manual_hqs if s and s.strip()]
         model_label = "manual"

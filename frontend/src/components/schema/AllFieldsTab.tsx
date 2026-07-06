@@ -1,4 +1,4 @@
-import { Button, Input, message, Modal, Popconfirm, Space, Table, Tag } from "antd";
+import { Button, Empty, Input, message, Modal, Popconfirm, Select, Space, Table, Tag } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
@@ -276,12 +276,12 @@ function SubFieldsTree(props: {
 /* ── 主组件 ── */
 
 export function AllFieldsTab(props: {
-  sco: Pick<SchemaCanonicalObject, "id" | "fields" | "user_locked" | "description" | "purpose_detail" | "relationships">;
+  sco: Pick<SchemaCanonicalObject, "id" | "fields" | "user_locked" | "description" | "purpose_detail" | "relationships" | "target">;
   namespaceId: number;
   onOpenEvidence: (fieldName: string) => void;
   onOpenHistory: (fieldName: string) => void;
   onLockField: (fieldName: string, locked: boolean) => void;
-  onSave?: (payload: { description?: string; purpose_detail?: string; fields?: SchemaCanonicalField[] }) => Promise<void>;
+  onSave?: (payload: { description?: string; purpose_detail?: string; fields?: SchemaCanonicalField[]; relationships?: SchemaCanonicalRelationship[] }) => Promise<void>;
   onRefresh?: () => void;
   onDelete?: () => void;
   tableLabel?: string;
@@ -292,6 +292,8 @@ export function AllFieldsTab(props: {
   const [editPurposeDetail, setEditPurposeDetail] = useState("");
   const [saving, setSaving] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [editRelationships, setEditRelationships] = useState<SchemaCanonicalRelationship[]>([]);
+  const [relationshipsModified, setRelationshipsModified] = useState(false);
 
   // Enum binding drawer state
   const [bindDrawer, setBindDrawer] = useState<{ field: SchemaCanonicalField } | null>(null);
@@ -301,6 +303,8 @@ export function AllFieldsTab(props: {
     setEditFields(toEditableFields(props.sco.fields));
     setEditDescription(props.sco.description || "");
     setEditPurposeDetail(props.sco.purpose_detail || "");
+    setEditRelationships(props.sco.relationships || []);
+    setRelationshipsModified(false);
     setValidationErrors({});
     setEditing(true);
   };
@@ -308,6 +312,8 @@ export function AllFieldsTab(props: {
   const cancelEdit = () => {
     setEditing(false);
     setEditFields([]);
+    setEditRelationships([]);
+    setRelationshipsModified(false);
     setValidationErrors({});
   };
 
@@ -321,11 +327,15 @@ export function AllFieldsTab(props: {
     setSaving(true);
     try {
       const cleanFields = stripEditFlags(editFields);
-      await props.onSave?.({
+      const savePayload: any = {
         description: editDescription,
         purpose_detail: editPurposeDetail,
         fields: cleanFields,
-      });
+      };
+      if (relationshipsModified) {
+        savePayload.relationships = editRelationships;
+      }
+      await props.onSave?.(savePayload);
       setEditing(false);
       setValidationErrors({});
     } catch {
@@ -366,6 +376,35 @@ export function AllFieldsTab(props: {
     next[idx] = { ...next[idx], sub_fields: updatedSubs };
     setEditFields(next);
     setValidationErrors(validateFields(next));
+  };
+
+  // ── Relationship editing handlers ──
+  const handleAddRel = () => {
+    const newRel: SchemaCanonicalRelationship = {
+      from_target: props.sco.target || "",
+      from_field: "",
+      to_db_type: "mysql",
+      to_database: "",
+      to_target: "",
+      to_field: "",
+      relation_type: "many_to_one",
+    };
+    setEditRelationships([...editRelationships, newRel]);
+    setRelationshipsModified(true);
+  };
+
+  const handleDeleteRel = (i: number) => {
+    const updated = [...editRelationships];
+    updated.splice(i, 1);
+    setEditRelationships(updated);
+    setRelationshipsModified(true);
+  };
+
+  const handleRelChange = (i: number, patch: Partial<SchemaCanonicalRelationship>) => {
+    const next = [...editRelationships];
+    next[i] = { ...next[i], ...patch };
+    setEditRelationships(next);
+    setRelationshipsModified(true);
   };
 
   // Enum binding handlers
@@ -676,49 +715,6 @@ export function AllFieldsTab(props: {
         }}
       />
 
-      {/* ── Relationships section ── */}
-      {props.sco.relationships && props.sco.relationships.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ marginBottom: 8 }}>关联关系 ({props.sco.relationships.length})</h4>
-          <Table<SchemaCanonicalRelationship>
-            rowKey={(r) => `${r.from_target}:${r.from_field}→${r.to_target}:${r.to_field}`}
-            dataSource={props.sco.relationships}
-            columns={[
-              {
-                title: "源表",
-                dataIndex: "from_target",
-                width: 180,
-                render: (t: string) => <strong>{t}</strong>,
-              },
-              {
-                title: "源字段",
-                dataIndex: "from_field",
-                width: 140,
-              },
-              {
-                title: "类型",
-                dataIndex: "relation_type",
-                width: 100,
-                render: (t: string) => <Tag>{t}</Tag>,
-              },
-              {
-                title: "目标表",
-                dataIndex: "to_target",
-                width: 180,
-                render: (t: string) => <strong>{t}</strong>,
-              },
-              {
-                title: "目标字段",
-                dataIndex: "to_field",
-                width: 140,
-              },
-            ]}
-            pagination={false}
-            size="small"
-          />
-        </div>
-      )}
-
       {/* Add field button */}
       {editing && (
         <Button
@@ -728,6 +724,98 @@ export function AllFieldsTab(props: {
           style={{ marginTop: 8, width: "100%" }}
         >
           添加字段
+        </Button>
+      )}
+
+      {/* ── Relationships section (可编辑) ── */}
+      <div style={{ marginTop: 16 }}>
+        <h4 style={{ marginBottom: 8 }}>
+          关联关系 ({(editing ? editRelationships : props.sco.relationships)?.length || 0})
+        </h4>
+        {((editing ? editRelationships : props.sco.relationships) || []).length > 0 ? (
+          editing ? (
+            /* ── editing: inline Input/Select per row ── */
+            <div>
+              {editRelationships.map((rel, i) => (
+                <Space key={i} wrap className="rel-edit-row" style={{ marginBottom: 4, padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
+                  <Input
+                    size="small" style={{ width: 120 }}
+                    value={rel.from_target}
+                    onChange={(e) => handleRelChange(i, { from_target: e.target.value })}
+                    placeholder="源表"
+                  />
+                  <Input
+                    size="small" style={{ width: 100 }}
+                    value={rel.from_field}
+                    onChange={(e) => handleRelChange(i, { from_field: e.target.value })}
+                    placeholder="源字段"
+                  />
+                  <Input
+                    size="small" style={{ width: 80 }}
+                    value={rel.to_db_type}
+                    onChange={(e) => handleRelChange(i, { to_db_type: e.target.value })}
+                    placeholder="类型库"
+                  />
+                  <Input
+                    size="small" style={{ width: 100 }}
+                    value={rel.to_database}
+                    onChange={(e) => handleRelChange(i, { to_database: e.target.value })}
+                    placeholder="目标库"
+                  />
+                  <Input
+                    size="small" style={{ width: 120 }}
+                    value={rel.to_target}
+                    onChange={(e) => handleRelChange(i, { to_target: e.target.value })}
+                    placeholder="目标表"
+                  />
+                  <Input
+                    size="small" style={{ width: 100 }}
+                    value={rel.to_field}
+                    onChange={(e) => handleRelChange(i, { to_field: e.target.value })}
+                    placeholder="目标字段"
+                  />
+                  <Select
+                    size="small" style={{ width: 130 }}
+                    value={rel.relation_type}
+                    onChange={(v) => handleRelChange(i, { relation_type: v })}
+                    options={[
+                      { value: "many_to_one", label: "many_to_one" },
+                      { value: "one_to_many", label: "one_to_many" },
+                      { value: "one_to_one", label: "one_to_one" },
+                    ]}
+                  />
+                  <Button danger size="small" className="rel-del-btn" onClick={() => handleDeleteRel(i)}>删除</Button>
+                </Space>
+              ))}
+            </div>
+          ) : (
+            /* ── view mode: read-only Table ── */
+            <Table<SchemaCanonicalRelationship>
+              rowKey={(_, i) => `${props.sco.id}_rel_${i}`}
+              dataSource={props.sco.relationships || []}
+              columns={[
+                { title: "源表", dataIndex: "from_target", width: 150, render: (t: string) => <strong>{t}</strong> },
+                { title: "源字段", dataIndex: "from_field", width: 120 },
+                { title: "类型库", dataIndex: "to_db_type", width: 90 },
+                { title: "目标库", dataIndex: "to_database", width: 120,
+                  render: (t: string) => t || <span style={{ color: "#ccc" }}>同库</span> },
+                { title: "目标表", dataIndex: "to_target", width: 150, render: (t: string) => <strong>{t}</strong> },
+                { title: "目标字段", dataIndex: "to_field", width: 120 },
+                { title: "基数", dataIndex: "relation_type", width: 110,
+                  render: (t: string) => <Tag>{t}</Tag> },
+              ]}
+              pagination={false} size="small"
+            />
+          )
+        ) : (
+          !editing && <Empty description="暂无关联关系" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+
+      {editing && (
+        <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddRel}
+          style={{ marginTop: 8, width: "100%" }}>
+          添加关联关系
         </Button>
       )}
 

@@ -96,15 +96,13 @@ async def test_multi_collection_success_creates_example_and_route_hint(
     assert example_ke.content == "某商品的订单数量"
     payload = json.loads(example_ke.payload)
     assert payload["question_pattern"] == "某商品的订单数量"
-    # 关键: 代码侧机械字段保真
+    # 新 5 字段 schema: question_pattern / collections / join_keys / final_query_plan / result_summary
     assert payload["collections"] == ["c_product", "c_category_group"]
-    assert payload["chart_type"] == "bar"
-    assert payload["tool_count"] == 5
-    assert {"collection": "c_product", "field": "categoryId"} in payload["field_mappings"]
-    assert all(m["collection"] != "c_category" for m in payload["field_mappings"])
-    # final_pipeline 含真实 $lookup, 不再是空壳
-    lookup_from = payload["final_pipeline"]["steps"][0]["pipeline"][0]["$lookup"]["from"]
+    assert payload.get("join_keys") is not None
+    # final_query_plan 含真实 $lookup, 不再是空壳
+    lookup_from = payload["final_query_plan"]["steps"][0]["pipeline"][0]["$lookup"]["from"]
     assert lookup_from == "c_category_group"
+    # 旧字段 chart_type / tool_count / field_mappings 已移除 (移至 evidence)
 
     rh_ke = next(e for e in entries if e.entry_type == "route_hint")
     rh_payload = json.loads(rh_ke.payload)

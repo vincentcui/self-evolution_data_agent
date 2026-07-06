@@ -1,7 +1,7 @@
 /* ============================================================================
  * SSE Agent Event Discriminated Union
  * ----------------------------------------------------------------------------
- * 13 SSE events, 1:1 aligned with backend contracts:
+ * 14 SSE events, 1:1 aligned with backend contracts:
  *   - app/engine/agent_loop.py
  *   - app/engine/sse_manager.py
  *   - app/api/query.py
@@ -20,7 +20,8 @@ export type AgentSSEEvent =
           | "cost_exhausted"
           | "max_total_iterations"   // 兼容旧后端，新后端已改为 cost_exhausted
           | "forced_clarify_timeout"
-          | "forced_clarify_exhausted";
+          | "forced_clarify_exhausted"
+          | "llm_timeout";
         total_iterations: number;
         ended_at?: string;
         total_tool_calls?: number;
@@ -69,8 +70,7 @@ export type AgentSSEEvent =
         rendered_row_count?: number;
         total_row_count?: number;
       };
-    };
-
+    }
 export type EventName = AgentSSEEvent["event"];
 
 /* ---------------------------------------------------------------------------

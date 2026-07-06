@@ -191,7 +191,7 @@ async def save_knowledge(
         # cast: settings.agent_learn_source 类型是 str, 闸门要求 Source Literal,
         # 二者值同源 ('agent_learn'), pyright 类型收窄用 cast 显式表达不变式.
         from typing import cast as _cast
-        from app.knowledge.terminology_intake import Source as _IntakeSource
+        from app.models.knowledge_entry import KnowledgeSource as _IntakeSource
         ke = await upsert_terminology_with_validation(
             db, ns_id=namespace_id, payload_dict=payload,
             source=_cast(_IntakeSource, settings.agent_learn_source),

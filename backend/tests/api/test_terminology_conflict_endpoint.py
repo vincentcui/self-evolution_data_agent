@@ -48,8 +48,8 @@ async def test_replace_supersedes_existing(admin_client, seeded_open_conflict, d
     logs = (await db.execute(select(KnowledgeAuditLog))).scalars().all()
     assert existing is not None and existing.is_superseded is True
     assert len(new_kes) == 1
-    # I-1 candidate 血缘: candidate_source="git" 透传到新 KE 而非写死 manual
-    assert new_kes[0].source == "git"
+    # I-1 candidate 血缘: candidate_source="code_extract" 透传到新 KE 而非写死 manual
+    assert new_kes[0].source == "code_extract"
     assert json.loads(new_kes[0].payload)["term"] == "订单"
     assert {l.action for l in logs} >= {"supersede", "propose"}
 
@@ -277,7 +277,7 @@ async def test_list_conflicts_returns_open_only(
     assert row["id"] == conflict_id
     assert row["namespace_id"] == ns_id
     assert row["status"] == "open"
-    assert row["candidate_source"] == "git"
+    assert row["candidate_source"] == "code_extract"
     # candidate_payload 是原样 JSON 字符串, 前端自行 parse
     assert isinstance(row["candidate_payload"], str)
     parsed = json.loads(row["candidate_payload"])

@@ -31,7 +31,7 @@ export default function RouteHintEditPanel({ value, onChange }: Props) {
 
   return (
     <>
-      <Form.Item label="集合路径 (collection_path, 来自 trace, 只读)">
+      <Form.Item label="集合路径 (只读, 来自执行记录)">
         <div>
           {value.collection_path.map((c, i, arr) => (
             <span key={c}>
@@ -42,7 +42,7 @@ export default function RouteHintEditPanel({ value, onChange }: Props) {
         </div>
       </Form.Item>
 
-      <Form.Item label="join 字段 (join_fields, 来自 trace, 只读)">
+      <Form.Item label="连接字段 (只读, 来自执行记录)">
         <div>
           {value.join_fields.length === 0 ? (
             <Tag>无</Tag>
@@ -54,13 +54,13 @@ export default function RouteHintEditPanel({ value, onChange }: Props) {
         </div>
       </Form.Item>
 
-      <Form.Item label="成本策略 (cost_strategy, 来自 trace, 只读)">
+      <Form.Item label="成本策略 (只读, 来自执行记录)">
         <Tag>{value.cost_strategy}</Tag>
       </Form.Item>
 
       <Form.Item label={`路径理由 (reason, ≤${REASON_MAX_LEN} 字)`}>
         <Input
-          aria-label="reason"
+          aria-label="原因"
           value={value.reason}
           onChange={(e) => update({ reason: e.target.value })}
           maxLength={REASON_MAX_LEN}

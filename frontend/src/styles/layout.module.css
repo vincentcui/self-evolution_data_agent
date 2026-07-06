@@ -112,6 +112,7 @@
   background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
   min-height: 100vh;
   padding: 28px 32px;
+  overflow-x: hidden;
 }
 
 /* ════════════════════════════════════════════

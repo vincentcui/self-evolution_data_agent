@@ -27,9 +27,10 @@ from app.knowledge.trace_extractor import (
     derive_cost_strategy,
     extract_collections,
     extract_db_context,
-    extract_final_pipeline,
-    extract_join_fields,
-    extract_primary_query_json,
+    extract_final_pipeline,     # route_hint still uses (type:"execute_plan" wrapper)
+    extract_join_fields,        # route_hint still uses ({a,b} shape)
+    normalize_query_plan,       # example uses (new)
+    extract_join_keys,          # example uses ({from,to} shape)
 )
 from app.knowledge.trace_refiner import refine_traces
 from app.models.agent_trace import AgentTrace
@@ -47,8 +48,8 @@ LLM_ALLOWED_FIELDS: dict[str, set[str]] = {
     "route_hint": {"question_pattern", "reason", "avoid_path"},
     "rule": {"rule_text", "rule_kind", "applies_to_collections",
              "priority", "evidence"},
-    "example": {"question", "result_summary", "nl_paraphrases",
-                "schema_hash", "extraction_source"},
+    "example": {"question_pattern", "result_summary",
+                "collections", "join_keys", "final_query_plan"},
 }
 
 
@@ -76,13 +77,14 @@ def inject_mechanical_fields(
         if not payload.get("target_collection") and collections:
             payload["target_collection"] = collections[0]
     elif entry_type == "example":
-        if not payload.get("target_collection") and collections:
-            payload["target_collection"] = collections[0]
-        if database:
-            payload["target_database"] = database
-        qj = extract_primary_query_json(tool_trace)
-        if qj is not None:
-            payload["query_json"] = qj
+        qplan = normalize_query_plan(tool_trace)
+        if qplan is not None:
+            payload["final_query_plan"] = qplan
+        if collections:
+            payload["collections"] = collections
+        joins = extract_join_keys(qplan)
+        if joins:
+            payload["join_keys"] = joins
     elif entry_type == "route_hint":
         if collections:
             payload["collection_path"] = collections

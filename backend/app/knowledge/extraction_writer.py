@@ -63,7 +63,7 @@ async def write_canonical_candidates_from_parse(
     mongo_documents: list[dict],
     enum_classes: list[dict],
     where_evidence: list[dict],
-    coll_to_db: dict[str, str] | None = None,
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
     repo_name: str = "",
 ) -> int:
     """Write schema canonical candidates from code parse results.
@@ -119,7 +119,7 @@ async def write_canonical_candidates_from_parse(
 
 async def _write_jpa_entity_candidates(
     db: AsyncSession, namespace_id: int, repo_id: int, entity: dict,
-    coll_to_db: dict[str, str] | None = None,
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
     repo_name: str = "",
 ) -> int:
     """Write table_description + field_description candidates for a JPA entity."""
@@ -132,7 +132,7 @@ async def _write_jpa_entity_candidates(
     database = entity.get("database") or ""
     # 反查: JPA entity 通常不带 database, 从 DataSource snapshot 补全
     if not database and coll_to_db and table_name in coll_to_db:
-        database = coll_to_db[table_name]
+        database = coll_to_db[table_name][1]
     if not database:
         log.warning(
             "[%s] jpa table=%r 不在任何已注册数据源中, 跳过 (repo_id=%d)",
@@ -218,6 +218,7 @@ async def _write_jpa_entity_candidates(
             database=database,
             source_file=source_file,
             evidence_source="code_jpa",
+            coll_to_db=coll_to_db,
         )
 
     return count
@@ -225,7 +226,7 @@ async def _write_jpa_entity_candidates(
 
 async def _write_mongo_document_candidates(
     db: AsyncSession, namespace_id: int, repo_id: int, doc: dict,
-    coll_to_db: dict[str, str] | None = None,
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
     repo_name: str = "",
 ) -> int:
     """Write table_description + field_description candidates for a Mongo document."""
@@ -238,7 +239,7 @@ async def _write_mongo_document_candidates(
     database = doc.get("database") or doc.get("database_name") or ""
     # 反查: LLM 解析结果通常不带 database, 从 DataSource snapshot 补全
     if not database and coll_to_db and collection in coll_to_db:
-        database = coll_to_db[collection]
+        database = coll_to_db[collection][1]
     if not database:
         log.warning(
             "[%s] mongo collection=%r 不在任何已注册数据源中, 跳过 (repo_id=%d)",
@@ -324,6 +325,7 @@ async def _write_mongo_document_candidates(
             database=database,
             source_file=source_file,
             evidence_source="code_mongo",
+            coll_to_db=coll_to_db,
         )
 
     return count
@@ -366,6 +368,10 @@ async def _write_enum_class_candidates(
     return 1
 
 
+_RELATION_TYPE_NORMALIZE: dict[str, str] = {
+    "foreign_key": "many_to_one", "fk": "many_to_one", "": "many_to_one",
+}
+
 async def _write_relationship_candidate(
     db: AsyncSession, namespace_id: int, repo_id: int, *,
     from_target: str, from_field: str,
@@ -375,26 +381,35 @@ async def _write_relationship_candidate(
     database: str = "",
     source_file: str = "",
     evidence_source: str = "code_relation",
+    to_db_type: str = "",
+    to_database: str = "",
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
 ) -> int:
-    """Write a relationship candidate — 由 entity writer 内联调用.
+    """Write a relationship candidate — 归一化 7 键(无 source, 无 is_required).
 
-    db_type / database 由调用方显式传入, 与 entity 的 field candidate 共享
-    同一 database gate, 杜绝独立通道绕过产生的幽灵 SCO.
+    to_db_type/to_database 从 coll_to_db 反查填, 不再留空.
+    source 走 evidence_sources (不进 candidate_value → 不进 hash).
     """
     if not from_target or not to_target or not database:
         return 0
+
+    rt_lower = (relation_type or "").lower()
+    normalized_rt = _RELATION_TYPE_NORMALIZE.get(rt_lower, rt_lower)
+    _to_db_type = to_db_type or db_type
+    _to_database = to_database or database
+    if coll_to_db and to_target in coll_to_db:
+        _to_db_type, _to_database = coll_to_db[to_target]
 
     evidence = [{"source": evidence_source, "repo_id": repo_id, "file": source_file}]
 
     candidate_value = {
         "from_target": from_target,
         "from_field": from_field,
-        "to_db_type": db_type,
-        "to_database": "",  # to_target 未绑定 database, 留空供后续反查
+        "to_db_type": _to_db_type,
+        "to_database": _to_database,
         "to_target": to_target,
         "to_field": to_field,
-        "relation_type": relation_type or "unknown",
-        "is_required": True,
+        "relation_type": normalized_rt,
     }
 
     await write_canonical_candidate(
@@ -476,7 +491,7 @@ async def _write_business_examples(
     """sql2nl → example KE (D3 恢复). Stage A 下线, 本 spec 经 agentic 管线恢复为核心产出.
 
     每个 example dict (agent emit_knowledge entry_type=example 的 payload) →
-    KnowledgeEntry(entry_type='example', status='proposed', source='mybatis_extract').
+    KnowledgeEntry(entry_type='example', status='proposed', source='code_extract').
     """
     total = 0
     for ex in business_examples:
@@ -488,13 +503,18 @@ async def _write_business_examples(
             entry_type="example",
             status="proposed",
             tier="normal",
-            source="mybatis_extract",
+            source="code_extract",
             repo_id=repo_id,
             content=f"查询模式: {sql[:120]}",
             payload=json.dumps({
-                "question_pattern": ex.get("question", ""),
-                "sql_pattern": sql,
-                "tables": ex.get("tables", []),
+                "question_pattern": ex.get("question_pattern") or ex.get("question", ""),
+                "collections": [f"{ex.get('database', '')}.{t}" if ex.get('database') else t
+                                for t in ex.get("tables", [])],
+                "join_keys": ex.get("join_keys", []),
+                "final_query_plan": ex.get("final_query_plan"),
+                "result_summary": ex.get("result_summary", ""),
+                "sql_pattern": sql,                          # legacy compat
+                "tables": ex.get("tables", []),              # legacy compat
                 "source_mapper": ex.get("mapper_namespace", ""),
                 "extraction_source": "mybatis_extract",
             }, ensure_ascii=False),
@@ -527,7 +547,7 @@ async def _write_rule_ke(
         tier="normal",
         content=rule_text,
         payload=payload.model_dump_json(),
-        source="mybatis_extract",
+        source="code_extract",
         repo_id=repo_id,
         raw_input=rule_text,
     )
@@ -622,7 +642,7 @@ async def _write_route_hints(
                 "extraction_source": "mybatis_extract",
                 "source_repo_id": repo_id,
             }, ensure_ascii=False),
-            source="mybatis_extract",
+            source="code_extract",
             repo_id=repo_id,
         )
         db.add(ke)

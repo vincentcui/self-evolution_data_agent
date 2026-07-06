@@ -40,8 +40,8 @@ from app.engine.drivers.base import (
     ExecuteMode,
     ExecuteResult,
     FieldDef,
+    ProbeResult,
     SchemaSnapshot,
-    ServerCapabilities,
 )
 from app.models import DataSource
 from app.models.base import local_now
@@ -96,17 +96,22 @@ _DML_DDL_KEYWORDS = re.compile(
 # ── 行数保护剥离 ──────────────────────────────────────────────
 
 _ORACLE_FETCH_TAIL_RE = re.compile(
-    r"\s+(OFFSET\s+\d+\s+ROWS\s+)?FETCH\s+(FIRST|NEXT)\s+\d+\s+ROWS\s+ONLY\s*$",
+    r"\s+(?:OFFSET\s+\d+\s+ROWS\s+)?FETCH\s+(?:FIRST|NEXT)\s+(\d+)\s+ROWS\s+ONLY\s*$",
     re.IGNORECASE,
 )
 _ORACLE_ROWNUM_WRAPPER_RE = re.compile(
-    r"^\s*SELECT\s+\*\s+FROM\s*\((?P<body>.*)\)\s+WHERE\s+ROWNUM\s*<=\s*\d+\s*$",
+    r"^\s*SELECT\s+\*\s+FROM\s*\((?P<body>.*)\)\s+WHERE\s+ROWNUM\s*<=\s*(\d+)\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 
 
 def _normalize_sql(sql: str) -> str:
-    return sql.strip().rstrip(";").strip()
+    """规范化: sqlparse tokenizer 剥注释 (尊重字符串字面量边界) + 去尾分号/空白.
+
+    尾注释会静默击穿 FETCH/ROWNUM 的 $ 锚定 (spec-review Claim 3) —— 与 MySQL
+    _normalize_for_limit 对称。sqlparse 已在 L29 import, _enforce_select_only 在用。
+    """
+    return sqlparse.format(sql, strip_comments=True).strip().rstrip(";").strip()
 
 
 def _strip_outer_row_limit_impl(sql: str) -> str:
@@ -127,12 +132,53 @@ def _rownum_wrap(sql: str, limit: int) -> str:
     return f"SELECT * FROM ({base}) WHERE ROWNUM <= {int(limit)}"
 
 
+def _extract_outer_rownum_value(sql: str) -> int | None:
+    """取最外层行保护数值 (ROWNUM<=n 或 FETCH FIRST n), 无则 None. 只看最外层."""
+    current = _normalize_sql(sql)
+    m = _ORACLE_ROWNUM_WRAPPER_RE.match(current)
+    if m:
+        assert m.lastindex is not None            # 匹配成功必有捕获组 (body + 数值)
+        return int(m.group(m.lastindex))          # ROWNUM <= n 的 n
+    m = _ORACLE_FETCH_TAIL_RE.search(current)
+    if m:
+        return int(m.group(1))                    # FETCH FIRST n
+    return None
+
+
+def _apply_rownum_limit(sql: str, cap: int) -> str:
+    """Oracle 保护型三态: 无保护注入 cap; >cap 剥离+重包 cap; ≤cap 保留原值."""
+    val = _extract_outer_rownum_value(sql)
+    if val is None:
+        return _rownum_wrap(sql, cap)             # 无保护 → 注入
+    if val > cap:
+        return _rownum_wrap(sql, cap)             # >cap → strip+重包 (_rownum_wrap 内含 strip)
+    return _normalize_sql(sql)                    # ≤cap → 保留原值
+
+
 def _cursor_to_dicts(cursor: Any, rows: list) -> list[dict]:
     """将 oracledb tuple rows 转换为 list[dict]，列名小写。"""
     if not cursor.description:
         return []
     col_names = [col[0].lower() for col in cursor.description]
     return [dict(zip(col_names, row)) for row in rows]
+
+
+def _oracle_fk_rows_to_relationships(
+    rows: list[dict], db_type: str,
+) -> list[dict]:
+    """Oracle FK rows → canonical relationship 7 键."""
+    return [
+        {
+            "from_target": r["table_name"],
+            "from_field": r["column_name"],
+            "to_db_type": db_type,
+            "to_database": r["referenced_owner"],
+            "to_target": r["referenced_table_name"],
+            "to_field": r["referenced_column_name"],
+            "relation_type": "many_to_one",
+        }
+        for r in rows
+    ]
 
 
 # ── OracleDriver ──────────────────────────────────────────────
@@ -457,7 +503,7 @@ class OracleDriver:
         target: str,
         query: dict,
         mode: ExecuteMode = "single",
-        batch_size: int = 1000,
+        batch_size: int = 1000,  # noqa: hardcode
     ) -> ExecuteResult:
         """Thick/Thin 统一走 executor + sync pool, 消除双份实现。"""
         log.info(
@@ -526,11 +572,6 @@ class OracleDriver:
             cur.execute("SELECT 1 FROM DUAL")
             cur.fetchone()
 
-    # ── get_server_capabilities ───────────────────────────────
-
-    async def get_server_capabilities(self, ds: DataSource) -> ServerCapabilities | None:
-        return None
-
     # ── list_object_names ──────────────────────────────────────
 
     async def list_object_names(self, ds: DataSource) -> list[str]:
@@ -544,6 +585,33 @@ class OracleDriver:
             cur.execute("SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME")
             rows = cur.fetchall()
             return sorted(r[0] for r in rows)
+
+    # ── probe_connectivity ───────────────────────────────
+
+    async def probe_connectivity(self, ds: DataSource) -> ProbeResult:
+        """一次性临时连接: 探测连通 + 时区. 走 executor 兼容 Thick/Thin."""
+        return await self._run_in_executor(self._probe_connectivity_sync, ds)
+
+    def _probe_connectivity_sync(self, ds: DataSource) -> ProbeResult:
+        from app.engine.drivers._timezone import normalize_timezone
+        try:
+            conn = oracledb.connect(
+                user=ds.username, password=ds.password, dsn=self._dsn(ds),
+                tcp_connect_timeout=settings.oracle_connect_timeout_secs,
+            )
+        except Exception as exc:
+            return ProbeResult(connected=False, failure_reason=str(exc)[:300])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT SESSIONTIMEZONE FROM DUAL")
+            raw = str(cur.fetchone()[0])
+            return ProbeResult(connected=True, detected_timezone=normalize_timezone(raw))
+        except Exception as exc:
+            return ProbeResult(
+                connected=True, detected_timezone=None, failure_reason=str(exc)[:300]
+            )
+        finally:
+            conn.close()
 
     # ── fetch_db_profile ──────────────────────────────────────
 
@@ -568,6 +636,11 @@ class OracleDriver:
                 ("SELECT USER FROM DUAL", "schema", lambda r: str(r[0])),
                 ("SELECT COUNT(*) FROM USER_TABLES", "object_count",
                  lambda r: int(r[0] or 0)),
+                ("SELECT VALUE FROM NLS_DATABASE_PARAMETERS WHERE PARAMETER='NLS_CHARACTERSET'",
+                 "charset", lambda r: str(r[0])),
+                ("SELECT VALUE FROM NLS_DATABASE_PARAMETERS "
+                 "WHERE PARAMETER='NLS_NCHAR_CHARACTERSET'",
+                 "nchar_charset", lambda r: str(r[0])),
             ]:
                 try:
                     cur.execute(stmt)
@@ -587,6 +660,74 @@ class OracleDriver:
                 except Exception:
                     pass
         return p
+
+    # ── fetch_foreign_keys ─────────────────────────────────
+
+    async def fetch_foreign_keys(
+        self, ds: DataSource, target: str | None = None,
+    ) -> list[dict]:
+        """查 USER_CONSTRAINTS(type='R') → FK 列表. 降级返 []."""
+        try:
+            return await self._run_in_executor(
+                self._fetch_foreign_keys_sync, ds, target,
+            )
+        except Exception:
+            log.warning(
+                "[oracle_driver] fetch_foreign_keys failed ds=%d target=%s",
+                ds.id, target, exc_info=True,
+            )
+            return []
+
+    def _fetch_foreign_keys_sync(
+        self, ds: DataSource, target: str | None,
+    ) -> list[dict]:
+        """同步取 FK. ds.id 不为 None 走连接池, None 走一次性连接."""
+        if ds.id is not None:
+            pool = self._get_sync_pool(ds)
+            with pool.acquire() as conn:
+                return self._fk_queries(conn, ds, target)
+        conn = oracledb.connect(
+            user=ds.username, password=ds.password, dsn=self._dsn(ds),
+            tcp_connect_timeout=settings.oracle_connect_timeout_secs,
+        )
+        try:
+            return self._fk_queries(conn, ds, target)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _fk_queries(conn, ds: DataSource, target: str | None) -> list[dict]:
+        cur = conn.cursor()
+        if target is not None:
+            cur.execute(
+                "SELECT a.TABLE_NAME, a.COLUMN_NAME, "
+                "c_pk.OWNER AS REFERENCED_OWNER, "
+                "c_pk.TABLE_NAME AS REFERENCED_TABLE_NAME, "
+                "c_pk.COLUMN_NAME AS REFERENCED_COLUMN_NAME "
+                "FROM USER_CONS_COLUMNS a "
+                "JOIN USER_CONSTRAINTS r ON r.CONSTRAINT_NAME = a.CONSTRAINT_NAME "
+                "   AND r.CONSTRAINT_TYPE = 'R' "
+                "JOIN USER_CONS_COLUMNS c_pk ON c_pk.CONSTRAINT_NAME = r.R_CONSTRAINT_NAME "
+                "   AND c_pk.POSITION = a.POSITION "
+                "WHERE a.TABLE_NAME = :target "
+                "ORDER BY a.TABLE_NAME, a.COLUMN_NAME",
+                target=target,
+            )
+        else:
+            cur.execute(
+                "SELECT a.TABLE_NAME, a.COLUMN_NAME, "
+                "c_pk.OWNER AS REFERENCED_OWNER, "
+                "c_pk.TABLE_NAME AS REFERENCED_TABLE_NAME, "
+                "c_pk.COLUMN_NAME AS REFERENCED_COLUMN_NAME "
+                "FROM USER_CONS_COLUMNS a "
+                "JOIN USER_CONSTRAINTS r ON r.CONSTRAINT_NAME = a.CONSTRAINT_NAME "
+                "   AND r.CONSTRAINT_TYPE = 'R' "
+                "JOIN USER_CONS_COLUMNS c_pk ON c_pk.CONSTRAINT_NAME = r.R_CONSTRAINT_NAME "
+                "   AND c_pk.POSITION = a.POSITION "
+                "ORDER BY a.TABLE_NAME, a.COLUMN_NAME"
+            )
+        rows = _cursor_to_dicts(cur, cur.fetchall())
+        return _oracle_fk_rows_to_relationships(rows, "oracle")
 
     # ── lifecycle ─────────────────────────────────────────────
 
@@ -642,15 +783,18 @@ class OracleDriver:
 
     @staticmethod
     def _wrap_by_mode(sql: str, mode: ExecuteMode, batch_size: int) -> str:
-        normalized = _normalize_sql(sql)
-        base = _strip_outer_row_limit_impl(normalized)
-        has_limit = base != normalized
+        """两类契约, 与 MySQL 对称 (Oracle 用 ROWNUM 包装):
+
+        保护型 (single/batched/probe): _apply_rownum_limit 三态.
+        权威型 (render/count): strip 后注入权威语义.
+        """
+        base = _strip_outer_row_limit_impl(sql)
         if mode == "count":
             return f"SELECT COUNT(*) AS cnt FROM ({base})"
         if mode == "render":
             return _rownum_wrap(base, settings.render_row_limit)
         if mode == "probe":
-            return normalized if has_limit else _rownum_wrap(normalized, 10)
+            return _apply_rownum_limit(sql, settings.probe_row_limit)
         if mode == "batched":
-            return normalized if has_limit else _rownum_wrap(normalized, batch_size)
-        return normalized if has_limit else _rownum_wrap(normalized, settings.query_row_limit)
+            return _apply_rownum_limit(sql, batch_size)
+        return _apply_rownum_limit(sql, settings.query_row_limit)  # single

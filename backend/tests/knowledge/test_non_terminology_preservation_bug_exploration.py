@@ -19,19 +19,15 @@
   在未修复代码上观察到的基线行为 (probe 记录, 本测试据此编码):
   ────────────────────────────────────────────────────────────────────────────
   [1] purge_legacy_for_full_rebuild(repo_id=A):
-        删除 non-terminology 且 (repo_id==A AND source∈{git,mybatis_extract});
+        删除 non-terminology 且 (repo_id==A AND source∈{code_extract});
         保留 其他 repo 的条目 (repo_id==B) 与 非清场 source (manual/...).
-  [2] git_reparse _clean_namespace_knowledge_entries (scope source∈{git,self_answer,
-        clarify}, entry_type-agnostic):
-        删除 非术语条目 source∈{git,self_answer,clarify} (不论 entry_type);
-        保留 其他 source (mybatis_extract/manual/...).
-  [3] git banner (source=="git"): total=count(source==git),
+  [2] git banner (source=="code_extract"): total=count(source==git),
         canonical=count(source==git AND status==canonical).
-  [4a] gate 唯一键去重 + synonyms 合并: 同 (collection,database,db_type) 三元组
+  [3a] gate 唯一键去重 + synonyms 合并: 同 (collection,database,db_type) 三元组
         且词形相交 → 命中同一 active 行并合并 synonyms.
-  [4b] gate canonical 保护: 既有 canonical + 候选词形相交 → 落 open conflict,
+  [3b] gate canonical 保护: 既有 canonical + 候选词形相交 → 落 open conflict,
         canonical synonyms 不变 (冲突工单机制保留, 仅 candidate_repo_id 维度改动).
-  [5] 删 GitRepo: 非术语 KE 存活, repo_id → NULL (ondelete=SET NULL).
+  [4] 删 GitRepo: 非术语 KE 存活, repo_id → NULL (ondelete=SET NULL).
 """
 from __future__ import annotations
 
@@ -60,11 +56,9 @@ TEST_DATABASE_URL = os.environ.get(
 # 非术语 entry_type (排除 terminology) —— 覆盖 NOT isBugCondition(X) 输入域
 NON_TERM_ENTRY_TYPES = ["example", "route_hint", "rule", "schema_summary", "instance_alias"]
 # trainer purge per-repo 命中 source
-PURGE_SOURCES = ["git", "mybatis_extract"]
-# git_reparse scope 命中 source
-GIT_REPARSE_SCOPE_SOURCES = ["git", "self_answer", "clarify"]
+PURGE_SOURCES = ["code_extract"]
 # 非清场 / 非 scope source (保留)
-KEPT_SOURCES = ["manual", "conversation", "agent_learn"]
+KEPT_SOURCES = ["manual", "schema", "agent_learn"]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -135,7 +129,7 @@ async def test_purge_non_terminology_per_repo_baseline(
     async_session, chroma_isolated, specs: list[tuple[str, str, str]],
 ):
     """purge_legacy_for_full_rebuild(repo_id=A) 对非术语条目按 per-repo 规则:
-    删除 (repo_id==A AND source∈{git,mybatis_extract}); 保留其余.
+    删除 (repo_id==A AND source∈{code_extract}); 保留其余.
     保留条目同时维持其原 source / repo_id 归属 (Req 3.2).
 
     EXPECTED OUTCOME on unfixed code: PASS (基线保留行为).
@@ -194,77 +188,7 @@ async def test_purge_non_terminology_per_repo_baseline(
 
 
 # ════════════════════════════════════════════════════════════════
-#  Property 6b — git_reparse scope 对非术语条目按 source 清/留
-#  (Req 3.3 的非术语部分; 术语变更由 task 7 覆盖) —— 未修复代码上预期 PASS
-# ════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-@settings(
-    max_examples=15,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-@given(
-    specs=st.lists(
-        st.tuples(
-            st.sampled_from(NON_TERM_ENTRY_TYPES),
-            st.sampled_from(GIT_REPARSE_SCOPE_SOURCES + KEPT_SOURCES + ["mybatis_extract"]),
-        ),
-        min_size=1, max_size=6,
-    ),
-)
-async def test_git_reparse_non_terminology_scope_baseline(
-    async_session, chroma_isolated, specs: list[tuple[str, str]],
-):
-    """git_reparse _clean_namespace_knowledge_entries (scope source∈{git,self_answer,
-    clarify}, entry_type-agnostic) 对非术语条目: 删 scope 内 source、保留 scope 外
-    source. 保留条目 source 不变.
-
-    EXPECTED OUTCOME on unfixed code: PASS (基线保留行为).
-    """
-    from app.api.knowledge import _clean_namespace_knowledge_entries
-
-    uid = uuid.uuid4().hex[:8]
-    async with async_session() as db:
-        ns = Namespace(name=f"gr_{uid}", slug=f"gr_{uid}", description="git_reparse preservation")
-        db.add(ns)
-        await db.commit()
-        await db.refresh(ns)
-        async_session._created_ns_ids.append(ns.id)
-
-        recs: list[tuple[int, str, bool]] = []  # (ke_id, source, expect_kept)
-        for i, (etype, source) in enumerate(specs):
-            ke = _mk_ke(ns.id, entry_type=etype, source=source, repo_id=None, content=f"c{i}")
-            db.add(ke)
-            await db.flush()
-            expect_deleted = source in GIT_REPARSE_SCOPE_SOURCES
-            recs.append((ke.id, source, not expect_deleted))
-        await db.commit()
-
-        await _clean_namespace_knowledge_entries(db, ns.id, ns.slug, actor_id=None)
-        await db.commit()
-
-    async with async_session() as db:
-        for ke_id, source, expect_kept in recs:
-            ke = await db.get(KnowledgeEntry, ke_id)
-            if expect_kept:
-                assert ke is not None, (
-                    f"非术语条目应脱离 git_reparse scope 被保留: "
-                    f"ke_id={ke_id} source={source!r}"
-                )
-                assert ke.source == source, (
-                    f"保留条目 source 被改动: ke_id={ke_id} 期望 {source!r} 实际 {ke.source!r}"
-                )
-            else:
-                assert ke is None, (
-                    f"git_reparse scope 内非术语条目应被删除: "
-                    f"ke_id={ke_id} source={source!r}"
-                )
-
-
-# ════════════════════════════════════════════════════════════════
-#  Property 6c — git banner 按 source=="git" 统计非术语条目 (Req 3.4)
+#  Property 6c — git banner 按 source=="code_extract" 统计非术语条目 (Req 3.4)
 #  未修复代码上预期 PASS
 # ════════════════════════════════════════════════════════════════
 
@@ -279,7 +203,7 @@ async def test_git_reparse_non_terminology_scope_baseline(
     specs=st.lists(
         st.tuples(
             st.sampled_from(NON_TERM_ENTRY_TYPES),
-            st.sampled_from(["git", "mybatis_extract", "manual", "self_answer"]),
+            st.sampled_from(["code_extract", "manual", "schema", "agent_learn"]),
             st.sampled_from(["proposed", "canonical", "superseded", "rejected"]),
         ),
         min_size=1, max_size=8,
@@ -306,7 +230,7 @@ async def test_git_banner_stats_baseline(
         for i, (etype, source, status) in enumerate(specs):
             db.add(_mk_ke(ns.id, entry_type=etype, source=source, repo_id=None,
                           content=f"c{i}", status=status))
-            if source == "git":
+            if source == "code_extract":
                 expected_total += 1
                 if status == "canonical":
                     expected_canonical += 1
@@ -316,13 +240,13 @@ async def test_git_banner_stats_baseline(
         total = (await db.execute(
             select(func.count(KnowledgeEntry.id)).where(
                 KnowledgeEntry.namespace_id == ns.id,
-                KnowledgeEntry.source == "git",
+                KnowledgeEntry.source == "code_extract",
             )
         )).scalar_one()
         canonical = (await db.execute(
             select(func.count(KnowledgeEntry.id)).where(
                 KnowledgeEntry.namespace_id == ns.id,
-                KnowledgeEntry.source == "git",
+                KnowledgeEntry.source == "code_extract",
                 KnowledgeEntry.status == "canonical",
             )
         )).scalar_one()
@@ -446,7 +370,7 @@ async def test_gate_canonical_protection_and_conflict_baseline(
         res = await upsert_terminology_with_validation(
             db, ns_id=ns.id,
             payload_dict={**base, "term": "货品", "synonyms": ["货物"]},
-            source="git", repo_id=None,
+            source="code_extract", repo_id=None,
         )
         await db.commit()
 
@@ -479,7 +403,7 @@ async def test_gate_canonical_protection_and_conflict_baseline(
 )
 @given(
     entry_type=st.sampled_from(NON_TERM_ENTRY_TYPES),
-    source=st.sampled_from(["git", "mybatis_extract", "manual"]),
+    source=st.sampled_from(["code_extract", "manual", "schema", "agent_learn"]),
 )
 async def test_git_repo_delete_sets_non_terminology_repo_id_null_baseline(
     async_session, entry_type: str, source: str,

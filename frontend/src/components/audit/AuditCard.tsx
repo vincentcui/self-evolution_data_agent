@@ -21,6 +21,32 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "red", superseded: "default",
 };
 
+// ── 字段中文映射 — AuditQueue STATUS_OPTIONS 同源, 此处用于卡片 Tag 文本 ──
+const STATUS_LABELS: Record<string, string> = {
+  proposed: "待审", canonical: "已通过",
+  rejected: "已拒绝", superseded: "已替代",
+};
+
+const ENTRY_TYPE_LABELS: Record<string, string> = {
+  terminology:    "业务术语",
+  instance_alias: "实例别名",
+  example:        "示例查询",
+  rule:           "查询规则",
+  route_hint:     "路由偏好",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  schema:        "Schema 抽取",
+  manual:        "手动",
+  agent_learn:   "Agent 学习",
+  code_extract: "代码提取",
+};
+
+const TIER_LABELS: Record<string, string> = {
+  normal:   "普通",
+  critical: "关键",
+};
+
 // ── entry_type 颜色映射: UI 上显式呈现 6 类宪章边界, 不依赖默认灰 Tag 视觉混淆 ──
 const ENTRY_TYPE_COLORS: Record<string, string> = {
   terminology:    "geekblue",
@@ -51,8 +77,8 @@ function TerminologyRouting({ payload }: { payload: Record<string, unknown> | nu
     <div style={{ marginBottom: 8, fontSize: 12 }}>
       <Space size="small" wrap>
         {dbType && <Tag color={DB_TYPE_META[dbType as keyof typeof DB_TYPE_META]?.color ?? "purple"}>{dbType}</Tag>}
-        {db && <Text type="secondary">database: <Text code>{db}</Text></Text>}
-        {coll && <Text type="secondary">collection: <Text code>{coll}</Text></Text>}
+        {db && <Text type="secondary">数据库: <Text code>{db}</Text></Text>}
+        {coll && <Text type="secondary">集合: <Text code>{coll}</Text></Text>}
       </Space>
       {synonyms.length > 0 && (
         <div style={{ marginTop: 4 }}>
@@ -62,7 +88,7 @@ function TerminologyRouting({ payload }: { payload: Record<string, unknown> | nu
       )}
       {sourceColls.length > 1 && (
         <div style={{ marginTop: 4 }}>
-          <Text type="secondary">关联 collections: </Text>
+          <Text type="secondary">关联集合: </Text>
           {sourceColls.map((c) => <Tag key={c}>{c}</Tag>)}
         </div>
       )}
@@ -99,7 +125,7 @@ export default function AuditCard({
       ),
       onOk: async () => {
         const reason = (document.getElementById("reject-reason") as HTMLInputElement)?.value?.trim();
-        if (!reason) { message.warning("reason 必填"); return Promise.reject(); }
+        if (!reason) { message.warning("原因必填"); return Promise.reject(); }
         await rejectEntry(entry.id, reason);
         message.success("已拒绝");
         onAction?.();
@@ -136,10 +162,10 @@ export default function AuditCard({
         {selectable && (
           <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
         )}
-        <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{entry.status}</Tag>
-        <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{entry.entry_type}</Tag>
-        <Tag>{entry.source}</Tag>
-        <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{entry.tier}</Tag>
+        <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{STATUS_LABELS[entry.status] ?? entry.status}</Tag>
+        <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}</Tag>
+        <Tag>{SOURCE_LABELS[entry.source] ?? entry.source}</Tag>
+        <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{TIER_LABELS[entry.tier] ?? entry.tier}</Tag>
       </Space>
       <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>
         {entry.content}
@@ -196,14 +222,14 @@ export default function AuditCard({
             </div>
             {joins.length > 0 && (
               <div style={{ marginTop: 4 }}>
-                <Text type="secondary">join: </Text>
+                <Text type="secondary">连接: </Text>
                 {joins.map((j, i) => (
                   <Tag key={`${j.a}:${j.b}:${i}`}>{j.a} ↔ {j.b}</Tag>
                 ))}
               </div>
             )}
             <div style={{ marginTop: 4 }}>
-              <Tag>strategy: {(p.cost_strategy as string) ?? "?"}</Tag>
+              <Tag>策略: {(p.cost_strategy as string) ?? "?"}</Tag>
               <Text type="secondary" style={{ marginLeft: 8 }}>
                 {(p.reason as string) ?? ""}
               </Text>

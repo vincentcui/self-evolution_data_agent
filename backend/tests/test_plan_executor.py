@@ -25,7 +25,7 @@ def _step(idx=1, db="db1", coll="c", op="find",
     return PlanStep(
         step_idx=idx, database=db, collection=coll, operation=op,
         pipeline=pipeline or [], query=query or {},
-        exports=exports or [], limit=100, db_type=db_type,
+        exports=exports or [], db_type=db_type,
     )
 
 
@@ -439,3 +439,26 @@ async def test_execute_plan_mysql_downstream_var_injection():
 
     assert "IN (10, 20)" in captured["sql"]
     assert len(result.final) == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PlanStep.limit write-only 字段删除 (Task 5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_plan_step_has_no_limit_field():
+    """step.limit write-only 字段已删 — 执行路径从不读它做控制流, 仅曾进 log/trace 误导."""
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(PlanStep)}
+    assert "limit" not in field_names
+
+
+def test_plan_step_to_dict_omits_limit():
+    step = PlanStep(step_idx=1, database="db", collection="orders", operation="find")
+    assert "limit" not in step.to_dict()
+
+
+def test_plan_step_construction_rejects_limit_kwarg():
+    """破坏性契约: limit kwarg 已移除, 传入应 TypeError (防止 callsite 漏迁移回潜)."""
+    with pytest.raises(TypeError):
+        PlanStep(step_idx=1, database="db", collection="c", operation="find", limit=100)  # type: ignore[call-arg]

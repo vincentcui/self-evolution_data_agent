@@ -84,8 +84,8 @@ test.describe("agent traces e2e", () => {
           trace_json: '{"tool_trace": [{"name": "lookup_knowledge", "input": {}, "output": {}, "status": "ok"}]}',
           reflection_log_json: JSON.stringify([
             { tool_name: "lookup_knowledge", confidence: 0.85, reason: "匹配到规则", alternative: "" },
-            { tool_name: "execute_query", confidence: 0.92, reason: "SQL 正确", alternative: "可用 aggregate" },
           ]),
+          tool_trace_compact: [{ step: 0, tool: "lookup_knowledge" }],
           status: "completed",
           refined_at: null,
           refined_summary: null,
@@ -113,7 +113,14 @@ test.describe("agent traces e2e", () => {
     await page.getByRole("button", { name: "详情" }).first().click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 3000 });
+    // 调用列表表头 (新结构)
+    await expect(dialog.getByText("调用列表")).toBeVisible();
+    // 入参/返回值 列标题 (新结构, 替换旧 查询摘要/结果)
+    await expect(dialog.getByText("入参")).toBeVisible();
+    await expect(dialog.getByText("返回值")).toBeVisible();
+    // lookup_knowledge 现来自调用列表 (tool_trace_compact), 非旧 reflection 表
     await expect(dialog.getByText("lookup_knowledge").first()).toBeVisible();
+    // reflection 覆盖层: mock reflection 非空, 0.85 / 匹配到规则 仍渲染 (现验覆盖层, 非旧面板)
     await expect(dialog.getByText("0.85")).toBeVisible();
     await expect(dialog.getByText("匹配到规则")).toBeVisible();
     await dialog.locator("button.ant-modal-close").click();

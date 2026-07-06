@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from tests._db_schema_sync import prepare_test_schema
 
@@ -24,6 +25,29 @@ TEST_DATABASE_URL = os.environ.get(
     "IS_TEST_DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/self_evolution_data_agent_test",
 )
+os.environ.setdefault("IS_METADATA_DB_URL", TEST_DATABASE_URL)
+
+
+async def _ensure_postgres_database_exists(database_url: str) -> None:
+    """Create the local PostgreSQL test database when only the server exists."""
+    url = make_url(database_url)
+    if url.get_backend_name() != "postgresql" or not url.database:
+        return
+
+    admin_url = url.set(database=os.environ.get("IS_TEST_ADMIN_DATABASE", "postgres"))
+    admin_engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with admin_engine.connect() as conn:
+            exists = await conn.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": url.database},
+            )
+            if exists:
+                return
+            escaped_database = url.database.replace('"', '""')
+            await conn.execute(text(f'CREATE DATABASE "{escaped_database}"'))
+    finally:
+        await admin_engine.dispose()
 
 
 # ── pytest-asyncio 全局配置 ──
@@ -37,6 +61,7 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def _engine():
     """Session-scoped async engine for PostgreSQL test database."""
+    await _ensure_postgres_database_exists(TEST_DATABASE_URL)
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 
     # 连接级时区设置 — 与生产一致
@@ -63,7 +88,7 @@ async def db(_engine):
     async with _engine.connect() as conn:
         trans = await conn.begin()
         # 创建嵌套事务（SAVEPOINT），使得 session.commit() 只提交到 savepoint
-        nested = await conn.begin_nested()
+        await conn.begin_nested()
 
         session = AsyncSession(bind=conn, expire_on_commit=False)
 
@@ -95,6 +120,10 @@ async def make_client(db):
     created = []
 
     async def _factory(role: str = "super_admin", user_id: int = 1, username: str = "admin"):
+        if await db.get(User, user_id) is None:
+            db.add(User(id=user_id, username=username, role=role, password_hash="x"))
+            await db.flush()
+
         async def _fake_user():
             return User(id=user_id, username=username, role=role, password_hash="x")
 
@@ -118,3 +147,4 @@ async def make_client(db):
 async def admin_client(make_client):
     """向后兼容: 默认 super_admin 身份 client (旧测试沿用)。"""
     return await make_client(role="super_admin", user_id=1, username="admin")
+

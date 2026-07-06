@@ -39,10 +39,10 @@ function validateTerm(term: string | undefined): string | undefined {
   const t = term.trim();
   if (!t) return undefined;
   if (t.length > TERM_MAX_LEN) {
-    return `term 应为单一业务名词 (不能超过 ${TERM_MAX_LEN} 字), 当前 ${t.length} 字`;
+    return `术语应为单一业务名词 (不能超过 ${TERM_MAX_LEN} 字), 当前 ${t.length} 字`;
   }
-  if (t.includes("\n")) return "term 不应含换行";
-  if (/[。；;]/.test(t)) return "term 不应含句号/分号";
+  if (t.includes("\n")) return "术语不应含换行";
+  if (/[。；;]/.test(t)) return "术语不应含句号/分号";
   return undefined;
 }
 
@@ -67,14 +67,18 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
 
   // ── example 状态: 对齐后端 ExamplePayload schema ──
   const [examplePayload, setExamplePayload] = useState<ExamplePayload>(() => {
-    const p = (entry.payload ?? {}) as Partial<ExamplePayload>;
+    const p = (entry.payload ?? {}) as Record<string, unknown>;
     return {
       ...p,
-      question:          p.question ?? entry.content ?? "",
-      target_collection: p.target_collection ?? "",
-      target_database:   p.target_database ?? null,
-      query_json:        (p.query_json as Record<string, unknown>) ?? null,
-      result_summary:    p.result_summary ?? "",
+      question_pattern:  p.question_pattern as string ?? p.question as string ?? entry.content ?? "",
+      collections:       (p.collections as string[]) ?? [],
+      join_keys:         (p.join_keys as Record<string, unknown>[]) ?? [],
+      final_query_plan:  (p.final_query_plan as Record<string, unknown>) ?? (p.query_json as Record<string, unknown>) ?? null,
+      result_summary:    (p.result_summary as string) ?? "",
+      // legacy passthrough
+      question:          p.question as string,
+      target_collection: p.target_collection as string,
+      query_json:        p.query_json as Record<string, unknown>,
     } as ExamplePayload;
   });
 
@@ -117,10 +121,9 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     setSubmitting(true);
     try {
       if (isExample) {
-        // ── example: payload.question 同步写 content (RAG 索引文本 = question) ──
-        const q = examplePayload.question.trim();
+        const q = (examplePayload.question_pattern as string || examplePayload.question as string || "").trim();
         if (!q) {
-          message.warning("question 不能为空");
+          message.warning("问题模式不能为空");
           setSubmitting(false);
           return;
         }
@@ -175,11 +178,11 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
       <Form.Item label="级别">
         <Select value={tier} onChange={setTier}
           options={[
-            { label: "normal (RAG 召回)", value: "normal" },
-            { label: "critical (直注入 prompt)", value: "critical" },
+            { label: "普通 (向量召回)", value: "normal" },
+            { label: "关键 (强约束 — 每次查询必注入)", value: "critical" },
           ]} style={{ width: 240 }} />
       </Form.Item>
-      <Form.Item label="编辑原因 (必填)">
+      <Form.Item label="编辑原因" required>
         <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="为何修改" />
       </Form.Item>
 
@@ -189,7 +192,7 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
         <Button type="primary" loading={submitting} onClick={handleSubmit}>
           保存
         </Button>
-        {conflicts.length > 0 && <Badge count={conflicts.length} title="conflicts" />}
+        {conflicts.length > 0 && <Badge count={conflicts.length} title="冲突" />}
       </Space>
 
       {/* ── dynamic_variants 折叠区 (mybatis_extract 专用) ── */}

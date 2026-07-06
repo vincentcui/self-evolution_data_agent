@@ -3,7 +3,7 @@
 
 设计原则:
 - 进程级单例, 所有 ChromaDB collection 共用同一 EmbeddingFunction
-- 与 LLM 路由解耦: embedding 凭证独立 (IS_EMBEDDING_*), 不复用 IS_LLM_API_KEY / IS_CLAUDE_API_KEY
+- 凭证从 model_configs 表 + ModelRegistry 读取 (Web UI 模型管理页面配置)
 - 遵循 ChromaDB EmbeddingFunction Protocol,
   直接传入 client.get_or_create_collection(embedding_function=...)
 
@@ -20,7 +20,6 @@ import numpy as np
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Space
 from langfuse import observe
 
-from app.config import settings
 from app.tracing import get_client as _lf_client
 
 if TYPE_CHECKING:
@@ -44,19 +43,18 @@ class DashScopeEmbeddingFunction(EmbeddingFunction[Documents]):
     _model: str = ""
 
     def __init__(self) -> None:
-        if not settings.embedding_api_key:
+        from app.engine.model_registry import registry
+
+        cfg = registry.embedding_config
+        if cfg is None:
             raise RuntimeError(
-                "IS_EMBEDDING_API_KEY 未配置 — embedding 层无法初始化. "
-                "请在 backend/.env 写入 DashScope API key."
+                "无激活的 Embedding 模型配置，请前往「模型管理」页面添加并激活 EMBEDDING 类型配置。"
             )
-        from openai import OpenAI
-        self._client = OpenAI(
-            api_key=settings.embedding_api_key,
-            base_url=settings.embedding_base_url,
-        )
-        self._model = settings.embedding_model
+        self._client = registry.get_embedding_client()
+        self._model = cfg["model_name"]
+        self._base_url = cfg.get("base_url")
         log.info("embedding provider 就绪 model=%s base_url=%s",
-                 self._model, settings.embedding_base_url)
+                 self._model, self._base_url)
 
     @observe(as_type="embedding", name="embedding", capture_input=False, capture_output=False)
     def __call__(self, input: Documents) -> Embeddings:
@@ -89,7 +87,10 @@ class DashScopeEmbeddingFunction(EmbeddingFunction[Documents]):
                     model=self._model,
                     input={"batch_count": len(texts)},
                     output={"dim": int(vectors[0].shape[0]) if vectors else 0},
-                    usage_details={"input": total_tokens, "total": total_tokens} if total_tokens else None,
+                    usage_details=(
+                        {"input": total_tokens, "total": total_tokens}
+                        if total_tokens else None
+                    ),
                 )
             except Exception:
                 pass
@@ -104,11 +105,11 @@ class DashScopeEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: dict) -> "DashScopeEmbeddingFunction":
-        _ = config  # 当前无参可解析 — 所有配置从 settings 读
+        _ = config  # 当前无参可解析 — 所有配置从 registry 读
         return DashScopeEmbeddingFunction()
 
     def get_config(self) -> dict:
-        return {"model": self._model, "base_url": settings.embedding_base_url}
+        return {"model": self._model, "base_url": self._base_url}
 
     def default_space(self) -> Space:
         return "cosine"

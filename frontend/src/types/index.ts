@@ -40,6 +40,7 @@ export interface DataSource {
   username: string;
   description: string;
   db_profile: Record<string, unknown>;
+  timezone: string;
   created_at: string;
 }
 
@@ -78,7 +79,7 @@ export interface KnowledgeEntry {
   content: string;
   raw_input: string;
   description: string;
-  source: "manual" | "conversation" | "git" | "auto" | "agent_learn" | "migration";
+  source: "schema" | "manual" | "agent_learn" | "code_extract";
   status: "proposed" | "canonical" | "superseded" | "rejected";
   is_superseded: boolean;
   payload: Record<string, unknown> | null;
@@ -259,4 +260,31 @@ export interface TerminologyConflict {
   candidate_repo_id: number | null;
   status: "open" | "resolved" | "dismissed";
   created_at: string;
+}
+
+/* ════════════════════════════════════════════
+ *  P0 对话体验 — Session / Readiness / Feedback
+ * ════════════════════════════════════════════ */
+
+export interface Session {
+  id: string;
+  namespace_id: number;
+  title: string;
+  created_by: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface Blocker {
+  type: string;
+  message: string;
+  admin_action: string;
+  admin_route: string;
+  user_action: string;
+}
+
+export interface ReadinessResult {
+  ready: boolean;
+  checks: Record<string, boolean>;
+  blockers: Blocker[];
 }

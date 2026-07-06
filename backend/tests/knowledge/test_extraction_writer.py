@@ -341,7 +341,7 @@ async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
 
     ke = rows[0]
     assert ke.status == "proposed"
-    assert ke.source == "mybatis_extract"
+    assert ke.source == "code_extract"
     assert ke.repo_id == repo_id
 
     payload = json.loads(ke.payload)
@@ -382,7 +382,7 @@ async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded
 
     ke = rows[0]
     assert ke.status == "proposed"
-    assert ke.source == "mybatis_extract"
+    assert ke.source == "code_extract"
     assert ke.repo_id == repo_id
     payload = json.loads(ke.payload)
     assert payload["sql_pattern"].startswith("SELECT * FROM orders")

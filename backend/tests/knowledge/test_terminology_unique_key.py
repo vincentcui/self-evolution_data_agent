@@ -24,7 +24,7 @@ async def test_same_term_merges_synonyms(async_session, seeded_ns_with_mongo_ds)
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         await upsert_terminology_with_validation(
@@ -46,7 +46,7 @@ async def test_candidate_term_in_existing_synonyms_merges(
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品", "存货"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品", "存货"]), source="code_extract",
         )
         await db.commit()
         # candidate term=货品 ∈ existing.synonyms → 合并
@@ -65,7 +65,7 @@ async def test_synonyms_intersection_merges(async_session, seeded_ns_with_mongo_
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         # candidate term=存货, syn=[货品, 货本] — synonyms 交集 {货品} 非空
@@ -85,12 +85,12 @@ async def test_no_intersection_creates_conflict(
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         # 完全无交集
         ret = await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("订单", ["单子"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("订单", ["单子"]), source="code_extract",
         )
         await db.commit()
     assert ret is None
@@ -109,7 +109,7 @@ async def test_canonical_protection_skips_git_extractor(
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         ke = await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         assert ke is not None
@@ -117,7 +117,7 @@ async def test_canonical_protection_skips_git_extractor(
         await db.commit()
         # source=git + canonical → 走 conflict, syns 不变
         result = await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货本"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货本"]), source="code_extract",
         )
         await db.commit()
         loaded = (await db.execute(select(KnowledgeEntry))).scalar_one()
@@ -137,7 +137,7 @@ async def test_canonical_routes_to_conflict_regardless_of_source(async_session, 
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         ke = await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         assert ke is not None
@@ -162,7 +162,7 @@ async def test_superseded_excluded_from_unique_key(
     ns_id, _ = seeded_ns_with_mongo_ds
     async with async_session() as db:
         ke = await upsert_terminology_with_validation(
-            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="git",
+            db, ns_id=ns_id, payload_dict=_payload("商品", ["货品"]), source="code_extract",
         )
         await db.commit()
         assert ke is not None

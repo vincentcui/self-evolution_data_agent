@@ -13,7 +13,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ from app.models.enum_binding_conflict import EnumBindingConflict
 from app.models.schema_canonical_candidate import SchemaCanonicalCandidate
 from app.models.schema_canonical_conflict import SchemaCanonicalConflict
 from app.models.user import User
+from app.schemas.relationship import RelationshipEntry
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +150,7 @@ class SchemaCanonicalOut(BaseModel):
             indexes = []
         try:
             relationships = json.loads(obj.relationships_json or "[]")
+            relationships = [{k: v for k, v in r.items() if k != "sources"} for r in relationships]
         except json.JSONDecodeError:
             relationships = []
         return cls(
@@ -172,6 +174,15 @@ class SchemaCanonicalPatch(BaseModel):
     description: str | None = None
     purpose_detail: str | None = None
     fields: list[dict] | None = None  # 用户编辑字段 description
+    relationships: list[RelationshipEntry] | None = None  # pydantic-validated
+
+    @field_validator("relationships", mode="before")
+    @classmethod
+    def _ensure_dicts(cls, v):
+        """Allow plain dict input — coercing through RelationshipEntry."""
+        if v is None:
+            return None
+        return [RelationshipEntry(**r) if isinstance(r, dict) else r for r in v]
 
 
 # ── Endpoints ──
@@ -224,6 +235,11 @@ async def patch_canonical(
         obj.purpose_detail = body.purpose_detail
     if body.fields is not None:
         obj.fields_json = json.dumps(body.fields, ensure_ascii=False)
+    if body.relationships is not None:
+        obj.relationships_json = json.dumps(
+            [{**r.model_dump(), "sources": ["manual"]} for r in body.relationships],
+            ensure_ascii=False,
+        )
 
     # 修订 #3: auto-lock on patch
     obj.user_locked = True

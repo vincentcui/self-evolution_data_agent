@@ -237,6 +237,13 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
 // ---------------------------------------------------------------------------
 // useAgentStream: start() 触发 SSE 长连接, stop() abort 信号传至 fetch reader.
 // ---------------------------------------------------------------------------
+
+/** 模块级 stop 引用，供 Layout.newChat 等外部直接中止 SSE，不依赖 context 注入时序 */
+let _globalStop: (() => void) | null = null;
+export function getGlobalStop(): (() => void) | null {
+  return _globalStop;
+}
+
 export function useAgentStream() {
   const [state, dispatch] = useReducer(agentStreamReducer, undefined, initialAgentStreamState);
   const abortRef = useRef<AbortController | null>(null);
@@ -252,7 +259,7 @@ export function useAgentStream() {
         const { traceId, done } = await openAgentStream({
           url: "/api/query/stream",
           body,
-          onEvent: (ev) => dispatch({ type: "event", event: ev }),
+          onEvent: (ev) => { if (!ctrl.signal.aborted) dispatch({ type: "event", event: ev }); },
           signal: ctrl.signal,
         });
         dispatch({ type: "set_trace", traceId });
@@ -276,7 +283,14 @@ export function useAgentStream() {
     [],
   );
 
-  const stop = useCallback(() => abortRef.current?.abort(), []);
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
-  return { state, start, stop };
+  const reset = useCallback(() => dispatch({ type: "reset" }), []);
+
+  // 注册到模块级变量，供 Layout.newChat 等外部直接取用
+  _globalStop = stop;
+
+  return { state, start, stop, reset };
 }

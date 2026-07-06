@@ -45,7 +45,7 @@ async def evict_datasource(ds_id: int) -> None:
 
     遍历所有已注册 driver, 优先调用 invalidate_pool, 否则调 invalidate_client.
     一个 ds 只属于一种 db_type, 对其他 driver 的清理是 no-op pop (幂等安全).
-    防止 CASCADE 删 datasources 行后, driver 内 _pools/_clients/_caps_cache 残留
+    防止 CASCADE 删 datasources 行后, driver 内 _pools/_clients 残留
     持有 TCP 连接直到进程重启.
     新增 driver 时无需修改此函数, 只需在 DRIVERS 注册.
     """

@@ -100,8 +100,11 @@ instance_alias:
   - id_field (str, 默认 "_id")
 
 example:
-  - question (str, 原用户问题或归一化形式)
-  - result_summary (str, 可空, ≤160 字, 描述过滤+关联+聚合)
+  - question_pattern (str, 可复用语义骨架, 用于向量检索匹配类似问题)
+  - collections (list[str], 有序 db.collection 链, 描述此问题涉及的所有表/集合)
+  - join_keys (list[dict], 跨表连接键 [{"from":"orders.user_id","to":"users.id"}])
+  - final_query_plan (dict, 统一查询计划, steps 内 db_type 按数据库类型多态, operation:sql|aggregate|filter)
+  - result_summary (str, 可空, ≤160 字, 自然语言描述过滤/关联/聚合模式)
 
 rule:
   - rule_text (str, 一句话规则描述, 含字段路径)
@@ -154,7 +157,10 @@ route_hint:
 合法 example:
 {"entry_type": "example",
  "content": "按状态分组统计订单数",
- "payload": {"question": "查看各订单状态的数量分布",
+ "payload": {"question_pattern": "查看各订单状态的数量分布",
+             "collections": ["shop.orders"],
+             "join_keys": [],
+             "final_query_plan": {"steps": [{"db_type":"mongodb","database":"shop","collection":"orders","operation":"aggregate","query":{"pipeline":[{"$group":{"_id":"$status","count":{"$sum":1}}}]}}]},
              "result_summary": "在 orders 上按 status 字段 $group + $sum:1"},
  "evidence": {"trace_ids": ["t3"],
    "reasoning": "trace t3 step 1 一次性在 orders 上 $group by status 即得结果, pipeline 简单可复用"},

@@ -12,8 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.engine.json_parser import parse_llm_json
-from app.engine.llm import THINKING_DISABLED, chat_completion
+from app.engine.llm import chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +141,8 @@ async def parse_enum_classes_batch(
             ]
             try:
                 raw = await asyncio.to_thread(
-                    chat_completion, messages=messages, temperature=0.1, max_tokens=4096,
-                    extra_body=THINKING_DISABLED,
+                    chat_completion, messages=messages, temperature=0.1,
+                    max_tokens=settings.enum_extract_max_tokens, thinking=False,
                 )
             except Exception as e:
                 async with lock:

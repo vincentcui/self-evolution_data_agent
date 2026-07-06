@@ -10,9 +10,9 @@ Phase 2 P2.T13: example 类型的向量索引内容由 question + nl_paraphrases
 def build_example_content(payload: dict) -> str:
     """Build ChromaDB-indexed content for example entries.
 
-    Concatenates question + nl_paraphrases for vector search.
-    Frontend still shows only question; this concatenation serves retrieval only.
+    Prefers question_pattern (new); falls back to question (old).
+    Appends nl_paraphrases for retrieval robustness.
     """
-    parts = [payload.get("question", "")]
+    parts = [payload.get("question_pattern") or payload.get("question", "")]
     parts.extend(payload.get("nl_paraphrases", []))
     return "\n".join(p for p in parts if p)

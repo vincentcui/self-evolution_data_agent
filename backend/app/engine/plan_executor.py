@@ -556,22 +556,22 @@ async def _execute_mongo_step(
 async def _resolve_step_caps(ns_id: int, db_type: str, database: str) -> dict | None:
     """Resolve the document datasource capabilities for a step. Failure-safe.
 
-    resolve_ds → get_server_capabilities (per-ds cached). Any missing datasource
-    or probe failure → None (pre-validation must never block execution).
+    resolve_ds → db_profile caps projection. Any missing datasource
+    or empty profile → None (pre-validation must never block execution).
     """
+    import json as _json
+
     from app.db.metadata import async_session
-    from app.engine.drivers import get_driver
+    from app.engine.tools._db_profile_projector import _project_db_profile
     from app.engine.tools._resolve_ds import resolve_ds
 
     async with async_session() as db:
         ds = await resolve_ds(db, ns_id, db_type, database)
     if ds is None:
         return None
-    try:
-        caps = await get_driver(db_type).get_server_capabilities(ds)
-    except Exception:  # noqa: BLE001 — pre-validation must never block on probe failure
-        return None
-    return dict(caps) if caps is not None else None
+    profile = _json.loads(ds.db_profile_json or "{}")
+    caps = _project_db_profile(profile, "caps")
+    return dict(caps) if caps else None
 
 
 @observe(name="plan_executor", as_type="span", capture_input=False, capture_output=False)
@@ -605,9 +605,9 @@ async def execute_plan(
 
     for step in plan.steps:
         log.info(
-            "[plan_exec] step=%d db_type=%s db=%s target=%s op=%s limit=%d",
+            "[plan_exec] step=%d db_type=%s db=%s target=%s op=%s",
             step.step_idx, step.db_type, step.database, step.collection,
-            step.operation, step.limit,
+            step.operation,
         )
 
         # 每步建一个子 span 便于 Langfuse 追踪

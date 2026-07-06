@@ -1,17 +1,16 @@
-"""Phase 1b Task 1.3 — terminology 5 通道统一写入 helper.
+"""Phase 1b Task 1.3 — terminology 通道统一写入 helper.
 
 # ════════════════════════════════════════════════════════════════
 #  设计契约
 # ════════════════════════════════════════════════════════════════
-# 5 通道 (git / manual / conversation / agent_learn / clarify) 共用同一闸门:
+# 3 通道 (schema / manual / agent_learn) 共用同一闸门:
 #
 #   1. Schema 校验 (TerminologyPayload Pydantic, 失败 → None, 不写库)
 #   2. db_type 一致性 (ns 下 primary_database 实际类型 ≠ payload.db_type → None)
 #   3. 唯一键查重 (active 行 = is_superseded=False, 命中 active 三元组)
 #   4a. 不存在 → 新建 KE(status=proposed)
-#         + audit_log: source=git → "auto_generate", 其余 → "propose"
+#         + audit_log: source=schema → "auto_generate", 其余 → "propose"
 #   4b. 存在 + 双向同义命中 (existing_lex ∩ candidate_lex ≠ ∅) → 合并 synonyms
-#         canonical 保护: source=git 跳过, manual/conversation/clarify/agent_learn 仍合并
 #         + audit_log action="merge", diff_json 含 shared_terms
 #   4c. 存在 + 双向同义未命中 → 写 TerminologyConflict, 不写 audit_log, return None
 #
@@ -20,7 +19,6 @@
 
 import json
 import logging
-from typing import Literal
 
 from pydantic import ValidationError
 from sqlalchemy import cast, select
@@ -28,14 +26,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge_audit_log import KnowledgeAuditLog
-from app.models.knowledge_entry import KnowledgeEntry
+from app.models.knowledge_entry import KnowledgeEntry, KnowledgeSource
 from app.models.namespace import DataSource
 from app.models.terminology_conflict import TerminologyConflict
 from app.schemas.knowledge_payload import TerminologyPayload
 
 log = logging.getLogger(__name__)
 
-Source = Literal["schema", "git", "manual", "conversation", "agent_learn", "clarify"]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -59,7 +56,7 @@ async def _resolve_db_type(db: AsyncSession, ns_id: int, database: str) -> str |
 #  Step 1 — schema 校验
 # ════════════════════════════════════════════════════════════════
 async def _validate_payload(
-    payload_dict: dict, source: Source,
+    payload_dict: dict, source: KnowledgeSource,
 ) -> TerminologyPayload | None:
     try:
         return TerminologyPayload(**payload_dict)
@@ -120,7 +117,7 @@ async def _create_proposed(
     db: AsyncSession,
     ns_id: int,
     parsed: TerminologyPayload,
-    source: Source,
+    source: KnowledgeSource,
     repo_id: int | None,
     raw_input: str,
     evidence: dict | None,
@@ -139,7 +136,7 @@ async def _create_proposed(
     )
     db.add(ke)
     await db.flush()
-    action = "auto_generate" if source in ("schema", "git") else "propose"
+    action = "auto_generate" if source == "schema" else "propose"
     db.add(KnowledgeAuditLog(
         entry_id=ke.id,
         actor_id=None,
@@ -160,7 +157,7 @@ async def _merge_or_skip(
     existing: KnowledgeEntry,
     existing_payload: TerminologyPayload,
     parsed: TerminologyPayload,
-    source: Source,
+    source: KnowledgeSource,
 ) -> KnowledgeEntry | None:
     """canonical 一律不合并 (含所有来源) — 返 None 让 caller 落 conflict.
 
@@ -214,7 +211,7 @@ async def _record_conflict(
     existing: KnowledgeEntry,
     existing_payload: TerminologyPayload,
     parsed: TerminologyPayload,
-    source: Source,
+    source: KnowledgeSource,
     repo_id: int | None,
 ) -> None:
     conflict = TerminologyConflict(
@@ -241,7 +238,7 @@ async def upsert_terminology_with_validation(
     *,
     ns_id: int,
     payload_dict: dict,
-    source: Source,
+    source: KnowledgeSource,
     repo_id: int | None = None,
     raw_input: str = "",
     evidence: dict | None = None,

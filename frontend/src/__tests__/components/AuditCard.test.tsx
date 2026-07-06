@@ -214,13 +214,13 @@ describe("AuditCard — entry_type type-specific blocks", () => {
     render(<AuditCard entry={routeHintEntry} />);
     expect(screen.getByText("c_product.categoryId ↔ c_category_group._id")).toBeInTheDocument();
     expect(screen.getByText("商品→订单两层关联")).toBeInTheDocument();
-    expect(screen.getByText(/strategy: default/)).toBeInTheDocument();
+    expect(screen.getByText(/策略: default/)).toBeInTheDocument();
   });
 
   it("entry_type Tag 颜色按 ENTRY_TYPE_COLORS 上色", () => {
     const { container } = render(<AuditCard entry={exampleEntry} />);
     const tags = Array.from(container.querySelectorAll(".ant-tag"));
-    const exampleTag = tags.find((el) => el.textContent === "example");
+    const exampleTag = tags.find((el) => el.textContent === "示例查询");
     expect(exampleTag).toBeTruthy();
     expect(exampleTag!.className).toMatch(/ant-tag-green/);
   });

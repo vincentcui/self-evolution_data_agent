@@ -32,7 +32,7 @@ Self-Evolution Data Agent removes those bottlenecks:
 
 - **No SQL skills needed** — business users self-serve data by asking in natural language.
 - **No BI team, no pre-modeling** — the agent learns your schema and business terms automatically from your code repositories.
-- **No vendor lock-in on the model** — swap between Qwen, GPT, DeepSeek, Claude, or a local vLLM / Ollama endpoint by changing one environment variable.
+- **No vendor lock-in on the model** — swap between Qwen, GPT, DeepSeek, Claude, or a local vLLM / Ollama endpoint via the Web UI (Model Management page); supports hot-switching without restart.
 - **Zero intrusion on production** — read-only connections, no schema changes, no plugins, no touching your business code.
 
 ---
@@ -196,7 +196,7 @@ A text-to-SQL library translates one prompt into one SQL string. Self-Evolution 
 No. Business users ask in natural language. The agent generates and executes the query for MySQL or MongoDB.
 
 **Which LLMs are supported?**
-Any model behind an OpenAI-compatible or Anthropic-compatible endpoint. `IS_LLM_PROVIDER` selects the wire protocol — `openai` (GPT, Qwen/DashScope, DeepSeek, local vLLM / Ollama, or any OpenAI-compatible endpoint via `IS_LLM_BASE_URL`) or `anthropic` (Claude via `IS_CLAUDE_API_KEY`).
+Any model behind an OpenAI-compatible or Anthropic-compatible endpoint. Configured via the Web UI (Model Management page) — add your API key, endpoint URL, and model name, then activate. Supports hot-switching without restart.
 
 **Is my production database safe?**
 Connections are read-only. The agent never alters table structures, installs plugins, or touches business code. SQL is `SELECT`-only with enforced row limits and pre-execution row-count checks.

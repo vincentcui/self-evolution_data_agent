@@ -38,7 +38,7 @@ _VALID_SUGGESTED = {"merge", "replace", "coexist"}
 
 # ─────────────────────────── entry_type 5 类宪章 ───────────────────────────
 # Stage 1 写入治理: 与 KnowledgeEntry.entry_type 文档串、payload schema、前端下拉一一对应
-# 任何写入点 (manual / git / conversation / agent) 均必须从此白名单取值
+# 任何写入点 (manual / git / agent) 均必须从此白名单取值
 VALID_ENTRY_TYPES: frozenset[str] = frozenset({
     "terminology",      # 业务术语 → 集合的映射, 替代旧 business_terms
     "instance_alias",   # 别名 → 具体记录的映射 (仅 RAG 召回, 不进自动机)

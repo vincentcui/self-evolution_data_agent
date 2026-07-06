@@ -31,21 +31,43 @@ def test_terminology_payload_full():
     assert p.primary_field == "categoryId"
 
 
-def test_example_payload_requires_question_and_collection():
+def test_example_payload_requires_question_pattern():
+    """question_pattern is the only required field."""
     with pytest.raises(ValidationError):
-        ExamplePayload(query_json={})  # type: ignore[call-arg]  # 故意缺 required, 测 ValidationError
+        ExamplePayload()  # type: ignore[call-arg]
+
+
+def test_example_payload_minimal():
+    p = ExamplePayload(question_pattern="查询订单")
+    assert p.question_pattern == "查询订单"
+    assert p.collections == []
+    assert p.join_keys == []
+    assert p.final_query_plan is None
+    assert p.result_summary == ""
 
 
 def test_example_payload_full():
     p = ExamplePayload(
-        question="昨天订单数",
-        target_collection="c_product",
-        query_json={"find": {"createdAt": {"$gte": "2026-04-28"}}},
-        result_summary="返回 1 行",
-        source_query_history_id=42,
+        question_pattern="查看各订单状态的数量分布",
+        collections=["shop.orders"],
+        join_keys=[],
+        final_query_plan={"steps": [{"db_type": "mongodb", "collection": "orders", "query": {"pipeline": []}}]},
+        result_summary="在 orders 上按 status 字段 $group + $sum:1",
     )
-    assert p.target_collection == "c_product"
-    assert p.source_query_history_id == 42
+    assert len(p.collections) == 1
+
+
+def test_example_payload_accepts_old_fields():
+    """extra='allow' — old fields pass through without rejection."""
+    p = ExamplePayload(
+        question_pattern="查询订单",
+        question="查询订单",
+        target_collection="orders",
+        query_json={"find": {"createdAt": {"$gte": "2026-04-28"}}},
+        nl_paraphrases=["查看订单"],
+    )
+    assert p.question_pattern == "查询订单"
+    assert p.model_extra is not None
 
 
 def test_rule_payload():

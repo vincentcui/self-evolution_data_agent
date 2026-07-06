@@ -158,7 +158,7 @@ async def seeded_repo_with_mixed_kes(db_session) -> tuple[int, int]:
             status=status,
             tier="normal",
             content=f"ke-{status}",
-            source="git",
+            source="code_extract",
             repo_id=repo.id,
         ))
     await db_session.commit()
@@ -193,14 +193,14 @@ async def seeded_repo_with_open_conflicts(db_session) -> tuple[int, int]:
         namespace_id=ns.id,
         existing_entry_id=anchor.id,
         candidate_payload="{}",
-        candidate_source="git",
+        candidate_source="code_extract",
         status="open",
     ))
     db_session.add(TerminologyConflict(
         namespace_id=ns.id,
         existing_entry_id=anchor.id,
         candidate_payload="{}",
-        candidate_source="git",
+        candidate_source="code_extract",
         status="resolved",
     ))
     await db_session.commit()

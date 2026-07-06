@@ -17,13 +17,15 @@ import type {
   ParseReport,
   QueryHistory,
   QueryResponse,
+  ReadinessResult,
   RepoListResponse,
   SchemaRefreshResult,
+  Session,
   ShareViewResponse,
   User,
 } from "@/types";
 
-const http = axios.create({ baseURL: "/api", timeout: 60_000 });
+export const http = axios.create({ baseURL: "/api", timeout: 60_000 });
 
 // ── 请求拦截: 自动附加 JWT ──
 http.interceptors.request.use((config) => {
@@ -79,6 +81,14 @@ export const deleteNamespace = async (id: number) => {
 export const addDataSource = (nsId: number, data: Record<string, any>) =>
   http.post<DataSource>(`/namespaces/${nsId}/datasources`, data).then((r) => r.data);
 
+export const probeDatasource = (nsId: number, data: Record<string, any>) =>
+  http
+    .post<{ connected: boolean; detected_timezone: string | null; failure_reason: string | null }>(
+      `/namespaces/${nsId}/datasources/probe`,
+      data,
+    )
+    .then((r) => r.data);
+
 export const fetchDataSources = (nsId: number) =>
   http.get<DataSource[]>(`/namespaces/${nsId}/datasources`).then((r) => r.data);
 
@@ -108,9 +118,6 @@ export const getRepoProgress = (nsId: number, repoId: number) =>
 
 export const batchParseRepos = (nsId: number, force = false) =>
   http.post(`/namespaces/${nsId}/repos/batch-parse`, null, { params: force ? { force: true } : {} }).then((r) => r.data);
-
-export const getGitKeSummary = (nsId: number): Promise<{ total: number; canonical: number }> =>
-  http.get(`/namespaces/${nsId}/git-ke-summary`).then((r) => r.data);
 
 export const cancelParse = (nsId: number, repoId: number) =>
   http.post(`/namespaces/${nsId}/repos/${repoId}/cancel`).then((r) => r.data);
@@ -559,3 +566,25 @@ export const deleteProfile = (id: number) =>
 export const updateRepoProfile = (nsId: number, repoId: number, profileId: number | null) =>
   http.patch<GitRepo>(`/namespaces/${nsId}/repos/${repoId}`, { profile_id: profileId })
     .then((r) => r.data);
+
+// ════════════════════════════════════════════
+//  P0 对话体验 — Session / Readiness / Feedback
+// ════════════════════════════════════════════
+
+export const createSession = (namespaceId: number) =>
+  http.post<Session>("/sessions", { namespace_id: namespaceId }).then((r) => r.data);
+
+export const listSessions = (namespaceId: number) =>
+  http.get<Session[]>("/sessions", { params: { namespace_id: namespaceId } }).then((r) => r.data);
+
+export const renameSession = (id: string, title: string) =>
+  http.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data);
+
+export const deleteSession = (id: string) =>
+  http.delete(`/sessions/${id}`);
+
+export const getReadiness = (namespaceId: number) =>
+  http.get<ReadinessResult>(`/namespaces/${namespaceId}/readiness`).then((r) => r.data);
+
+export const submitFeedback = (historyId: number, rating: "like" | "dislike") =>
+  http.post("/feedback", { history_id: historyId, rating });

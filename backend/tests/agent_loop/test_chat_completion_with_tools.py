@@ -10,9 +10,10 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from app.config import settings
 from app.engine.llm import (
     ToolCall,
     ToolUseResponse,
@@ -33,11 +34,11 @@ WEATHER_TOOL = {
 
 
 def _openai_available() -> bool:
-    return bool(settings.llm_api_key)
+    return bool(os.environ.get('IS_LLM_API_KEY'))
 
 
 def _claude_available() -> bool:
-    return bool(settings.claude_api_key)
+    return bool(os.environ.get('IS_CLAUDE_API_KEY'))
 
 
 def test_dataclass_fields_present() -> None:

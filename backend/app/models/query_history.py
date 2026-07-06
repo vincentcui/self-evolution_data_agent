@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, LOCAL_NOW
+from app.models.base import LOCAL_NOW, Base
 
 
 class QueryHistory(Base):
@@ -20,4 +20,6 @@ class QueryHistory(Base):
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
     result_snapshot: Mapped[str] = mapped_column(Text, default="")  # JSON blob: 完整查询结果快照
+    # 'like' | 'dislike' | None
+    feedback_rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=LOCAL_NOW)

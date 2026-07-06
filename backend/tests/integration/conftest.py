@@ -109,19 +109,19 @@ async def seeded_legacy_terminology_kes(async_session, real_chromadb):
 
         kes = [
             KnowledgeEntry(
-                namespace_id=ns.id, entry_type="terminology", source="git",
+                namespace_id=ns.id, entry_type="terminology", source="code_extract",
                 status="proposed", is_superseded=False,
                 payload=json.dumps({"term": "订单状态枚举: 0=draft, 1=published"}),
                 content="订单状态枚举",
             ),
             KnowledgeEntry(
-                namespace_id=ns.id, entry_type="terminology", source="git",
+                namespace_id=ns.id, entry_type="terminology", source="code_extract",
                 status="proposed", is_superseded=False,
                 payload=json.dumps({"term": "c_product.categoryId 关联 c_category._id"}),
                 content="c_product 关联 c_category",
             ),
             KnowledgeEntry(
-                namespace_id=ns.id, entry_type="terminology", source="git",
+                namespace_id=ns.id, entry_type="terminology", source="code_extract",
                 status="proposed", is_superseded=False,
                 payload=json.dumps({"term": "订单状态枚举别名"}),
                 content="另一条枚举描述",

@@ -135,7 +135,8 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
   const handleBatchParse = async (force = false) => {
     try {
       const res = await api.batchParseRepos(nsId, force);
-      message.success(`已启动 ${res.started} 个解析任务`);
+      // force 清场是两阶段异步, 后端 message 如实反映「清场中…」; 增量则为「已启动 N 个」
+      message.success(res.message || `已启动 ${res.started} 个解析任务`);
       onReposChange();
     } catch {
       message.error("批量解析失败");
@@ -143,40 +144,18 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
   };
 
   const handleFullRebuild = async () => {
-    try {
-      const summary = await api.getGitKeSummary(nsId);
-      Modal.confirm({
-        title: "全量解析将清除本命名空间历史知识",
-        content: (
-          <div>
-            <p>本次操作将清除所有仓库历史抽取的知识 (含已审核 canonical), 重新生成后需要人工审核:</p>
-            <ul>
-              <li>共 <b>{summary.total}</b> 条 git 来源知识</li>
-              <li>其中已审核 canonical: <b>{summary.canonical}</b> 条</li>
-            </ul>
-            {summary.canonical > 0 && (
-              <p style={{ color: "#d97706" }}>
-                ⚠️ 已审核的 {summary.canonical} 条知识将回到待审队列, 需要重新审核.
-              </p>
-            )}
-          </div>
-        ),
-        okText: "确认清场并重新解析",
-        okType: "danger",
-        cancelText: "取消",
-        onOk: () => handleBatchParse(true),
-      });
-    } catch {
-      // fallback: 如果 summary 接口失败, 直接用简单确认
-      Modal.confirm({
-        title: "全量重新解析",
-        content: "将清空所有知识库并重新解析全部仓库，确认？",
-        okText: "确认",
-        okType: "danger",
-        cancelText: "取消",
-        onOk: () => handleBatchParse(true),
-      });
-    }
+    Modal.confirm({
+      title: "全量解析将清除本命名空间历史知识",
+      content: (
+        <div>
+          <p>本次操作将清除所有仓库历史抽取的知识 (含已审核 canonical)，重新生成后需要人工审核。</p>
+        </div>
+      ),
+      okText: "确认清场并重新解析",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: () => handleBatchParse(true),
+    });
   };
 
   const handleViewReport = async (repoId: number) => {

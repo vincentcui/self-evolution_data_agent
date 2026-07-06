@@ -18,10 +18,10 @@ async def test_dry_run_no_side_effects(db_session):
     db_session.add_all(
         [
             KnowledgeEntry(
-                entry_type="schema_summary", content="x", source="git", status="canonical"
+                entry_type="schema_summary", content="x", source="code_extract", status="canonical"
             ),
             KnowledgeEntry(
-                entry_type="schema_summary", content="y", source="git", status="canonical"
+                entry_type="schema_summary", content="y", source="code_extract", status="canonical"
             ),
         ]
     )
@@ -29,7 +29,7 @@ async def test_dry_run_no_side_effects(db_session):
 
     guard = BulkOperationGuard(
         op_name="git_reparse_clean",
-        scope_filter={"source": ["git"], "entry_type": ["schema_summary"]},
+        scope_filter={"source": ["code_extract"], "entry_type": ["schema_summary"]},
         dry_run=True,
         actor_id=None,
         reason="test",
@@ -37,7 +37,7 @@ async def test_dry_run_no_side_effects(db_session):
     report = await guard.execute(db_session, slug="test_ns")
 
     assert report.affected_count == 2
-    assert report.by_source == {"git": 2}
+    assert report.by_source == {"code_extract": 2}
     rows = (await db_session.scalars(select(KnowledgeEntry))).all()
     assert len(rows) == 2  # 没真删
 
@@ -51,10 +51,10 @@ async def test_dry_run_no_side_effects(db_session):
 async def test_protects_human_edited_entries(db_session):
     """audit_log 中 actor_id != NULL 的 entry 视为人类知识, 不可批量删."""
     edited = KnowledgeEntry(
-        entry_type="schema_summary", content="edited", source="git", status="canonical"
+        entry_type="schema_summary", content="edited", source="code_extract", status="canonical"
     )
     plain = KnowledgeEntry(
-        entry_type="schema_summary", content="plain", source="git", status="canonical"
+        entry_type="schema_summary", content="plain", source="code_extract", status="canonical"
     )
     db_session.add_all([edited, plain])
     await db_session.flush()
@@ -72,7 +72,7 @@ async def test_protects_human_edited_entries(db_session):
 
     guard = BulkOperationGuard(
         op_name="git_reparse_clean",
-        scope_filter={"source": ["git"]},
+        scope_filter={"source": ["code_extract"]},
         dry_run=False,
         reason="test",
     )
@@ -93,14 +93,14 @@ async def test_protects_human_edited_entries(db_session):
 async def test_writes_audit_log_on_execute(db_session):
     db_session.add(
         KnowledgeEntry(
-            entry_type="schema_summary", content="x", source="git", status="canonical"
+            entry_type="schema_summary", content="x", source="code_extract", status="canonical"
         )
     )
     await db_session.commit()
 
     guard = BulkOperationGuard(
         op_name="git_reparse_clean",
-        scope_filter={"source": ["git"]},
+        scope_filter={"source": ["code_extract"]},
         dry_run=False,
         actor_id=99,
         reason="test",
@@ -127,10 +127,10 @@ async def test_compound_scope_filter_intersects(db_session):
     db_session.add_all(
         [
             KnowledgeEntry(
-                entry_type="schema_summary", content="a", source="git", status="canonical"
+                entry_type="schema_summary", content="a", source="code_extract", status="canonical"
             ),
             KnowledgeEntry(
-                entry_type="terminology", content="b", source="git", status="canonical"
+                entry_type="terminology", content="b", source="code_extract", status="canonical"
             ),
             KnowledgeEntry(
                 entry_type="schema_summary", content="c", source="manual", status="canonical"
@@ -142,10 +142,10 @@ async def test_compound_scope_filter_intersects(db_session):
     report = await BulkOperationGuard(
         op_name="t",
         dry_run=True,
-        scope_filter={"source": ["git"], "entry_type": ["schema_summary"]},
+        scope_filter={"source": ["code_extract"], "entry_type": ["schema_summary"]},
     ).execute(db_session, slug="ns")
     assert report.affected_count == 1
-    assert report.by_source == {"git": 1}
+    assert report.by_source == {"code_extract": 1}
     assert report.by_entry_type == {"schema_summary": 1}
 
 
@@ -155,20 +155,20 @@ async def test_report_by_entry_type_grouping(db_session):
     db_session.add_all(
         [
             KnowledgeEntry(
-                entry_type="schema_summary", content="a", source="git", status="canonical"
+                entry_type="schema_summary", content="a", source="code_extract", status="canonical"
             ),
             KnowledgeEntry(
-                entry_type="schema_summary", content="b", source="git", status="canonical"
+                entry_type="schema_summary", content="b", source="code_extract", status="canonical"
             ),
             KnowledgeEntry(
-                entry_type="terminology", content="c", source="git", status="canonical"
+                entry_type="terminology", content="c", source="code_extract", status="canonical"
             ),
         ]
     )
     await db_session.commit()
 
     report = await BulkOperationGuard(
-        op_name="t", dry_run=True, scope_filter={"source": ["git"]},
+        op_name="t", dry_run=True, scope_filter={"source": ["code_extract"]},
     ).execute(db_session, slug="ns")
     assert report.by_entry_type == {"schema_summary": 2, "terminology": 1}
 
@@ -182,7 +182,7 @@ async def test_report_by_entry_type_grouping(db_session):
 async def test_empty_match_skips_audit(db_session):
     """0 行匹配 → 不写 audit (空操作无审计意义), 仍返回报告."""
     guard = BulkOperationGuard(
-        op_name="t", dry_run=False, scope_filter={"source": ["git"]},
+        op_name="t", dry_run=False, scope_filter={"source": ["code_extract"]},
     )
     report = await guard.execute(db_session, slug="ns")
     assert report.affected_count == 0
@@ -195,7 +195,7 @@ async def test_empty_match_skips_audit(db_session):
 async def test_all_candidates_protected_skips_audit(db_session):
     """全部 candidates 被保护 → 0 删 + 不写 audit + preserved 报告正确."""
     e = KnowledgeEntry(
-        entry_type="schema_summary", content="x", source="git", status="canonical"
+        entry_type="schema_summary", content="x", source="code_extract", status="canonical"
     )
     db_session.add(e)
     await db_session.flush()
@@ -208,7 +208,7 @@ async def test_all_candidates_protected_skips_audit(db_session):
     await db_session.commit()
 
     report = await BulkOperationGuard(
-        op_name="t", dry_run=False, scope_filter={"source": ["git"]},
+        op_name="t", dry_run=False, scope_filter={"source": ["code_extract"]},
     ).execute(db_session, slug="ns")
     assert report.affected_count == 0
     assert report.preserved_audited_count == 1
@@ -245,11 +245,11 @@ async def test_chromadb_synced_after_sqlite_delete(db_session, chroma_isolated):
 
     # 1. 准备: SQLite 写 2 条 + ChromaDB 同步写
     e1 = KnowledgeEntry(
-        entry_type="schema_summary", content="ke_1", source="git",
+        entry_type="schema_summary", content="ke_1", source="code_extract",
         status="canonical", namespace_id=ns.id, tier="normal",
     )
     e2 = KnowledgeEntry(
-        entry_type="schema_summary", content="ke_2", source="git",
+        entry_type="schema_summary", content="ke_2", source="code_extract",
         status="canonical", namespace_id=ns.id, tier="normal",
     )
     db_session.add_all([e1, e2])
@@ -268,7 +268,7 @@ async def test_chromadb_synced_after_sqlite_delete(db_session, chroma_isolated):
     # 2. 执行 bulk delete
     guard = BulkOperationGuard(
         op_name="test_chromadb_sync",
-        scope_filter={"source": ["git"]},
+        scope_filter={"source": ["code_extract"]},
         dry_run=False,
         reason="test",
     )
@@ -301,7 +301,7 @@ async def test_chromadb_failure_does_not_rollback_sqlite(db_session, monkeypatch
     await db_session.refresh(ns)
 
     e1 = KnowledgeEntry(
-        entry_type="schema_summary", content="x", source="git",
+        entry_type="schema_summary", content="x", source="code_extract",
         status="canonical", namespace_id=ns.id, tier="normal",
     )
     db_session.add(e1)
@@ -317,7 +317,7 @@ async def test_chromadb_failure_does_not_rollback_sqlite(db_session, monkeypatch
 
     guard = BulkOperationGuard(
         op_name="test_chromadb_failure",
-        scope_filter={"source": ["git"]},
+        scope_filter={"source": ["code_extract"]},
         dry_run=False,
         reason="test",
     )

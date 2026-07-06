@@ -43,7 +43,6 @@ class PlanStep:
     query: dict = field(default_factory=dict)              # find 用 / sql 用 {"sql": "..."}
     projection: dict = field(default_factory=dict)
     sort: list = field(default_factory=list)
-    limit: int = 1000  # noqa: hardcode
     exports: list[str] = field(default_factory=list)
     db_type: str = "mongodb"                               # "mysql" | "mongodb"
 
@@ -58,7 +57,6 @@ class PlanStep:
             "query": self.query,
             "projection": self.projection,
             "sort": self.sort,
-            "limit": self.limit,
             "exports": self.exports,
         }
 

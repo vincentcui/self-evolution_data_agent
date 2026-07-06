@@ -49,6 +49,11 @@ from app.knowledge.trace_extractor import (
     extract_collections as _extract_collections_impl,
     extract_final_pipeline as _extract_final_pipeline_impl,
     extract_join_fields as _extract_join_fields_impl,
+    normalize_query_plan as _normalize_query_plan_impl,
+    extract_join_keys as _extract_join_keys_impl,
+)
+from app.api._session_cleanup import (
+    write_cancelled_history,
 )
 from app.models import (
     Namespace,
@@ -105,18 +110,15 @@ async def _async_extract_after_end_turn(
         # ── 代码侧抽取 (机械字段, 一定对) ──
         final_pipeline = _extract_final_pipeline(result.tool_trace)
         collections    = _extract_collections(result.tool_trace or [])
-        field_mappings = _extract_field_mappings(result.tool_trace or [])
         cost_strategy  = _derive_cost_strategy(result.tool_trace or [])
         join_fields    = _extract_join_fields(final_pipeline)
-        rows_count, chart_type = _extract_rows_chart(result)
+        rows_count, _  = _extract_rows_chart(result)
         tool_count     = len(result.tool_trace or [])
         trace_summary  = _summarize_tool_trace(result.tool_trace, settings)
 
-        if final_pipeline is None or not collections:
+        if not collections:
             log.warning(
-                "[async_extract] missing final_pipeline or collections trace=%s "
-                "final_pipeline=%r collections=%r",
-                trace_id, final_pipeline, collections,
+                "[async_extract] missing collections trace=%s", trace_id,
             )
             return
 
@@ -142,15 +144,15 @@ async def _async_extract_after_end_turn(
 
         # ── 服务端拼装 (保真) ──
         question_pattern = llm_output["question_pattern"].strip()
+        final_query_plan = _normalize_query_plan_impl(result.tool_trace or [])
         evidence = {"trace_id": trace_id, "tool_count": tool_count, "rows": rows_count}
 
         example = {
             "question_pattern": question_pattern,
-            "final_pipeline":   final_pipeline,
-            "chart_type":       chart_type,
-            "field_mappings":   field_mappings,
             "collections":      collections,
-            "tool_count":       tool_count,
+            "join_keys":        _extract_join_keys(final_query_plan),
+            "final_query_plan": final_query_plan,
+            "result_summary":   llm_output.get("result_summary") or "",
         }
         route_hint = None
         rh_reason = llm_output.get("route_hint_reason")
@@ -197,8 +199,9 @@ async def cancel_agent_loop(
 
     P1-19 A2: 通过公共函数 cancel_agent 发 cancel, 不直读 _active_agent_workers.
 
-    404: trace_id 未注册或已结束 (run_agent_loop finally 块已 pop).
-    200: task.cancel() 已发, 等待 grace_secs 让 worker 跑完 finally 清理.
+    task 仍在 _active_agent_workers 中: task.cancel() + 等待 grace_secs → 200.
+    task 已结束 (run_agent_loop finally 已 pop): _cancel_reason 上文已设置作为闸门
+    标志, _run_and_finalize() 检查后中止成功写入 → 仍返回 200.
     """
     # ── P0-4: 标记来源 user_abort, agent_loop except 块 pop 后日志区分 ──
     _cancel_reason[trace_id] = "user_abort"
@@ -206,6 +209,17 @@ async def cancel_agent_loop(
 
     cancelled, task = cancel_agent(trace_id)
     if not cancelled:
+        # 区分两种情况:
+        # 1. SSE 会话仍存活 → _run_and_finalize() 还在运行 (盲区),
+        #    _cancel_reason 作为闸门标志让检查点中止成功写入 → 200
+        # 2. SSE 会话已注销 → trace_id 从未存在过 → 清理标志, 404
+        if get_event_queue(trace_id) is not None:
+            log.info(
+                "agent cancel flag-only (task already finished, SSE alive) trace=%s",
+                trace_id,
+            )
+            return {"cancelled": True, "trace_id": trace_id, "note": "flag_set"}
+        _cancel_reason.pop(trace_id, None)
         raise HTTPException(404, f"trace_id {trace_id} 不存在或已结束")
 
     if task is not None:
@@ -239,7 +253,7 @@ async def query_stream(
     # session_id: 会话级稳定标识 (前端传则用), 用于多轮历史 / 按会话聚合。
     # 两者解耦 — 同一会话多次提交 → 不同 trace_id, 不再撞 agent_traces 唯一约束。
     trace_id = str(uuid.uuid4())
-    session_id = body.session_id or trace_id
+    session_id = body.session_id or ""  # P0: 不用 trace_id 回退，保证前端传来的 session UUID 可追溯
     event_q, correction_q = register_sse_session(trace_id)
 
     async def sse_emit(evt: dict) -> None:
@@ -276,6 +290,14 @@ async def query_stream(
                 namespace_id=ns.id,
                 session_id=session_id,
             )
+            # ── Cancel 盲区守卫 ──
+            # _cancel_reason 可能在 run_agent_loop() 返回后 (已从 _active_agent_workers
+            # 移除自身) 被 cancel 端点设置。pop-and-check 将迟到的 cancel 转为
+            # CancelledError，让已有 except 块走 _write_cancelled_history。
+            if _cancel_reason.pop(trace_id, None) == "user_abort":
+                raise asyncio.CancelledError(
+                    "user cancelled (flag detected after agent loop completed)"
+                )
             # Phase 7: end_turn 异步抽取 (fire-and-forget, 不阻断主链路)
             asyncio.create_task(_async_extract_after_end_turn(
                 ns_id=ns.id, ns_slug=ns.slug, question=body.question,
@@ -286,6 +308,7 @@ async def query_stream(
                 session_id=session_id,
                 question=body.question,
                 result=result,
+                trace_id=trace_id,
             )
             final_data: dict = {
                 "content": result.final_answer,
@@ -322,7 +345,16 @@ async def query_stream(
                 "data": final_data,
             })
         except asyncio.CancelledError:
-            pass  # agent_loop 已 emit 'cancelled'
+            # 被取消的对话也要保存，让刷新后仍可查看部分过程
+            try:
+                await write_cancelled_history(
+                    trace_id=trace_id,
+                    namespace_id=ns.id,
+                    session_id=session_id,
+                    question=body.question,
+                )
+            except Exception:
+                log.exception("write_cancelled_history failed trace=%s", trace_id)
         except Exception as exc:
             log.exception("query_stream unexpected error trace_id=%s", trace_id)
             await event_q.put({
@@ -330,6 +362,7 @@ async def query_stream(
                 "data": {"code": "internal_error", "message": str(exc), "recoverable": False},
             })
         finally:
+            _cancel_reason.pop(trace_id, None)  # 兜底清理，防止泄漏
             await event_q.put(None)  # sentinel → generator 退出
 
     agent_task = asyncio.create_task(_run_and_finalize())
@@ -438,8 +471,13 @@ async def _write_query_history(
     session_id: str,
     question: str,
     result: "AgentResult",
+    trace_id: str = "",
 ) -> int:
-    """写 QueryHistory。使用独立 session 避免与 request scoped db 生命周期冲突。"""
+    """写 QueryHistory。使用独立 session 避免与 request scoped db 生命周期冲突。
+
+    trace_id 用于 commit 前最后一次取消检查 — 若用户在此期间点了取消,
+    则 raise CancelledError 让上层 except 块写取消记录。
+    """
     generated_query = ""
     row_count = 0
     for tr in reversed(result.tool_trace):
@@ -504,12 +542,20 @@ async def _write_query_history(
                 "final_answer": result.final_answer,
                 "iterations": result.iterations,
                 "stop_reason": result.stop_reason,
+                # P0: 保存工具调用链, 前端重建历史时展示完整过程
+                "tool_trace": result.tool_trace,
             }, ensure_ascii=False, default=str),
         )
         db.add(entry)
+        # ── 提交前最后一次取消检查 (commit 之后无法回滚) ──
+        if trace_id and _cancel_reason.pop(trace_id, None) == "user_abort":
+            raise asyncio.CancelledError(
+                "user cancelled (flag detected before history commit)"
+            )
         await db.commit()
         await db.refresh(entry)
         return entry.id
+
 
 
 @router.post("/query/stream/{trace_id}/correct")
@@ -976,6 +1022,14 @@ def _extract_join_fields(final_pipeline: dict | None) -> list[dict]:
     返回 [{"a": "上游集合.字段", "b": "下游集合.字段"}, ...]. 无 $lookup 返 [].
     """
     return _extract_join_fields_impl(final_pipeline)
+
+
+def _extract_join_keys(final_query_plan: dict | None) -> list[dict]:
+    """从归一化 query_plan 中抽取 join 键对.
+
+    返回 [{from: "上游集合.字段", to: "下游集合.字段"}, ...].
+    """
+    return _extract_join_keys_impl(final_query_plan)
 
 
 def _validate_llm_output_minimal(out: dict) -> None:

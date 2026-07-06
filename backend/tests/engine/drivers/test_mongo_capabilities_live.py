@@ -15,7 +15,7 @@ pytestmark = pytest.mark.live
 
 
 @pytest.mark.asyncio
-async def test_real_mongo_buildinfo_and_unsupported_ops():
+async def test_real_mongo_fetch_db_profile():
     url = os.environ.get("IS_METADATA_DB_URL")
     if not url:
         pytest.skip("IS_METADATA_DB_URL not set")
@@ -30,10 +30,10 @@ async def test_real_mongo_buildinfo_and_unsupported_ops():
             pytest.skip("ds=3 not found in metadata db")
 
         driver = MongoDriver()
-        caps = await driver.get_server_capabilities(ds)
-        assert caps is not None, "buildInfo must return non-None on real ds=3"
-        assert caps["version"], "version field must be non-empty"
-        print(f"\n[live] ds=3 version={caps['version']}")
-        print(f"[live] agg_ops_unsupported={caps['agg_ops_unsupported']}")
+        profile = await driver.fetch_db_profile(ds)
+        assert profile["connected"] is True, "ds=3 must be reachable"
+        assert profile.get("version"), "version must be non-empty on real ds=3"
+        print(f"\n[live] ds=3 version={profile['version']}")
+        print(f"[live] unsupported_ops={profile.get('unsupported_ops', [])}")
     finally:
         await engine.dispose()
