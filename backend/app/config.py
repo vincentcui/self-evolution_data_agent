@@ -196,6 +196,7 @@ class Settings(BaseSettings):
     """HQItem.q 最大字符数 (IS_HQ_QUESTION_MAX_LEN)."""
     hq_covered_path_max: int = 10
     """HQItem.covered_path 最大长度 (IS_HQ_COVERED_PATH_MAX)."""
+
     hq_text_validation_mode: str = "lenient"
     """HQ 文本子串校验严格度: strict / lenient / off (IS_HQ_TEXT_VALIDATION_MODE)."""
 

@@ -20,4 +20,5 @@ class QueryHistory(Base):
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
     result_snapshot: Mapped[str] = mapped_column(Text, default="")  # JSON blob: 完整查询结果快照
+    feedback_rating: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 'like'|'dislike'|None
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=LOCAL_NOW)

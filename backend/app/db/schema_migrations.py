@@ -588,8 +588,38 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_model_config_protocol_column(engine)
     # migration_025 (model-management): model_config_audit_logs 审计日志表
     await _ensure_model_config_audit_logs_table(engine)
-    # migration_026 (timezone): datasources.timezone 列 + 存量回填
+    # migration_026 (P0 对话体验优化): sessions 表 — 对话会话持久化
+    await _create_sessions_table(engine)
+    # migration_027 (P0 对话体验优化): query_history.feedback_rating 列 — 答案反馈
+    await _add_missing(engine, "query_history", [
+        ("feedback_rating", "VARCHAR(10)"),
+    ])
+    # migration_028 (timezone): datasources.timezone 列 + 存量回填
     await _ensure_datasources_timezone_column(engine)
+
+
+async def _create_sessions_table(engine: AsyncEngine) -> None:
+    """migration_026: sessions 表 — 会话 CRUD, 绑定命名空间, 软删不实施.
+
+    时区说明: created_at/updated_at server_default 硬编码 'Asia/Shanghai' —
+    与 models/base.py LOCAL_NOW 一致 (默认 IS_APP_TIMEZONE).
+    若需改变时区, 迁移已应用的表需手工 ALTER COLUMN.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            "    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),"
+            "    namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,"
+            "    title VARCHAR(255) NOT NULL DEFAULT '新会话',"
+            "    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "    created_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),"
+            "    updated_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_namespace_updated"
+            "    ON sessions(namespace_id, updated_at DESC)"
+        ))
 
 
 async def _migrate_rbac_three_tier(engine: AsyncEngine) -> None:
@@ -1009,7 +1039,7 @@ async def _ensure_model_config_audit_logs_table(engine: AsyncEngine) -> None:
 
 
 async def _ensure_datasources_timezone_column(engine: AsyncEngine) -> None:
-    """migration_026 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
+    """migration_028 (timezone): 幂等为 datasources 加 timezone 列 (NOT NULL, 无默认 — 建源必填).
 
     照抄 migration_024 范式: ADD COLUMN ... NOT NULL DEFAULT 一步原子 (存量行填 Asia/Shanghai),
     随后 DROP DEFAULT 强制建源时显式给值

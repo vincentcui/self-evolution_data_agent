@@ -170,7 +170,12 @@ export const QueryStreamView: React.FC<Props> = ({
         {state.pendingClarify && (
           <ClarifyCard pending={state.pendingClarify} onSubmit={onClarifyAnswer} />
         )}
-        {state.finalAnswer && <FinalResult {...state.finalAnswer} stopReason={state.stopReason} />}
+        {state.finalAnswer && (
+          <FinalResult
+            {...state.finalAnswer}
+            stopReason={state.stopReason}
+          />
+        )}
         {!state.finalAnswer && state.status === "finished" && state.stopReason && state.stopReason !== "end_turn" && (
           <FinalResult content="" stopReason={state.stopReason} />
         )}

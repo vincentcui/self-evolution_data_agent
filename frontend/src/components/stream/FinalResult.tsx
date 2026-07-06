@@ -8,11 +8,16 @@
 
 import React, { useState } from "react";
 import { Card, Button, message, Input, Space, Popover, Alert } from "antd";
-import { ShareAltOutlined, CopyOutlined } from "@ant-design/icons";
+import {
+  ShareAltOutlined,
+  CopyOutlined,
+  LikeOutlined,
+  DislikeOutlined,
+} from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ResultDisplay from "@/components/ResultDisplay";
-import { createShare } from "@/api";
+import { createShare, submitFeedback } from "@/api";
 import type { QueryResponse } from "@/types";
 import mdStyles from "@/styles/markdown.module.css";
 
@@ -48,10 +53,14 @@ export const STOP_REASON_HINT: Record<string, string> = {
   forced_clarify_exhausted: "已就同类错误多次向你澄清仍未解决，为避免空耗已中止本次查询。",
 };
 
-export const FinalResult: React.FC<Props> = ({ content, rows, columns, chartType, chartOption, categoryColumn, truncated, renderedRowCount, totalRowCount, historyId, stopReason }) => {
+export const FinalResult: React.FC<Props> = ({
+  content, rows, columns, chartType, chartOption, categoryColumn,
+  truncated, renderedRowCount, totalRowCount, historyId, stopReason,
+}) => {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
 
   const showResult = (rows && rows.length > 0 && columns && columns.length > 0)
     || (chartType && chartType !== "table" && chartOption && Object.keys(chartOption).length > 0);
@@ -101,10 +110,31 @@ export const FinalResult: React.FC<Props> = ({ content, rows, columns, chartType
     }
   };
 
-  const handleCopy = () => {
+  const handleCopyAnswer = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success("回答已复制");
+    } catch {
+      message.error("复制失败，请重试");
+    }
+  };
+
+  const handleCopyShareUrl = () => {
     if (shareUrl) {
       navigator.clipboard.writeText(shareUrl);
       message.success("已复制到剪贴板");
+    }
+  };
+
+  const handleFeedback = async (rating: "like" | "dislike") => {
+    if (!historyId) return;
+    // 互斥: 点击相同值取消, 点击另一个值切换
+    const newRating = feedback === rating ? null : rating;
+    try {
+      await submitFeedback(historyId, newRating ?? rating);
+      setFeedback(newRating);
+    } catch {
+      message.error("反馈失败，请重试");
     }
   };
 
@@ -125,33 +155,53 @@ export const FinalResult: React.FC<Props> = ({ content, rows, columns, chartType
   );
 
   return (
+    <>
     <Card
       title="✅ 最终结果"
       style={{ marginTop: 12 }}
       extra={
-        historyId ? (
-          <Popover
-            content={expiryContent}
-            title="选择有效期"
-            trigger="click"
-            open={popoverOpen}
-            onOpenChange={setPopoverOpen}
-          >
-            <Button
-              icon={<ShareAltOutlined />}
-              size="small"
-              loading={sharing}
-            >
-              分享
-            </Button>
-          </Popover>
-        ) : null
+        <Space size="small">
+          <Button icon={<CopyOutlined />} size="small" onClick={handleCopyAnswer}>
+            复制
+          </Button>
+          {historyId && (
+            <>
+              <Button
+                icon={<LikeOutlined />}
+                size="small"
+                type={feedback === "like" ? "primary" : "default"}
+                onClick={() => handleFeedback("like")}
+              />
+              <Button
+                icon={<DislikeOutlined />}
+                size="small"
+                type={feedback === "dislike" ? "primary" : "default"}
+                onClick={() => handleFeedback("dislike")}
+              />
+              <Popover
+                content={expiryContent}
+                title="选择有效期"
+                trigger="click"
+                open={popoverOpen}
+                onOpenChange={setPopoverOpen}
+              >
+                <Button
+                  icon={<ShareAltOutlined />}
+                  size="small"
+                  loading={sharing}
+                >
+                  分享
+                </Button>
+              </Popover>
+            </>
+          )}
+        </Space>
       }
     >
       {shareUrl && (
         <Space style={{ marginBottom: 12, width: "100%" }}>
           <Input value={shareUrl} readOnly style={{ width: 360 }} size="small" />
-          <Button icon={<CopyOutlined />} size="small" onClick={handleCopy}>
+          <Button icon={<CopyOutlined />} size="small" onClick={handleCopyShareUrl}>
             复制
           </Button>
         </Space>
@@ -171,6 +221,7 @@ export const FinalResult: React.FC<Props> = ({ content, rows, columns, chartType
       )}
       {fabricated && <ResultDisplay result={fabricated} />}
     </Card>
+    </>
   );
 };
 

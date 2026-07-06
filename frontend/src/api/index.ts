@@ -17,8 +17,10 @@ import type {
   ParseReport,
   QueryHistory,
   QueryResponse,
+  ReadinessResult,
   RepoListResponse,
   SchemaRefreshResult,
+  Session,
   ShareViewResponse,
   User,
 } from "@/types";
@@ -564,3 +566,25 @@ export const deleteProfile = (id: number) =>
 export const updateRepoProfile = (nsId: number, repoId: number, profileId: number | null) =>
   http.patch<GitRepo>(`/namespaces/${nsId}/repos/${repoId}`, { profile_id: profileId })
     .then((r) => r.data);
+
+// ════════════════════════════════════════════
+//  P0 对话体验 — Session / Readiness / Feedback
+// ════════════════════════════════════════════
+
+export const createSession = (namespaceId: number) =>
+  http.post<Session>("/sessions", { namespace_id: namespaceId }).then((r) => r.data);
+
+export const listSessions = (namespaceId: number) =>
+  http.get<Session[]>("/sessions", { params: { namespace_id: namespaceId } }).then((r) => r.data);
+
+export const renameSession = (id: string, title: string) =>
+  http.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data);
+
+export const deleteSession = (id: string) =>
+  http.delete(`/sessions/${id}`);
+
+export const getReadiness = (namespaceId: number) =>
+  http.get<ReadinessResult>(`/namespaces/${namespaceId}/readiness`).then((r) => r.data);
+
+export const submitFeedback = (historyId: number, rating: "like" | "dislike") =>
+  http.post("/feedback", { history_id: historyId, rating });

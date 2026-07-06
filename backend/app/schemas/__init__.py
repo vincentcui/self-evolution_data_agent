@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re as _re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -655,6 +655,61 @@ from app.schemas.query_stream import (  # noqa: E402
     CorrectionRequest,
     QueryStreamRequest,
 )
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Feedback
+# ════════════════════════════════════════════
+
+class FeedbackCreate(BaseModel):
+    history_id: int
+    rating: Literal["like", "dislike"]
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Readiness
+# ════════════════════════════════════════════
+
+class BlockerOut(BaseModel):
+    type: str  # no_datasource | no_api_key | no_schema | no_access
+    message: str
+    admin_action: str
+    admin_route: str = ""
+    user_action: str
+
+
+class ReadinessOut(BaseModel):
+    ready: bool
+    checks: dict[str, bool]
+    blockers: list[BlockerOut]
+
+
+# ════════════════════════════════════════════
+#  P0 对话体验 — Session
+# ════════════════════════════════════════════
+
+from datetime import datetime  # noqa: E402
+from uuid import UUID  # noqa: E402
+
+from pydantic import BaseModel, Field  # noqa: E402
+
+class SessionCreate(BaseModel):
+    namespace_id: int
+
+
+class SessionUpdate(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class SessionOut(BaseModel):
+    id: UUID  # Pydantic auto-serializes to str in JSON
+    namespace_id: int
+    title: str
+    created_by: int
+    created_at: datetime
+    updated_at: datetime | None
+
+    model_config = {"from_attributes": True}
 
 
 # ════════════════════════════════════════════
