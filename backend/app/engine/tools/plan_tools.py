@@ -85,6 +85,7 @@ async def generate_query_plan(
     plan = await generate_plan(
         question, collections, filters or [], schemas, knowledge, rules,
         capabilities_by_target=capabilities_by_target,
+        namespace_id=namespace_id,
     )
     plan_dict = plan.to_dict()
     out: dict[str, Any] = {"plan": plan_dict}

@@ -147,6 +147,7 @@ async def _async_extract_after_end_turn(
         raw_llm_output = await asyncio.to_thread(
             chat_completion,
             messages=[{"role": "user", "content": prompt}],
+            namespace_id=ns_id,
         )
         from app.engine.json_parser import parse_llm_json
         llm_output = parse_llm_json(raw_llm_output, expect="dict")
@@ -713,6 +714,7 @@ async def _clarify_extract_hook(
         raw_llm_output = await asyncio.to_thread(
             chat_completion,
             messages=[{"role": "user", "content": prompt}],
+            namespace_id=ns_id,
         )
         from app.engine.json_parser import parse_llm_json
         output = parse_llm_json(raw_llm_output, expect="dict")

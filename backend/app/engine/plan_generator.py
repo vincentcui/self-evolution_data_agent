@@ -391,6 +391,7 @@ def generate_plan_sync(
     knowledge: list[str] | None = None,
     rules: list[str] | None = None,
     capabilities_by_target: dict | None = None,
+    namespace_id: int | None = None,
 ) -> QueryPlan:
     """同步入口 — 供 asyncio.to_thread 包裹.
 
@@ -430,6 +431,7 @@ def generate_plan_sync(
             {"role": "user", "content": user_msg},
         ],
         max_tokens=8192,  # noqa: hardcode — 开思考后预留 CoT 预算
+        namespace_id=namespace_id,
         thinking=None,   # None → 尊重 settings.llm_thinking_enabled 全局开关
     )
     if not raw or not raw.strip():
@@ -452,10 +454,12 @@ async def generate_plan(
     knowledge: list[str] | None = None,
     rules: list[str] | None = None,
     capabilities_by_target: dict | None = None,
+    namespace_id: int | None = None,
 ) -> QueryPlan:
     plan = await asyncio.to_thread(
         generate_plan_sync, question, collections, filters,
         schemas, knowledge, rules, capabilities_by_target,
+        namespace_id=namespace_id,
     )
     lf = _lf_client()
     if lf is not None:
