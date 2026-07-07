@@ -422,6 +422,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         proxy_port        INTEGER       NULL,
         proxy_username    VARCHAR(128)  NULL,
         proxy_password    TEXT          NULL,
+        namespace_id      INTEGER       NULL REFERENCES namespaces(id) ON DELETE CASCADE,
         is_active         BOOLEAN       NOT NULL DEFAULT FALSE,
         is_deleted        BOOLEAN       NOT NULL DEFAULT FALSE,
         created_at        TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
@@ -508,6 +509,37 @@ async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
         "[schema_migrations] terminology_conflicts existing_entry_id FK ensured "
         "ON DELETE CASCADE"
     )
+
+
+async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
+    """migration_030 (namespace-model-config): model_configs.namespace_id 列 + 重建唯一索引.
+
+    为 model_configs 表添加 namespace_id 列 (nullable, FK → namespaces.id CASCADE),
+    并将唯一索引从 (model_type) 重建为 (model_type, namespace_id),
+    以支持 per-namespace CHAT 配置 + 全局兜底。
+
+    Step 2-3 (DROP INDEX + CREATE INDEX) 在 engine.begin() 同一事务内执行,
+    若 DROP 成功但 CREATE 失败, 事务回滚, 旧索引保持 (唯一约束不丢失)。
+    """
+    async with engine.begin() as conn:
+        # Step 1: 新增列 (可独立执行, 幂等)
+        await conn.execute(text(
+            "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS namespace_id "
+            "INTEGER REFERENCES namespaces(id) ON DELETE CASCADE"
+        ))
+        # Step 2-3 必须同事务: 删除旧索引 + 重建新索引
+        await conn.execute(text(
+            "DROP INDEX IF EXISTS uq_model_configs_one_active_per_type"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
+            "ON model_configs (model_type, namespace_id) "
+            "WHERE is_active = TRUE AND is_deleted = FALSE"
+        ))
+        log.info(
+            "[schema_migrations] model_configs.namespace_id 列已添加, "
+            "唯一索引已重建为 (model_type, namespace_id)"
+        )
 
 
 async def run_all(engine: AsyncEngine) -> None:
@@ -598,6 +630,8 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_datasources_timezone_column(engine)
     # migration_029 (multi-turn-context): model_configs.max_history_turns 列 — 多轮历史注入轮数
     await _ensure_model_config_max_history_turns_column(engine)
+    # migration_030 (namespace-model-config): model_configs.namespace_id + 唯一索引重建
+    await _migrate_model_config_namespace_id(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:
