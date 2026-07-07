@@ -94,31 +94,31 @@ def _sanitize_tool_use_id(raw_id: str) -> str:
 # 不传 cfg 时从 registry 取 (向后兼容, 仅旧调用路径用).
 
 
-def _get_openai_client(cfg: dict[str, Any] | None = None) -> OpenAI:
+def _get_openai_client(cfg: dict[str, Any] | None = None, namespace_id: int | None = None) -> OpenAI:
     """返回 OpenAI 兼容客户端 (从 registry 激活配置构造, 热切换自动重建)."""
     # import 必须无条件: 否则 cfg 非 None 时跳过分支, registry 未绑定 → UnboundLocalError
     from app.engine.model_registry import registry
     if cfg is None:
-        cfg = registry.chat_config
+        cfg = registry.resolve_chat_config(namespace_id)
     if cfg is None or cfg.get("protocol", "openai") != "openai":
         raise RuntimeError(
             "无激活的 openai Chat 配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
         )
-    client = registry.get_chat_client(cfg)
+    client = registry.get_chat_client(cfg, namespace_id=namespace_id)
     return client  # type: ignore[return-value]
 
 
-def _get_claude_client(cfg: dict[str, Any] | None = None) -> anthropic.Anthropic:
+def _get_claude_client(cfg: dict[str, Any] | None = None, namespace_id: int | None = None) -> anthropic.Anthropic:
     """返回 Anthropic 客户端 (从 registry 激活配置构造, 热切换自动重建)."""
     # import 必须无条件: 否则 cfg 非 None 时跳过分支, registry 未绑定 → UnboundLocalError
     from app.engine.model_registry import registry
     if cfg is None:
-        cfg = registry.chat_config
+        cfg = registry.resolve_chat_config(namespace_id)
     if cfg is None or cfg.get("protocol") != "anthropic":
         raise RuntimeError(
             "无激活的 anthropic Chat 配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
         )
-    client = registry.get_chat_client(cfg)
+    client = registry.get_chat_client(cfg, namespace_id=namespace_id)
     return client  # type: ignore[return-value]
 
 
@@ -293,14 +293,16 @@ def chat_completion(
     provider: str | None = None,
     extra_body: dict | None = None,
     thinking: bool | None = None,
+    namespace_id: int | None = None,
 ) -> str:
     """统一聊天补全接口。
 
     thinking 控制思考模式: None=取 settings 默认, True/False=显式开/关。
     extra_body 仅用于非 thinking 的厂商扩展参数, 其中的 thinking 键会被覆盖。
+    namespace_id: 请求所属命名空间, 用于按优先级解析配置 (namespace > 全局)。
     """
     from app.engine.model_registry import registry
-    cfg = registry.chat_config
+    cfg = registry.resolve_chat_config(namespace_id)
     if cfg is None:
         raise RuntimeError(
             "无激活的 Chat 模型配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
@@ -611,11 +613,14 @@ def chat_completion_checked(
     provider: str | None = None,
     extra_body: dict | None = None,
     thinking: bool | None = None,
+    namespace_id: int | None = None,
 ) -> LLMResponse:
-    """同 chat_completion, 额外返回截断状态。thinking 同上。"""
+    """同 chat_completion, 额外返回截断状态。thinking 同上。
+    namespace_id: 请求所属命名空间, 用于按优先级解析配置。
+    """
     from app.engine.model_registry import registry
 
-    cfg = registry.chat_config
+    cfg = registry.resolve_chat_config(namespace_id)
     if cfg is None:
         raise RuntimeError(
             "无激活的 Chat 模型配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
@@ -771,13 +776,15 @@ async def chat_completion_with_tools(
     max_tokens: int | None = None,
     extra_body: dict | None = None,
     thinking: bool | None = None,
+    namespace_id: int | None = None,
 ) -> ToolUseResponse:
     """统一 tool_use 入口。thinking 控制思考模式: None=取 settings 默认, True/False=显式开/关。
 
     extra_body 仅用于非 thinking 的厂商扩展参数, 其中的 thinking 键会被覆盖。
+    namespace_id: 请求所属命名空间, 用于按优先级解析配置。
     """
     from app.engine.model_registry import registry
-    cfg = registry.chat_config
+    cfg = registry.resolve_chat_config(namespace_id)
     if cfg is None:
         raise RuntimeError(
             "无激活的 Chat 模型配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
