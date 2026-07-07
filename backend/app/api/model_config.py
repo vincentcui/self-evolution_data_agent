@@ -180,7 +180,7 @@ async def _write_audit(
         log.warning("[model_config] 审计写入失败（非致命）action=%s: %s", action, exc)
 
 
-def _to_out(row: ModelConfig) -> ModelConfigOut:
+def _to_out(row: ModelConfig, namespace_name: str | None = None) -> ModelConfigOut:
     return ModelConfigOut(
         id=row.id,
         provider=row.provider,
@@ -194,7 +194,7 @@ def _to_out(row: ModelConfig) -> ModelConfigOut:
         max_history_turns=row.max_history_turns,
         is_active=row.is_active,
         namespace_id=row.namespace_id,
-        namespace_name=None,  # 可后续 join 填充，或前端用 namespace_id 关联
+        namespace_name=namespace_name,
         completions_path=row.completions_path,
         embeddings_path=row.embeddings_path,
         proxy_enabled=row.proxy_enabled,
@@ -229,7 +229,18 @@ async def list_configs(
         query = query.where(ModelConfig.namespace_id == namespace_id)
     query = query.order_by(ModelConfig.model_type, ModelConfig.id)
     rows = (await db.execute(query)).scalars().all()
-    return [_to_out(r) for r in rows]
+
+    # 批量查 namespace 名称，填充 namespace_name 字段
+    ns_ids = {r.namespace_id for r in rows if r.namespace_id is not None}
+    ns_names: dict[int, str] = {}
+    if ns_ids:
+        from app.models.namespace import Namespace
+        ns_rows = (await db.execute(
+            select(Namespace.id, Namespace.name).where(Namespace.id.in_(ns_ids))
+        )).all()
+        ns_names = {row.id: row.name for row in ns_rows}
+
+    return [_to_out(r, ns_names.get(r.namespace_id)) for r in rows]
 
 
 @router.post("/add", response_model=ModelConfigOut, status_code=201)

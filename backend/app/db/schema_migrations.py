@@ -438,7 +438,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         SELECT
             id,
             ROW_NUMBER() OVER (
-                PARTITION BY model_type
+                PARTITION BY model_type, namespace_id
                 ORDER BY updated_at DESC NULLS LAST, id DESC
             ) AS rn
         FROM model_configs
@@ -453,7 +453,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
     """
     unique_active = (
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
-        "ON model_configs (model_type) "
+        "ON model_configs (model_type, namespace_id) "
         "WHERE is_active = TRUE AND is_deleted = FALSE"
     )
     alter_max_tokens_default = (
