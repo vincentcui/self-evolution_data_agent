@@ -219,6 +219,11 @@ async def delete_namespace(
     await db.delete(ns)
     await db.commit()
 
+    # 主动清 registry 内存槽 (FK CASCADE 删 DB 行但不清内存, 不清理会导致配置泄漏)
+    from app.engine.model_registry import registry
+    registry.refresh_chat(None, namespace_id=ns_id)
+    log.info("[namespace] deleted id=%s, registry chat slot cleared", ns_id)
+
     from app.engine.drivers import evict_datasource
     for did in ds_ids:
         await evict_datasource(did)
