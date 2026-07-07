@@ -113,6 +113,7 @@ def generate_hq_with_validation(
     route_collection_path: list[str] | None,
     terminology_lookup: dict[str, list[str]] | None = None,
     n: int | None = None,
+    namespace_id: int | None = None,
 ) -> list[str]:
     """产 HQ + 路径校验. 不通过的丢弃, 不重生.
 
@@ -123,7 +124,7 @@ def generate_hq_with_validation(
     if entry_type not in ENABLED_ENTRY_TYPES:
         return []
 
-    raw_items = _call_llm_for_hq_items(content, entry_type, n)
+    raw_items = _call_llm_for_hq_items(content, entry_type, n, namespace_id=namespace_id)
 
     if entry_type == "rule" or not route_collection_path:
         if entry_type == "route_hint" and not route_collection_path:
@@ -154,6 +155,7 @@ def generate_hq_with_validation(
 
 def _call_llm_for_hq_items(
     content: str, entry_type: str, n: int | None,
+    namespace_id: int | None = None,
 ) -> list[HQItem]:
     """LLM 调用 + Pydantic 解析. 失败返空."""
     cap = n if n is not None else settings.hypothetical_queries_per_entry
@@ -163,6 +165,7 @@ def _call_llm_for_hq_items(
             [{"role": "user", "content": prompt}],
             temperature=settings.hypothetical_queries_llm_temperature,
             max_tokens=settings.hypothetical_queries_llm_max_tokens,
+            namespace_id=namespace_id,
         )
     except Exception as e:
         log.warning("[hq] LLM 失败, 退化空列表: %s", e)

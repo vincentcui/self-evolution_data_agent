@@ -297,6 +297,7 @@ async def _run_enum_safety_net(local_path: str, ns_id: int, name: str) -> None:
         try:
             response = await chat_completion_with_tools(
                 messages=messages, tools=tool_specs, thinking=False,
+                namespace_id=ns_id,
             )
         except Exception:
             log.exception("[%s] enum agent LLM 调用失败 (iteration=%d)", name, iteration)
@@ -537,7 +538,9 @@ async def run_training_pipeline_with_progress(
     t_parse = time.time()
     hint_text = await _load_profile_hint(repo_id)
     from app.knowledge.skeleton.orchestrator import orchestrated_extraction
-    result = await orchestrated_extraction(repo_path=local_path, hint_text=hint_text, repo_name=name)
+    result = await orchestrated_extraction(
+        repo_path=local_path, hint_text=hint_text, repo_name=name, namespace_id=ns_id,
+    )
 
     # ── Step 3a: agent 状态守卫 ──
     if result.status == "failed":

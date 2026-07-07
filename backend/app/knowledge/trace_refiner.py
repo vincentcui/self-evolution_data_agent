@@ -177,6 +177,7 @@ route_hint:
 def refine_traces(
     traces: list[dict],
     critical_rules: list[str] | None = None,
+    namespace_id: int | None = None,
 ) -> list[ProposedKE]:
     """traces 格式: [{trace_id, user_query, trace_json, reflection_log_json}, ...]
 
@@ -203,6 +204,7 @@ def refine_traces(
         raw = chat_completion(
             [{"role": "system", "content": _PROMPT}, {"role": "user", "content": user_msg}],
             temperature=0.2, max_tokens=4096,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
     except Exception as e:
         log.warning("[trace_refiner] LLM 失败: %s", e)

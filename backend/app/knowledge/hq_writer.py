@@ -104,12 +104,14 @@ async def rewrite_hq_for_entry(
             entry_type=entry.entry_type,
             route_collection_path=route_path,
             terminology_lookup=terminology_lookup,
+            namespace_id=entry.namespace_id,
         )
         from app.engine.model_registry import registry
 
+        resolved_config = registry.resolve_chat_config(entry.namespace_id)
         model_label = (
-            registry.chat_config.get("model_name", "unknown")
-            if registry.chat_config
+            resolved_config.get("model_name", "unknown")
+            if resolved_config
             else "unknown"
         )
     else:

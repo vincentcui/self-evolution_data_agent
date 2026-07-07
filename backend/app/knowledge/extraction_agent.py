@@ -147,6 +147,7 @@ async def run_extraction_agent(
     hint_text: str | None = None,
     max_iterations: int | None = None,
     repo_name: str = "",
+    namespace_id: int | None = None,
 ) -> ExtractionResult:
     """运行一次 agentic schema 提取。
 
@@ -234,6 +235,7 @@ async def run_extraction_agent(
                 messages=messages,
                 tools=EXTRACTION_TOOL_SPECS,
                 thinking=False,
+                namespace_id=namespace_id,
             )
         except Exception:
             logger.exception("chat_completion_with_tools 调用异常 (iteration=%d)", iteration)

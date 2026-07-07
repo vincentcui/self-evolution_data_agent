@@ -261,7 +261,7 @@ async def _handle_multi_candidates(
         report.promoted_count += 1
         return
     for rule in applicable_rules(db_type, kind):
-        outcome = await _try_rule(rule, cands)
+        outcome = await _try_rule(rule, cands, ns_id)
         if outcome is None:
             continue
         winner, reason = outcome
@@ -273,10 +273,10 @@ async def _handle_multi_candidates(
     await _record_conflict(db, ns_id, key, cands, report)
 
 
-async def _try_rule(rule: Any, cands: list[SchemaCanonicalCandidate]):
+async def _try_rule(rule: Any, cands: list[SchemaCanonicalCandidate], ns_id: int):
     """跑单条 rule, 屏蔽异常, 兼容 sync/async checker. 返 (winner, reason) 或 None."""
     try:
-        result = rule.checker(cands)
+        result = rule.checker(cands, namespace_id=ns_id)
         if inspect.isawaitable(result):
             result = await result
     except Exception as exc:

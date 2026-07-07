@@ -73,6 +73,7 @@ class RelatedHit:
 def detect_relations(
     new_content: str,
     neighbors: list[dict],
+    namespace_id: int | None = None,
 ) -> list[RelatedHit]:
     """新条目 vs 近邻 → list[RelatedHit] (含 independent, 调用方按需过滤).
 
@@ -92,6 +93,7 @@ def detect_relations(
             [{"role": "system", "content": _PROMPT}, {"role": "user", "content": user_msg}],
             temperature=0.1,
             max_tokens=1024,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
     except Exception as e:
         log.warning("[relations] LLM 失败: %s", e)
