@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re as _re
@@ -214,8 +215,6 @@ async def run_agent_loop(
             "started_at": _now_iso(),
         }})
         logger.info("[agent_loop] trace=%s agent_started 已发送", trace_id)
-
-        import functools
 
         if llm is not None:
             llm_fn: LLMCallable = llm
