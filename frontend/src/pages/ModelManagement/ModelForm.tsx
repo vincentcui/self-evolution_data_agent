@@ -19,6 +19,11 @@ import {
   isEmbeddingAllowed,
 } from "./modelFormUtils";
 
+export interface NamespaceOption {
+  id: number;
+  name: string;
+}
+
 interface Props {
   open: boolean;
   initial: ModelConfig | null;
@@ -26,6 +31,8 @@ interface Props {
   onSuccess: () => void;
   namespaceId?: number | null;
   namespaceName?: string;
+  accessibleNamespaces?: NamespaceOption[];
+  isSuperAdmin?: boolean;
 }
 
 /* ── 厂商默认配置 ──────────────────────────── */
@@ -61,11 +68,12 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "proxy", label: "网络代理", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
 ];
 
-export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName }: Props) {
+export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin }: Props) {
   const isEdit = !!initial;
   const effectiveNamespaceId = namespaceId ?? null;
-  const isNamespaceLocked = namespaceId != null || initial?.model_type === "EMBEDDING";
+  const isNamespaceLocked = namespaceId != null;
   const [form, setForm] = useState({ ...INIT });
+  const isEmbedding = initial?.model_type === "EMBEDDING" || (!isEdit && form.model_type === "EMBEDDING");
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -130,7 +138,9 @@ export default function ModelForm({ open, initial, onClose, onSuccess, namespace
     if (!form.base_url.trim()) { message.error("请输入 Base URL"); return; }
     setSaving(true);
     const protocol = protocolForProvider(form.provider, form.protocol as ModelProtocol);
-    const nsIdForSubmit = form.model_type === "EMBEDDING" ? null : effectiveNamespaceId;
+    const nsIdForSubmit = form.model_type === "EMBEDDING" ? null
+      : isNamespaceLocked ? effectiveNamespaceId
+      : form.namespace_id;
     const payload = { ...form, protocol, namespace_id: nsIdForSubmit };
     try {
       if (isEdit) {
@@ -183,6 +193,37 @@ export default function ModelForm({ open, initial, onClose, onSuccess, namespace
             {/* ── 基本信息 ── */}
             <div className={styles.section} data-section="basic">
               <div className={styles.sectionTitle}>基本信息</div>
+
+              {/* 所属空间 — EMBEDDING 固定全局, 锁定模式下只读 */}
+              <div className={styles.row}>
+                <label className={styles.rowLabel}>所属空间</label>
+                <div className={styles.rowCtrl}>
+                  {isEmbedding ? (
+                    <span style={{ fontSize: 13, color: "#8c95a3" }}>全局</span>
+                  ) : isNamespaceLocked ? (
+                    <span style={{ fontSize: 13, color: "#1a2332" }}>
+                      {namespaceName || `#${effectiveNamespaceId}`}
+                    </span>
+                  ) : (
+                    <select
+                      value={form.namespace_id ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        set("namespace_id", v === "" ? null : Number(v));
+                      }}
+                      style={{
+                        width: "100%", padding: "7px 10px", borderRadius: 8,
+                        border: "1.5px solid #e5e8ed", fontSize: 13, background: "#fff",
+                      }}
+                    >
+                      {isSuperAdmin && <option value="">全局</option>}
+                      {(accessibleNamespaces || []).map((ns) => (
+                        <option key={ns.id} value={ns.id}>{ns.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
 
               {/* 提供商 */}
               <div className={styles.row}>

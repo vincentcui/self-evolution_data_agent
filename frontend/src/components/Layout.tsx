@@ -95,7 +95,7 @@ const Layout: React.FC = () => {
   const isAdmin = roleAtLeast(user?.role, "admin");
 
   const ncColors = getButtonColors(!activeSessionId, hoverNewChat);
-  const cfgActive = location.pathname.startsWith("/workspace/model-management");
+  const cfgActive = location.pathname.startsWith("/config");
   const cfgColors = getButtonColors(cfgActive, hoverConfig);
   const wsColors = getButtonColors(false, hoverWorkspace);
 
@@ -126,7 +126,7 @@ const Layout: React.FC = () => {
       {/* P0: 配置中心 (仅 admin) — 快捷进入模型管理 */}
       {isAdmin && (
         <div style={{ padding: "4px 12px" }}>
-          <Button block icon={<SettingOutlined />} onClick={() => navigate("/workspace/model-management")}
+          <Button block icon={<SettingOutlined />} onClick={() => navigate("/config/model-management")}
             onMouseEnter={() => setHoverConfig(true)} onMouseLeave={() => setHoverConfig(false)}
             style={{ ...BUTTON_BASE_STYLE, ...cfgColors }}>
             配置中心

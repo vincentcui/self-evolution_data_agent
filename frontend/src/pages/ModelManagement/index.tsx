@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════
  *  模型配置管理页 — 参考 DataAgent 设计实现
  * ════════════════════════════════════════════ */
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button, message, Select } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import {
@@ -11,7 +11,11 @@ import {
   listModelConfigs,
   testModelConnection,
 } from "@/api/modelConfig";
+import { fetchNamespaces } from "@/api";
+import { useAuth } from "@/context/AuthContext";
+import { roleAtLeast } from "@/utils/role";
 import ModelForm from "./ModelForm";
+import type { NamespaceOption } from "./ModelForm";
 import { hasOtherActiveEmbedding, isEmbeddingEditLocked } from "./modelFormUtils";
 import styles from "./ModelManagement.module.css";
 
@@ -27,7 +31,10 @@ const PROVIDER_META: Record<string, { label: string; abbr: string; cls: string }
 };
 
 export default function ModelManagement() {
+  const { user } = useAuth();
+  const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
+  const [namespaces, setNamespaces] = useState<NamespaceOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [formOpen, setFormOpen] = useState(false);
@@ -38,8 +45,14 @@ export default function ModelManagement() {
 
   const load = async () => {
     setLoading(true);
-    try { setConfigs(await listModelConfigs()); }
-    catch { message.error("加载失败"); }
+    try {
+      const [mcs, nss] = await Promise.all([
+        listModelConfigs(),
+        fetchNamespaces(),
+      ]);
+      setConfigs(mcs);
+      setNamespaces(nss.map((ns: { id: number; name: string }) => ({ id: ns.id, name: ns.name })));
+    } catch { message.error("加载失败"); }
     finally { setLoading(false); }
   };
 
@@ -95,7 +108,7 @@ export default function ModelManagement() {
       <div className={styles.viewHead}>
         <div>
           <h2 className={styles.title}>模型配置管理</h2>
-          <p className={styles.desc}>管理全局兜底 Chat 配置和所有 Embedding 配置。命名空间专属配置请在「命名空间」页面管理。</p>
+          <p className={styles.desc}>管理所有 Chat 配置和 Embedding 配置</p>
         </div>
       </div>
 
@@ -185,7 +198,7 @@ export default function ModelManagement() {
                       {cfg.model_type === "CHAT" ? "对话" : "嵌入"}
                     </span>
                   </td>
-                  <td>{cfg.namespace_id != null ? `NS#${cfg.namespace_id}` : "全局"}</td>
+                  <td>{cfg.namespace_name || (cfg.namespace_id != null ? `#${cfg.namespace_id}` : "全局")}</td>
                   <td>
                     <span className={`${styles.badgeProtocol} ${effectiveProtocol === "anthropic" ? styles.protocolAnthropic : styles.protocolOpenai}`}>
                       {effectiveProtocol === "anthropic" ? "Anthropic" : "OpenAI"}
@@ -273,6 +286,8 @@ export default function ModelManagement() {
         initial={editing}
         onClose={() => { setFormOpen(false); setEditing(null); }}
         onSuccess={() => { setFormOpen(false); setEditing(null); load(); }}
+        accessibleNamespaces={namespaces}
+        isSuperAdmin={isSuperAdmin}
       />
     </div>
   );
