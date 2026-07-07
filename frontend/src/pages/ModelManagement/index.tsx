@@ -95,7 +95,7 @@ export default function ModelManagement() {
       <div className={styles.viewHead}>
         <div>
           <h2 className={styles.title}>模型配置管理</h2>
-          <p className={styles.desc}>配置和管理 AI 模型参数，Chat 支持运行时切换；Embedding 切换需重建知识库索引</p>
+          <p className={styles.desc}>管理全局兜底 Chat 配置和所有 Embedding 配置。命名空间专属配置请在「命名空间」页面管理。</p>
         </div>
       </div>
 
@@ -138,21 +138,22 @@ export default function ModelManagement() {
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <colgroup>
-            <col style={{ width: "4%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "11%" }} />
+            <col style={{ width: "3%" }} />
             <col style={{ width: "7%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "14%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "4%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "5%" }} />
             <col style={{ width: "6%" }} />
             <col style={{ width: "6%" }} />
-            <col style={{ width: "22%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "5%" }} />
+            <col style={{ width: "5%" }} />
+            <col style={{ width: "27%" }} />
           </colgroup>
           <thead>
             <tr>
-              <th>ID</th><th>提供商</th><th>模型名称</th><th>模型类型</th>
+              <th>ID</th><th>提供商</th><th>模型名称</th><th>类型</th><th>所属空间</th>
               <th>协议</th><th>API 地址</th><th>路径配置</th><th>温度</th><th>最大 Token</th>
               <th>状态</th><th>操作</th>
             </tr>
@@ -160,7 +161,7 @@ export default function ModelManagement() {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className={styles.emptyCell}>
+                <td colSpan={12} className={styles.emptyCell}>
                   暂无模型配置数据
                 </td>
               </tr>
@@ -181,9 +182,10 @@ export default function ModelManagement() {
                   <td><strong>{cfg.model_name}</strong></td>
                   <td>
                     <span className={`${styles.badgeType} ${cfg.model_type === "CHAT" ? styles.typeChat : styles.typeEmbed}`}>
-                      {cfg.model_type === "CHAT" ? "对话模型" : "嵌入模型"}
+                      {cfg.model_type === "CHAT" ? "对话" : "嵌入"}
                     </span>
                   </td>
+                  <td>{cfg.namespace_id != null ? `NS#${cfg.namespace_id}` : "全局"}</td>
                   <td>
                     <span className={`${styles.badgeProtocol} ${effectiveProtocol === "anthropic" ? styles.protocolAnthropic : styles.protocolOpenai}`}>
                       {effectiveProtocol === "anthropic" ? "Anthropic" : "OpenAI"}
