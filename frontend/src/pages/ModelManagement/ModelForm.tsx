@@ -24,6 +24,8 @@ interface Props {
   initial: ModelConfig | null;
   onClose: () => void;
   onSuccess: () => void;
+  namespaceId?: number | null;
+  namespaceName?: string;
 }
 
 /* ── 厂商默认配置 ──────────────────────────── */
@@ -46,7 +48,7 @@ const MASK = "****";
 /* ── 初始表单状态 ──────────────────────────── */
 const INIT: Omit<ModelConfig, "id" | "is_active" | "created_at" | "updated_at"> = {
   provider: "", protocol: "openai", base_url: "", api_key: "", model_name: "",
-  model_type: "CHAT", temperature: 0.0, max_tokens: 12288, max_history_turns: 5,
+  model_type: "CHAT", namespace_id: null, temperature: 0.0, max_tokens: 12288, max_history_turns: 5,
   completions_path: "", embeddings_path: "",
   proxy_enabled: false, proxy_host: "", proxy_port: undefined, proxy_username: "", proxy_password: "",
 };
@@ -59,8 +61,10 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "proxy", label: "网络代理", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
 ];
 
-export default function ModelForm({ open, initial, onClose, onSuccess }: Props) {
+export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName }: Props) {
   const isEdit = !!initial;
+  const effectiveNamespaceId = namespaceId ?? null;
+  const isNamespaceLocked = namespaceId != null || initial?.model_type === "EMBEDDING";
   const [form, setForm] = useState({ ...INIT });
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
@@ -75,7 +79,7 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
     setProvOpen(false);
     setForm(initial
       ? { ...INIT, ...initial, api_key: initial.api_key ?? "" }
-      : { ...INIT });
+      : { ...INIT, namespace_id: effectiveNamespaceId });
   }, [open, initial]);
 
   const set = (k: keyof typeof form, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
@@ -126,7 +130,8 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
     if (!form.base_url.trim()) { message.error("请输入 Base URL"); return; }
     setSaving(true);
     const protocol = protocolForProvider(form.provider, form.protocol as ModelProtocol);
-    const payload = { ...form, protocol };
+    const nsIdForSubmit = form.model_type === "EMBEDDING" ? null : effectiveNamespaceId;
+    const payload = { ...form, protocol, namespace_id: nsIdForSubmit };
     try {
       if (isEdit) {
         await updateModelConfig({ ...payload, id: initial!.id! } as ModelConfigUpdate);
