@@ -240,7 +240,7 @@ async def list_configs(
         )).all()
         ns_names = {row.id: row.name for row in ns_rows}
 
-    return [_to_out(r, ns_names.get(r.namespace_id)) for r in rows]
+    return [_to_out(r, ns_names.get(r.namespace_id) if r.namespace_id is not None else None) for r in rows]
 
 
 @router.post("/add", response_model=ModelConfigOut, status_code=201)

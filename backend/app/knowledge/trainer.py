@@ -646,7 +646,7 @@ async def run_training_pipeline_with_progress(
     t_eval = time.time()
     all_trained = ddls + jpa_docs
     report.duration_seconds = round(time.time() - start, 2)
-    report = await asyncio.to_thread(evaluate_parse_quality, report, all_trained)
+    report = await asyncio.to_thread(evaluate_parse_quality, report, all_trained, namespace_id=ns_id)
     log.info("[%s] 评估完成 耗时 %.1fs score=%d",
              name, time.time() - t_eval, report.completeness_score)
 

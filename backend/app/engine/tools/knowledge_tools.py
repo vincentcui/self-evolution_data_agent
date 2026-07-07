@@ -319,7 +319,7 @@ async def save_knowledge(
                 {"id": h.entry_id, "content": h.content}
                 for h in neighbors_hits if h.entry_id != ke.id
             ]
-            related = await asyncio.to_thread(detect_relations, content, neighbors)
+            related = await asyncio.to_thread(detect_relations, content, neighbors, namespace_id=namespace_id)
             non_indep = [
                 {
                     "related_entry_id": r.related_entry_id,

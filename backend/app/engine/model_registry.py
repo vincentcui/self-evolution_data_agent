@@ -64,7 +64,7 @@ class ModelRegistry:
         # CHAT: 按 namespace_id 索引 (None=全局槽)
         self._chat_configs: dict[int | None, dict[str, Any]] = {}
         self._chat_clients: dict[int | None, Any] = {}
-        self._chat_client_keys: dict[int | None, tuple] = {}
+        self._chat_client_keys: dict[int | None, tuple | None] = {}
         # EMBEDDING: 不变 (全局单槽)
         self._embedding_config: dict[str, Any] | None = None
         self._embedding_client: Any | None = None  # openai.OpenAI

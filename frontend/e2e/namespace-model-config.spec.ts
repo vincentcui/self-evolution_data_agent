@@ -1,8 +1,11 @@
 /* ════════════════════════════════════════════
  *  L3: namespace 模型配置 e2e — page.route + DB 断言
+ *  chromium only (per project e2e convention)
  * ════════════════════════════════════════════ */
-import { test, expect } from "@playwright/test";
+import { test, expect, devices } from "@playwright/test";
 import { login } from "./_rbac_helpers";
+
+test.use({ ...devices["Desktop Chrome"] });
 
 test("L3: list API URL 精确匹配 namespace_id 查询参数", async ({ page }) => {
   let capturedUrl = "";
