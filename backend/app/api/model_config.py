@@ -56,6 +56,7 @@ class ModelConfigIn(BaseModel):
     proxy_port: int | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
+    namespace_id: int | None = None
 
 
 class ModelConfigUpdate(ModelConfigIn):
@@ -80,6 +81,8 @@ class ModelConfigOut(BaseModel):
     max_tokens: int | None
     max_history_turns: int
     is_active: bool
+    namespace_id: int | None = None
+    namespace_name: str | None = None
     completions_path: str | None
     embeddings_path: str | None
     proxy_enabled: bool
@@ -132,6 +135,7 @@ def _safe_config_dict(row: ModelConfig) -> dict:
         "base_url": row.base_url,
         "model_name": row.model_name,
         "model_type": row.model_type,
+        "namespace_id": row.namespace_id,
         "temperature": float(row.temperature) if row.temperature is not None else None,
         "max_tokens": row.max_tokens,
         "max_history_turns": row.max_history_turns,
@@ -189,6 +193,8 @@ def _to_out(row: ModelConfig) -> ModelConfigOut:
         max_tokens=row.max_tokens,
         max_history_turns=row.max_history_turns,
         is_active=row.is_active,
+        namespace_id=row.namespace_id,
+        namespace_name=None,  # 可后续 join 填充，或前端用 namespace_id 关联
         completions_path=row.completions_path,
         embeddings_path=row.embeddings_path,
         proxy_enabled=row.proxy_enabled,
@@ -213,15 +219,16 @@ async def _get_or_404(db: AsyncSession, config_id: int) -> ModelConfig:
 
 @router.get("/list", response_model=list[ModelConfigOut])
 async def list_configs(
+    namespace_id: int | None = None,
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取全部未删除的模型配置列表（API Key 脱敏）."""
-    rows = (await db.execute(
-        select(ModelConfig)
-        .where(ModelConfig.is_deleted.is_(False))
-        .order_by(ModelConfig.model_type, ModelConfig.id)
-    )).scalars().all()
+    """获取未删除的模型配置列表（API Key 脱敏），可按 namespace 过滤."""
+    query = select(ModelConfig).where(ModelConfig.is_deleted.is_(False))
+    if namespace_id is not None:
+        query = query.where(ModelConfig.namespace_id == namespace_id)
+    query = query.order_by(ModelConfig.model_type, ModelConfig.id)
+    rows = (await db.execute(query)).scalars().all()
     return [_to_out(r) for r in rows]
 
 
@@ -235,6 +242,19 @@ async def add_config(
     proto = protocol_for_provider(body.provider, body.protocol)
     if proto == "anthropic" and body.model_type == "EMBEDDING":
         raise HTTPException(400, "Anthropic 协议不支持 EMBEDDING 类型")
+
+    # EMBEDDING 强制 namespace_id = None (代码层约束)
+    ns_id = body.namespace_id if body.model_type == "CHAT" else None
+
+    # namespace 存在性校验 (避免 FK IntegrityError → 500)
+    if ns_id is not None:
+        from app.models.namespace import Namespace
+        ns_exists = await db.scalar(
+            select(Namespace.id).where(Namespace.id == ns_id)
+        )
+        if ns_exists is None:
+            raise HTTPException(400, f"命名空间不存在: {ns_id}")
+
     row = ModelConfig(
         provider=body.provider.strip(),
         base_url=body.base_url.strip(),
@@ -254,6 +274,7 @@ async def add_config(
         proxy_password=body.proxy_password,
         is_active=False,
         is_deleted=False,
+        namespace_id=ns_id,
     )
     db.add(row)
     await db.flush()  # 获取 row.id（自增主键）
@@ -296,6 +317,9 @@ async def update_config(
         row.api_key = body.api_key.strip()
     row.model_name = body.model_name.strip()
     # model_type 不允许修改
+    # namespace_id 不允许修改 (创建时绑定)
+    if body.namespace_id is not None and body.namespace_id != row.namespace_id:
+        raise HTTPException(400, "namespace_id 不允许修改，请删除后重新创建")
     row.temperature = body.temperature
     row.max_tokens = body.max_tokens
     row.max_history_turns = body.max_history_turns
@@ -345,6 +369,7 @@ async def delete_config(
 
     was_active = row.is_active
     model_type = row.model_type
+    ns_id = row.namespace_id
     before_snapshot = _safe_config_dict(row)
     row.is_deleted = True
     row.is_active = False
@@ -352,7 +377,7 @@ async def delete_config(
     await _write_audit(db, "delete", _user, row=row, before=before_snapshot)
     await db.commit()
     if was_active:
-        _clear_registry(model_type)
+        _clear_registry(model_type, namespace_id=ns_id)
 
 
 @router.post("/activate/{config_id}", response_model=ModelConfigOut)
@@ -381,10 +406,11 @@ async def activate_config(
                 "Embedding 模型切换需要重建知识库索引，首期不支持直接热切换",
             )
 
-    # 先禁用同类型其他配置
+    # 先禁用同模型类型 + 同 namespace_id 组内其他配置
     others = (await db.execute(
         select(ModelConfig).where(
             ModelConfig.model_type == row.model_type,
+            ModelConfig.namespace_id == row.namespace_id,
             ModelConfig.is_active.is_(True),
             ModelConfig.id != config_id,
             ModelConfig.is_deleted.is_(False),
@@ -468,22 +494,50 @@ async def test_connection(
 
 @router.get("/check-ready", response_model=CheckReadyOut)
 async def check_ready(
+    namespace_id: int | None = None,
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """检查 model_configs DB 中是否各有一条激活的 Chat / Embedding 配置.
+    """检查 Chat / Embedding 是否就绪。namespace_id 非 None 时检查该 namespace
+    的 Chat 配置 (含全局兜底)；Embedding 始终检查全局。
 
-    只检查 DB，不读取 env / settings；env 有配置但 DB 无 active config 时仍返回 false。
+    只检查 DB, 不读取 env / settings；env 有配置但 DB 无 active config 时仍返回 false。
     """
-    rows = (await db.execute(
-        select(ModelConfig.model_type).where(
+    # 检查全局 EMBEDDING
+    emb_ok = await db.scalar(
+        select(ModelConfig.id).where(
+            ModelConfig.model_type == "EMBEDDING",
             ModelConfig.is_active.is_(True),
             ModelConfig.is_deleted.is_(False),
         )
-    )).scalars().all()
-    types = set(rows)
-    chat_ok = "CHAT" in types
-    emb_ok = "EMBEDDING" in types
+    )
+    emb_ok = emb_ok is not None
+
+    # 检查 CHAT: namespace 级别 + 全局兜底
+    chat_ok = False
+    if namespace_id is not None:
+        ns_chat = await db.scalar(
+            select(ModelConfig.id).where(
+                ModelConfig.model_type == "CHAT",
+                ModelConfig.namespace_id == namespace_id,
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_deleted.is_(False),
+            )
+        )
+        chat_ok = ns_chat is not None
+
+    if not chat_ok:
+        # 检查全局兜底
+        global_chat = await db.scalar(
+            select(ModelConfig.id).where(
+                ModelConfig.model_type == "CHAT",
+                ModelConfig.namespace_id.is_(None),
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_deleted.is_(False),
+            )
+        )
+        chat_ok = global_chat is not None
+
     return CheckReadyOut(
         chat_model_ready=chat_ok,
         embedding_model_ready=emb_ok,
@@ -572,15 +626,15 @@ async def _do_refresh(row: ModelConfig) -> None:
     from app.engine.model_registry import registry
     cfg = registry._row_to_dict(row)
     if row.model_type == "CHAT":
-        registry.refresh_chat(cfg)
+        registry.refresh_chat(cfg, namespace_id=row.namespace_id)
     else:
         registry.refresh_embedding(cfg)
 
 
-def _clear_registry(model_type: str) -> None:
-    """删除激活配置时清空注册中心（返回 None 状态）."""
+def _clear_registry(model_type: str, namespace_id: int | None = None) -> None:
+    """删除激活配置时清空注册中心对应槽位."""
     from app.engine.model_registry import registry
     if model_type == "CHAT":
-        registry.refresh_chat(None)
+        registry.refresh_chat(None, namespace_id=namespace_id)
     else:
         registry.refresh_embedding(None)
