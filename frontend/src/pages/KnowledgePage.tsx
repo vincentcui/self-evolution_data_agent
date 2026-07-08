@@ -201,7 +201,10 @@ const KnowledgePage: React.FC = () => {
       ) : (
         <>
           {/* ── 空间准备度概览 ── */}
-          <div className={styles.readinessWrap}>
+          <div className={styles.readinessSection}>
+            <div className={`${styles.readinessBadge} ${readiness.badge.cls}`}>
+              {readiness.badge.text}
+            </div>
             <div className={styles.readinessCards}>
               <div className={styles.readinessCard}>
                 <span className={styles.readinessLabel}>数据源</span>
@@ -222,9 +225,6 @@ const KnowledgePage: React.FC = () => {
                 <span className={styles.readinessLabel}>可问数</span>
                 <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
               </div>
-            </div>
-            <div className={`${styles.readinessBadge} ${readiness.badge.cls}`}>
-              {readiness.badge.text}
             </div>
           </div>
 

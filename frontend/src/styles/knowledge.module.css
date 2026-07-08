@@ -223,10 +223,12 @@
  * ════════════════════════════════════════════ */
 
 /* ── 空间准备度概览 ── */
-.readinessWrap {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
+.readinessSection {
+  position: relative;
+  background: #f5f8ff;
+  border: 1px solid #e0e7ff;
+  border-radius: 12px;
+  padding: 16px 18px;
   margin-bottom: 16px;
 }
 
@@ -234,12 +236,11 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-  flex: 1;
 }
 
 .readinessCard {
-  background: #fff;
-  border: 1px solid #e5e8ed;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid #e0e7ff;
   border-radius: 10px;
   padding: 14px 16px;
   display: flex;
@@ -267,16 +268,14 @@
 }
 
 .readinessBadge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 18px;
-  border-radius: 10px;
-  font-size: 14px;
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  min-width: 110px;
 }
 
 .readinessBadgeNotReady {
