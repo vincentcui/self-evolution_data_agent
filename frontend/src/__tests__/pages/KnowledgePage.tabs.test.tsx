@@ -20,6 +20,10 @@ vi.mock("@/api", () => ({
   supersedeKnowledge: vi.fn(),
   addRepo: vi.fn(),
   parseRepo: vi.fn(),
+  schemaCanonicalApi: {
+    listCanonicals: vi.fn().mockResolvedValue([]),
+    listExtractionFailures: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 // activeNs 走 WorkspacePage 共享 context (取代 NamespaceSelector 自动选中)

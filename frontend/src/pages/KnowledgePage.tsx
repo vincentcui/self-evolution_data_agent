@@ -85,8 +85,12 @@ const KnowledgePage: React.FC = () => {
   const [terminologyConflicts, setTerminologyConflicts] = useState<TerminologyConflict[]>([]);
   const [selectedTermConflict, setSelectedTermConflict] = useState<TerminologyConflict | null>(null);
 
+  /* 导航徽标用：schema canonical 数 + 抽取失败数 */
+  const [schemaCount, setSchemaCount] = useState(0);
+  const [extractionFailureCount, setExtractionFailureCount] = useState(0);
+
   const loadData = useCallback(async (nsId: number) => {
-    const [k, repoRes, termConflicts, ds] = await Promise.all([
+    const [k, repoRes, termConflicts, ds, schemas, failures] = await Promise.all([
       api.fetchKnowledge(nsId),
       api.fetchRepos(nsId),
       api
@@ -94,11 +98,15 @@ const KnowledgePage: React.FC = () => {
         .then((r) => r.conflicts)
         .catch(() => []),
       api.fetchDataSources(nsId).catch(() => []),
+      api.schemaCanonicalApi.listCanonicals(nsId).catch(() => []),
+      api.schemaCanonicalApi.listExtractionFailures(nsId).catch(() => []),
     ]);
     setKnowledge(k);
     setRepos(repoRes.repos);
     setTerminologyConflicts(termConflicts);
     setDataSources(ds);
+    setSchemaCount(Array.isArray(schemas) ? schemas.length : 0);
+    setExtractionFailureCount(Array.isArray(failures) ? failures.length : 0);
   }, []);
 
   useEffect(() => {
@@ -157,11 +165,16 @@ const KnowledgePage: React.FC = () => {
     return { dsCount, parsedRepos, totalRepos, proposedCount, canonicalCount, badge };
   }, [dataSources, repos, knowledge, terminologyConflicts]);
 
-  /* ── 导航徽标 ── */
-  const navBadges: Partial<Record<NavKey, number>> = useMemo(() => ({
+  /* ── 导航徽标（每个子项都显示，含 0）── */
+  const navBadges: Record<NavKey, number> = useMemo(() => ({
+    "knowledge": knowledge.length,
+    "schema": schemaCount,
     "audit-pending": readiness.proposedCount,
     "terminology-conflict": terminologyConflicts.length,
-  }), [readiness.proposedCount, terminologyConflicts]);
+    "repos": repos.length,
+    "audit-rejected": knowledge.filter((k) => k.status === "rejected").length,
+    "extraction-failure": extractionFailureCount,
+  }), [knowledge, schemaCount, readiness.proposedCount, terminologyConflicts, repos, extractionFailureCount]);
 
   return (
     <div>
@@ -265,11 +278,9 @@ const KnowledgePage: React.FC = () => {
                         onClick={() => setActiveTab(item.key)}
                       >
                         <span>{item.label}</span>
-                        {badge !== undefined && badge > 0 && (
-                          <span className={isActive ? styles.navBadgeActive : styles.navBadge}>
-                            {badge}
-                          </span>
-                        )}
+                        <span className={isActive ? styles.navBadgeActive : styles.navBadge}>
+                          {badge}
+                        </span>
                       </button>
                     );
                   })}
