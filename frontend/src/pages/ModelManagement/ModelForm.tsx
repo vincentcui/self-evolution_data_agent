@@ -33,8 +33,6 @@ interface Props {
   namespaceName?: string;
   accessibleNamespaces?: NamespaceOption[];
   isSuperAdmin?: boolean;
-  /** chatOnly 模式 (从 NamespacePage 进入): 仅允许 CHAT, 隐藏 EMBEDDING */
-  chatOnly?: boolean;
 }
 
 /* ── 厂商默认配置 ──────────────────────────── */
@@ -70,14 +68,13 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "proxy", label: "网络代理", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
 ];
 
-export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin, chatOnly }: Props) {
+export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin }: Props) {
   const isEdit = !!initial;
   const effectiveNamespaceId = namespaceId ?? null;
   const isNamespaceLocked = namespaceId != null;
   const [form, setForm] = useState({ ...INIT });
   const isEmbedding = initial?.model_type === "EMBEDDING" || (!isEdit && form.model_type === "EMBEDDING");
-  /** chatOnly: 仅展示 CHAT 类型 (EMBEDDING 是全局配置, 不应在空间级 Tab 创建) */
-  const typeOptions: ModelType[] = chatOnly ? ["CHAT"] : ["CHAT", "EMBEDDING"];
+  const typeOptions: ModelType[] = ["CHAT", "EMBEDDING"];
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
   const [saving, setSaving] = useState(false);
