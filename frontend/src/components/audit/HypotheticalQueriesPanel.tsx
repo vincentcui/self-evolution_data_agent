@@ -6,7 +6,7 @@
  * ════════════════════════════════════════════ */
 
 import { useState } from "react";
-import { Button, Empty, Input, Modal, Tag, message } from "antd";
+import { Empty, Input, Modal, Tag, message } from "antd";
 import { editKnowledge } from "@/api";
 
 interface HQ {
@@ -79,9 +79,23 @@ export function HypotheticalQueriesPanel({
         <span style={{ fontSize: 12, color: "#999" }}>
           LLM 同步生成的假设触发问题, 用作 ChromaDB 多向量召回 key
         </span>
-        <Button size="small" onClick={handleOpenEdit}>
+        <button
+          onClick={handleOpenEdit}
+          style={{
+            padding: "4px 10px",
+            borderRadius: 5,
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: "pointer",
+            border: "1px solid #93c5fd",
+            background: "#fff",
+            color: "#2563eb",
+            fontFamily: "inherit",
+            lineHeight: 1.4,
+          }}
+        >
           编辑全部
-        </Button>
+        </button>
       </div>
       {parsed.length === 0 ? (
         <Empty description="未生成假设触发问题 (仅 rule / route_hint 启用)" />
