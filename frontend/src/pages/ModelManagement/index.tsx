@@ -184,6 +184,8 @@ export default function ModelManagement() {
                 </td>
               </tr>
             ) : filtered.map((cfg) => {
+              // D2: 非 super_admin 对全局配置(含 EMBEDDING)的写操作必然 403 → 禁用避免死路
+              const writeLocked = !isSuperAdmin && cfg.namespace_id == null;
               const pm = getProviderMeta(cfg.provider);
               const effectiveProtocol = cfg.protocol ?? (cfg.provider === "anthropic" ? "anthropic" : "openai");
               const pathDisplay = cfg.model_type === "CHAT"
@@ -228,7 +230,8 @@ export default function ModelManagement() {
                       <button
                         className={`${styles.actBtn} ${styles.actTest} ${testingId === cfg.id ? styles.testing : ""}`}
                         onClick={() => handleTest(cfg)}
-                        disabled={testingId === cfg.id}
+                        disabled={testingId === cfg.id || writeLocked}
+                        title={writeLocked ? "全局配置仅超级管理员可管理" : undefined}
                       >
                         {testingId === cfg.id
                           ? <><span className={styles.spinIcon} />测试中...</>
@@ -243,7 +246,8 @@ export default function ModelManagement() {
                       <button
                         className={`${styles.actBtn} ${styles.actToggle} ${cfg.is_active ? styles.isActive : ""}`}
                         onClick={() => !cfg.is_active && handleActivate(cfg)}
-                        disabled={!!cfg.is_active || activatingId === cfg.id}
+                        disabled={!!cfg.is_active || activatingId === cfg.id || writeLocked}
+                        title={writeLocked ? "全局配置仅超级管理员可管理" : undefined}
                       >
                         {cfg.is_active ? "已激活" : (activatingId === cfg.id ? "激活中..." : "激活")}
                       </button>
@@ -251,12 +255,14 @@ export default function ModelManagement() {
                       {/* 编辑 */}
                       {(() => {
                         const embeddingLocked = isEmbeddingEditLocked(cfg);
+                        const editDisabled = embeddingLocked || writeLocked;
                         return (
                           <button
                             className={`${styles.actBtn} ${styles.actEdit}`}
-                            onClick={() => { if (!embeddingLocked) { setEditing(cfg); setFormOpen(true); } }}
-                            disabled={embeddingLocked}
-                            title={embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接修改" : undefined}
+                            onClick={() => { if (!editDisabled) { setEditing(cfg); setFormOpen(true); } }}
+                            disabled={editDisabled}
+                            title={writeLocked ? "全局配置仅超级管理员可管理"
+                              : embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接修改" : undefined}
                           >
                             编辑
                           </button>
@@ -266,12 +272,14 @@ export default function ModelManagement() {
                       {/* 删除（二次确认）*/}
                       {(() => {
                         const embeddingLocked = isEmbeddingEditLocked(cfg);
+                        const delDisabled = embeddingLocked || writeLocked;
                         return (
                           <button
                             className={`${styles.actBtn} ${styles.actDelete} ${deletingId === cfg.id ? styles.confirmDelete : ""}`}
-                            onClick={() => { if (!embeddingLocked) handleDelete(cfg); }}
-                            disabled={embeddingLocked}
-                            title={embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接删除" : undefined}
+                            onClick={() => { if (!delDisabled) handleDelete(cfg); }}
+                            disabled={delDisabled}
+                            title={writeLocked ? "全局配置仅超级管理员可管理"
+                              : embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接删除" : undefined}
                           >
                             {deletingId === cfg.id ? "确认删除?" : "删除"}
                           </button>
