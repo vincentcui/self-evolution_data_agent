@@ -156,121 +156,158 @@ export default function AuditCard({
     });
   };
 
+  // created_at 格式化为 YYYY-MM-DD
+  const createdAtShort = entry.created_at ? entry.created_at.slice(0, 10) : "";
+
   return (
-    <Card size="small">
-      <Space style={{ marginBottom: 8 }}>
-        {selectable && (
-          <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
-        )}
-        <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{STATUS_LABELS[entry.status] ?? entry.status}</Tag>
-        <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}</Tag>
-        <Tag>{SOURCE_LABELS[entry.source] ?? entry.source}</Tag>
-        <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{TIER_LABELS[entry.tier] ?? entry.tier}</Tag>
-      </Space>
-      <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>
-        {entry.content}
-      </Paragraph>
-      {entry.entry_type === "terminology" && (
-        <TerminologyRouting payload={entry.payload} />
-      )}
-      {entry.entry_type === "instance_alias" && entry.payload && (
-        <div style={{ marginBottom: 8, fontSize: 12 }}>
-          <Space size="small" wrap>
-            <Tag color="purple">
-              {(entry.payload as Record<string, string>).target_database || "?"} /{" "}
-              {(entry.payload as Record<string, string>).target_collection || "?"}
-              {" · "}
-              {(entry.payload as Record<string, string>).id_field || "_id"} ={" "}
-              {(entry.payload as Record<string, string>).target_id || "?"}
-            </Tag>
+    <Card size="small" bodyStyle={{ padding: "12px 16px" }}>
+      <div style={{ display: "flex", gap: 12 }}>
+        {/* 左侧编号 */}
+        <div style={{
+          flexShrink: 0, width: 36, textAlign: "center",
+          color: "#9ba5b2", fontSize: 13, fontWeight: 600, paddingTop: 2,
+        }}>
+          #{entry.id}
+        </div>
+
+        {/* 中间内容 */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* 第一行：标签区（状态/类型/来源/级别 并排）*/}
+          <Space style={{ marginBottom: 6 }} size="small" wrap>
+            {selectable && (
+              <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
+            )}
+            <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{STATUS_LABELS[entry.status] ?? entry.status}</Tag>
+            <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}</Tag>
+            <Tag>{SOURCE_LABELS[entry.source] ?? entry.source}</Tag>
+            <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{TIER_LABELS[entry.tier] ?? entry.tier}</Tag>
+          </Space>
+
+          {/* 标题（content）*/}
+          <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 6, fontSize: 14, fontWeight: 500 }}>
+            {entry.content}
+          </Paragraph>
+
+          {/* 关联表名/字段标签区 */}
+          {entry.entry_type === "terminology" && (
+            <TerminologyRouting payload={entry.payload} />
+          )}
+          {entry.entry_type === "instance_alias" && entry.payload && (
+            <div style={{ marginBottom: 6, fontSize: 12 }}>
+              <Space size="small" wrap>
+                <Tag color="purple">
+                  {(entry.payload as Record<string, string>).target_database || "?"} /{" "}
+                  {(entry.payload as Record<string, string>).target_collection || "?"}
+                  {" · "}
+                  {(entry.payload as Record<string, string>).id_field || "_id"} ={" "}
+                  {(entry.payload as Record<string, string>).target_id || "?"}
+                </Tag>
+              </Space>
+            </div>
+          )}
+          {entry.entry_type === "example" && entry.payload && (() => {
+            const p = entry.payload as Record<string, unknown>;
+            const collections = (p.collections as string[]) ?? [];
+            const targetCollection = (p.target_collection as string) ?? "";
+            const targetDatabase = (p.target_database as string) ?? "";
+            const resultSummary = (p.result_summary as string) ?? "";
+            return (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <Space size="small" wrap>
+                  {collections.map((c) => <Tag key={c} color="blue">{c}</Tag>)}
+                  {!collections.length && targetCollection && <Tag color="blue">{targetCollection}</Tag>}
+                  {targetDatabase && <Tag color="cyan">{targetDatabase}</Tag>}
+                </Space>
+                {resultSummary && (
+                  <div style={{ marginTop: 4 }}>
+                    <Text type="secondary">{resultSummary}</Text>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {entry.entry_type === "route_hint" && entry.payload && (() => {
+            const p = entry.payload as Record<string, unknown>;
+            const path = (p.collection_path as string[]) ?? [];
+            const joins = (p.join_fields as Array<{ a: string; b: string }>) ?? [];
+            return (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <div>
+                  <Text type="secondary">路径: </Text>
+                  {path.map((c, i, arr) => (
+                    <span key={c}>
+                      <Tag color="cyan">{c}</Tag>
+                      {i < arr.length - 1 && <Text type="secondary"> → </Text>}
+                    </span>
+                  ))}
+                </div>
+                {joins.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <Text type="secondary">连接: </Text>
+                    {joins.map((j, i) => (
+                      <Tag key={`${j.a}:${j.b}:${i}`}>{j.a} ↔ {j.b}</Tag>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop: 4 }}>
+                  <Tag>策略: {(p.cost_strategy as string) ?? "?"}</Tag>
+                  <Text type="secondary" style={{ marginLeft: 8 }}>
+                    {(p.reason as string) ?? ""}
+                  </Text>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 灰色说明文字 */}
+          {entry.description && (
+            <Paragraph type="secondary" style={{ marginBottom: 6, fontSize: 12 }}>
+              {entry.description}
+            </Paragraph>
+          )}
+
+          {["rule", "route_hint"].includes(entry.entry_type) && (
+            <HypotheticalQueriesPanel
+              entryId={entry.id}
+              hypothetical_queries_json={entry.hypothetical_queries_json ?? "[]"}
+              onUpdated={onAction}
+            />
+          )}
+          {entry.related_entry_ids_json && entry.related_entry_ids_json !== "[]" && (
+            <RelatedEntriesPanel related_entry_ids_json={entry.related_entry_ids_json} />
+          )}
+
+          {/* 操作按钮 */}
+          <Space>
+            {entry.status === "proposed" && (
+              <>
+                <Button type="primary" size="small" loading={approving} onClick={handleApprove}>通过</Button>
+                <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
+                <Button size="small" danger onClick={handleReject}>拒绝</Button>
+              </>
+            )}
+            {entry.status === "canonical" && (
+              <>
+                <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
+                <Button size="small" danger onClick={handleSoftDelete}>下架</Button>
+              </>
+            )}
+            {entry.status === "rejected" && (
+              <Button size="small" onClick={handleRestore}>恢复</Button>
+            )}
+            <Button size="small" onClick={() => setLogOpen(true)}>审计日志</Button>
           </Space>
         </div>
-      )}
-      {entry.entry_type === "example" && entry.payload && (() => {
-        const p = entry.payload as Record<string, unknown>;
-        const targetCollection = (p.target_collection as string) ?? "";
-        const targetDatabase = (p.target_database as string) ?? "";
-        const resultSummary = (p.result_summary as string) ?? "";
-        return (
-          <div style={{ marginBottom: 8, fontSize: 12 }}>
-            <Space size="small" wrap>
-              {targetCollection && <Tag color="blue">{targetCollection}</Tag>}
-              {targetDatabase && <Tag color="cyan">{targetDatabase}</Tag>}
-            </Space>
-            {resultSummary && (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">{resultSummary}</Text>
-              </div>
-            )}
+
+        {/* 右侧时间 */}
+        {createdAtShort && (
+          <div style={{
+            flexShrink: 0, color: "#9ba5b2", fontSize: 12, paddingTop: 2,
+          }}>
+            {createdAtShort}
           </div>
-        );
-      })()}
-      {entry.entry_type === "route_hint" && entry.payload && (() => {
-        const p = entry.payload as Record<string, unknown>;
-        const path = (p.collection_path as string[]) ?? [];
-        const joins = (p.join_fields as Array<{ a: string; b: string }>) ?? [];
-        return (
-          <div style={{ marginBottom: 8, fontSize: 12 }}>
-            <div>
-              <Text type="secondary">路径: </Text>
-              {path.map((c, i, arr) => (
-                <span key={c}>
-                  <Tag color="cyan">{c}</Tag>
-                  {i < arr.length - 1 && <Text type="secondary"> → </Text>}
-                </span>
-              ))}
-            </div>
-            {joins.length > 0 && (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">连接: </Text>
-                {joins.map((j, i) => (
-                  <Tag key={`${j.a}:${j.b}:${i}`}>{j.a} ↔ {j.b}</Tag>
-                ))}
-              </div>
-            )}
-            <div style={{ marginTop: 4 }}>
-              <Tag>策略: {(p.cost_strategy as string) ?? "?"}</Tag>
-              <Text type="secondary" style={{ marginLeft: 8 }}>
-                {(p.reason as string) ?? ""}
-              </Text>
-            </div>
-          </div>
-        );
-      })()}
-      {entry.description && (
-        <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          {entry.description}
-        </Paragraph>
-      )}
-      {["rule", "route_hint"].includes(entry.entry_type) && (
-        <HypotheticalQueriesPanel
-          entryId={entry.id}
-          hypothetical_queries_json={entry.hypothetical_queries_json ?? "[]"}
-          onUpdated={onAction}
-        />
-      )}
-      {entry.related_entry_ids_json && entry.related_entry_ids_json !== "[]" && (
-        <RelatedEntriesPanel related_entry_ids_json={entry.related_entry_ids_json} />
-      )}
-      <Space>
-        {entry.status === "proposed" && (
-          <>
-            <Button type="primary" size="small" loading={approving} onClick={handleApprove}>通过</Button>
-            <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-            <Button size="small" danger onClick={handleReject}>拒绝</Button>
-          </>
         )}
-        {entry.status === "canonical" && (
-          <>
-            <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-            <Button size="small" danger onClick={handleSoftDelete}>下架</Button>
-          </>
-        )}
-        {entry.status === "rejected" && (
-          <Button size="small" onClick={handleRestore}>恢复</Button>
-        )}
-        <Button size="small" onClick={() => setLogOpen(true)}>审计日志</Button>
-      </Space>
+      </div>
 
       <Modal title="编辑知识条目" open={editOpen} onCancel={() => setEditOpen(false)}
         footer={null} destroyOnClose width={720}>
