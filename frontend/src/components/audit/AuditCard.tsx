@@ -243,25 +243,37 @@ export default function AuditCard({
               <button className={`${s.aBtn} ${s.aBtnPass}`} disabled={approving} onClick={handleApprove}>
                 {approving ? "通过中..." : "通过"}
               </button>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
               <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
               <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleReject}>拒绝</button>
             </>
           )}
           {entry.status === "canonical" && (
             <>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
               <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
               <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleSoftDelete}>下架</button>
             </>
           )}
           {entry.status === "rejected" && (
-            <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
+            <>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
+              <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
+            </>
           )}
           <button className={`${s.aBtn} ${s.aBtnLog}`} onClick={() => setLogOpen(true)}>审计日志</button>
-          {hasHq && (
-            <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
-              编辑全部
-            </button>
-          )}
         </div>
       </div>
 
