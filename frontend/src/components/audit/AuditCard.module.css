@@ -4,7 +4,7 @@
 
 .entryRow {
   display: grid;
-  grid-template-columns: 48px 1fr auto;
+  grid-template-columns: 1fr auto;
   gap: 0 16px;
   padding: 14px 16px;
   background: #fff;
@@ -17,21 +17,6 @@
 .entryRow:hover {
   border-color: #93c5fd;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-/* 左侧 ID */
-.entryId {
-  font-family: 'JetBrains Mono', 'Menlo', monospace;
-  font-size: 11px;
-  color: #9ba5b2;
-  padding-top: 2px;
-  text-align: center;
-}
-.idNum {
-  display: block;
-  font-weight: 500;
-  color: #5a6878;
-  font-size: 13px;
 }
 
 /* 中间内容 */

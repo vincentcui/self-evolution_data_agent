@@ -160,19 +160,13 @@ export default function AuditCard({
 
   return (
     <div className={s.entryRow}>
-      {/* 左侧 ID */}
-      <div className={s.entryId}>
-        {selectable && (
-          <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)}
-            style={{ marginBottom: 4 }} />
-        )}
-        <span className={s.idNum}>#{entry.id}</span>
-      </div>
-
       {/* 中间内容 */}
       <div className={s.entryBody}>
         {/* 标签行 */}
         <div className={s.entryHeader}>
+          {selectable && (
+            <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
+          )}
           <span className={`${s.pill} ${ENTRY_TYPE_CLS[entry.entry_type] ?? ""}`}>
             {ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}
           </span>
