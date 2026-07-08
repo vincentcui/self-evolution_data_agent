@@ -1,9 +1,10 @@
 /* ════════════════════════════════════════════
- *  登录页 — 居中卡片 + Form
+ *  登录页 — 左侧产品视觉 + 右侧登录表单
  * ════════════════════════════════════════════ */
 
 import React, { useState } from "react";
-import { Button, Card, Form, Input, message } from "antd";
+import { LockOutlined, UserOutlined } from "@ant-design/icons";
+import { Button, Form, Input, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { login as apiLogin } from "@/api";
@@ -30,38 +31,58 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <Card className={styles.card}>
-        <h1 className={styles.title}>Self-Evolution Data Agent</h1>
-        <p className={styles.subtitle}>Self-Evolution Data Agent</p>
+      <section className={styles.visualPane} aria-label="Data Agent product visual">
+        <div className={styles.heroFrame}>
+          <img
+            className={styles.heroImage}
+            src="/login-hero.png"
+            alt="自演化知识驱动的多源数据库智能问数系统"
+          />
+        </div>
+      </section>
 
-        <Form layout="vertical" onFinish={handleSubmit} className={styles.form}>
-          <Form.Item
-            label="用户名"
-            name="username"
-            rules={[{ required: true, message: "请输入用户名" }]}
+      <section className={styles.formPane}>
+        <div className={styles.loginBox}>
+          <h1 className={styles.title}>欢迎登录</h1>
+          <p className={styles.subtitle}>自演化知识驱动的多源数据库智能问数系统</p>
+
+          <Form
+            layout="vertical"
+            onFinish={handleSubmit}
+            className={styles.form}
           >
-            <Input placeholder="username" autoComplete="username" size="large" />
-          </Form.Item>
+            <Form.Item
+              name="username"
+              rules={[{ required: true, message: "请输入用户名" }]}
+            >
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="请输入账号"
+                autoComplete="username"
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item
-            label="密码"
-            name="password"
-            rules={[{ required: true, message: "请输入密码" }]}
-          >
-            <Input.Password
-              placeholder="password"
-              autoComplete="current-password"
-              size="large"
-            />
-          </Form.Item>
+            <Form.Item
+              name="password"
+              rules={[{ required: true, message: "请输入密码" }]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder="请输入密码"
+                autoComplete="current-password"
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item style={{ marginBottom: 0 }}>
-            <Button type="primary" htmlType="submit" loading={loading} size="large" block>
-              登录
-            </Button>
-          </Form.Item>
-        </Form>
-      </Card>
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Button type="primary" htmlType="submit" loading={loading} size="large" block>
+                登录
+              </Button>
+            </Form.Item>
+          </Form>
+        </div>
+      </section>
     </div>
   );
 };
