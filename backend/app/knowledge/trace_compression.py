@@ -198,6 +198,9 @@ def compact_tool_call(idx: int, call: dict) -> dict:
             x = spec.get("x")
             if x:
                 rec["category_column"] = x
+            sb = spec.get("series_by")
+            if sb:
+                rec["series_by"] = sb
 
     elif name == "list_databases":
         if isinstance(out, dict):

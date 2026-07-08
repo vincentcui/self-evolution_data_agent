@@ -23,6 +23,7 @@ import type {
   Session,
   ShareViewResponse,
   User,
+  WorkbenchSummary,
 } from "@/types";
 
 export const http = axios.create({ baseURL: "/api", timeout: 60_000 });
@@ -588,3 +589,7 @@ export const getReadiness = (namespaceId: number) =>
 
 export const submitFeedback = (historyId: number, rating: "like" | "dislike") =>
   http.post("/feedback", { history_id: historyId, rating });
+
+/* ── 工作台首页汇总 ── */
+export const getWorkbenchSummary = () =>
+  http.get<WorkbenchSummary>("/workbench/summary").then((r) => r.data);

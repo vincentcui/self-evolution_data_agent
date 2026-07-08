@@ -30,6 +30,7 @@ function buildAutoOption(
   columns: string[],
   categoryColumn?: string,
   valueColumn?: string,
+  seriesBy?: string,
 ): Record<string, any> {
   if (!rows.length || !columns.length) return {};
 
@@ -107,6 +108,36 @@ function buildAutoOption(
 
   // line / bar: 有显式 valueColumn 时只画该列, 避免标识符列污染 y 轴尺度;
   // 否则保持原行为 (所有数值列各一条 series) 兼容多 series 场景
+  // seriesBy 给定 (LLM chart_spec 透传): 按其唯一值 pivot 出多 series, 与后端 _render_axis_chart 对齐
+  if ((type === "line" || type === "bar") && seriesBy && valueIdx >= 0) {
+    const sIdx = columns.indexOf(seriesBy);
+    if (sIdx >= 0 && sIdx !== catIdx && sIdx !== valueIdx) {
+      const categories = Array.from(new Set(rows.map((r) => String(r[catIdx] ?? ""))));
+      const seriesKeys = Array.from(new Set(rows.map((r) => String(r[sIdx] ?? ""))));
+      const series = seriesKeys.map((k) => ({
+        name: k,
+        type,
+        data: categories.map((c) => {
+          const row = rows.find(
+            (r) => String(r[catIdx] ?? "") === c && String(r[sIdx] ?? "") === k,
+          );
+          return row ? Number(row[valueIdx] ?? 0) : null; // 缺格补 null (ECharts 断线/空柱)
+        }),
+      }));
+      return {
+        tooltip: { trigger: "axis" },
+        legend: { data: seriesKeys },
+        xAxis: {
+          type: "category",
+          data: categories,
+          axisLabel: { rotate: categories.length > 8 ? 30 : 0 },
+        },
+        yAxis: { type: "value" },
+        series,
+      };
+    }
+  }
+
   const seriesCols = valueColumn && valueIdx >= 0 ? [valueIdx] : numericCols;
   const series = seriesCols.map((colIdx) => ({
     name: columns[colIdx],
@@ -166,7 +197,7 @@ const ChartRenderer: React.FC<Props> = ({ result, chartType }) => {
   const hasOption = !userSwitched && option && Object.keys(option).length > 0;
   const finalOption = hasOption
     ? option
-    : buildAutoOption(type, rows, result.columns, result.category_column, result.value_column);
+    : buildAutoOption(type, rows, result.columns, result.category_column, result.value_column, result.series_by);
 
   if (!finalOption || Object.keys(finalOption).length === 0) {
     return <DataTable columns={result.columns} rows={rows} />;

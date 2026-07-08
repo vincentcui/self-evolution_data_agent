@@ -42,7 +42,7 @@ function resolveOverlayBlocker(
   }
   if (namespaceCount === 0) {
     return isAdmin
-      ? { desc: "当前还没有可用的命名空间，创建命名空间后才可以开始问数", action: "点击去创建命名空间", target: "/workspace/namespaces" }
+      ? { desc: "当前还没有可用的命名空间，创建命名空间后才可以开始问数", action: "点击去创建命名空间", target: "/workspace" }
       : { desc: "当前还没有可用的命名空间，请联系管理员配置后开始问数" };
   }
   if (!isAdmin) {
@@ -51,9 +51,9 @@ function resolveOverlayBlocker(
       : null;
   }
   const order = [
-    { type: "no_datasource", desc: "当前空间还未配置数据源，添加数据源后才可以开始问数", action: "点击去添加数据源", target: "/workspace/namespaces" },
-    { type: "no_schema", desc: "当前空间还未采集 Schema，采集 Schema 后才可以开始问数", action: "点击去采集 Schema", target: "/workspace/namespaces" },
-    { type: "no_api_key", desc: "当前空间还未配置 API Key，配置后才可以开始问数", action: "点击去配置 API Key", target: "/workspace/model-management" },
+    { type: "no_datasource", desc: "当前空间还未配置数据源，添加数据源后才可以开始问数", action: "点击去添加数据源", target: "/workspace/manage/datasources" },
+    { type: "no_schema", desc: "当前空间还未采集 Schema，采集 Schema 后才可以开始问数", action: "点击去采集 Schema", target: "/workspace/manage/datasources" },
+    { type: "no_api_key", desc: "当前空间还未配置 API Key，配置后才可以开始问数", action: "点击去配置 API Key", target: "/workspace/manage/model-management" },
   ];
   for (const o of order) {
     if (blockers.some((b) => b.type === o.type)) return o;
@@ -144,6 +144,7 @@ const QueryPage: React.FC = () => {
               chartOption: snap.chart_option,
               categoryColumn: snap.category_column,
               valueColumn: snap.value_column,
+              seriesBy: snap.series_by,
               truncated: snap.truncated,
               renderedRowCount: snap.rendered_row_count,
               totalRowCount: snap.total_row_count,

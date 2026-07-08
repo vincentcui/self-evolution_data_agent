@@ -1,6 +1,9 @@
 """Stage 1 — 确定性渲染器 render_chart 单测. 纯函数, 真实 DataFrame, 不 mock."""
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
+
 from app.engine.visualizer import render_chart
 
 
@@ -139,6 +142,83 @@ class TestRenderBarPieCard:
         rows = [{"total": 42}]
         ct, opt = render_chart(rows, {"chart_type": "card", "value": "missing"})
         assert ct == "table"
+
+
+class TestDatetimeXAndDecimal:
+    """回归 trace e1f70ac0: datetime x 列 + Decimal 度量 → series 全 None / 字符串值.
+
+    根因: _render_line/_render_bar 用 df[x].astype(str) (向量化, datetime64→date-only)
+    建 x_data, 却用 str(r[x]) (标量 Timestamp→带时间) 建 lookup key, 双路径不一致致
+    lookup 全 miss. MySQL SUM 返回 Decimal, _to_serializable 原样返回 → 序列化成字符串,
+    ECharts value 轴不可靠.
+    """
+
+    def test_line_datetime_x_with_series_by_not_all_none(self):
+        # record_date 为 datetime.datetime (MySQL DATETIME 列原样返回)
+        rows = [
+            {"station_name": "D", "record_date": datetime(2024, 1, 1), "daily_total": 130996},
+            {"station_name": "D", "record_date": datetime(2024, 1, 2), "daily_total": 78321},
+            {"station_name": "G", "record_date": datetime(2024, 1, 1), "daily_total": 90000},
+            {"station_name": "G", "record_date": datetime(2024, 1, 2), "daily_total": 91000},
+        ]
+        ct, opt = render_chart(rows, {
+            "chart_type": "line", "x": "record_date",
+            "series_by": "station_name", "value": "daily_total",
+        })
+        assert ct == "line"
+        by_name = {s["name"]: s["data"] for s in opt["series"]}
+        # 关键断言: 不许全 None (原 bug 表现)
+        assert by_name["D"] == [130996, 78321]
+        assert by_name["G"] == [90000, 91000]
+
+    def test_line_datetime_x_single_series_not_all_none(self):
+        rows = [
+            {"record_date": datetime(2024, 1, 1), "daily_total": 130996},
+            {"record_date": datetime(2024, 1, 2), "daily_total": 78321},
+        ]
+        ct, opt = render_chart(rows, {
+            "chart_type": "line", "x": "record_date", "value": "daily_total",
+        })
+        assert ct == "line"
+        assert opt["series"][0]["data"] == [130996, 78321]
+
+    def test_bar_datetime_x_with_series_by_not_all_none(self):
+        rows = [
+            {"station_name": "D", "record_date": datetime(2024, 1, 1), "daily_total": 130996},
+            {"station_name": "G", "record_date": datetime(2024, 1, 1), "daily_total": 90000},
+        ]
+        ct, opt = render_chart(rows, {
+            "chart_type": "bar", "x": "record_date",
+            "series_by": "station_name", "value": "daily_total",
+        })
+        assert ct == "bar"
+        by_name = {s["name"]: s["data"] for s in opt["series"]}
+        assert by_name["D"] == [130996]
+        assert by_name["G"] == [90000]
+
+    def test_date_x_still_works(self):
+        # datetime.date 不触发 bug, 须保持不回归
+        rows = [
+            {"station_name": "D", "day": date(2024, 1, 1), "total": 10},
+            {"station_name": "G", "day": date(2024, 1, 1), "total": 20},
+        ]
+        ct, opt = render_chart(rows, {
+            "chart_type": "line", "x": "day", "series_by": "station_name", "value": "total",
+        })
+        by_name = {s["name"]: s["data"] for s in opt["series"]}
+        assert by_name["D"] == [10]
+        assert by_name["G"] == [20]
+
+    def test_decimal_value_coerced_to_number(self):
+        # MySQL SUM → Decimal; _to_serializable 须强转 number (非字符串)
+        rows = [
+            {"day": "2024-01-01", "daily_total": Decimal("130996")},
+            {"day": "2024-01-02", "daily_total": Decimal("78321")},
+        ]
+        ct, opt = render_chart(rows, {"chart_type": "line", "x": "day", "value": "daily_total"})
+        data = opt["series"][0]["data"]
+        assert data == [130996.0, 78321.0]
+        assert all(isinstance(v, (int, float)) for v in data)
 
 
 class TestCodeLabelMap:

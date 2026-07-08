@@ -60,6 +60,9 @@ from app.api import (
 from app.api import (
     users as users_api,
 )
+from app.api import (
+    workbench as workbench_api,
+)
 from app.auth import hash_password
 from app.db.metadata import async_session, engine, get_db
 from app.db.schema_migrations import run_all as run_schema_migrations
@@ -489,6 +492,9 @@ app.include_router(model_config_api.router)
 
 # P0 对话体验: 答案反馈
 app.include_router(feedback_api.router)
+
+# 工作台首页汇总
+app.include_router(workbench_api.router)
 
 
 @app.get("/api/health")

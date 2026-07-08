@@ -6,10 +6,11 @@ vi.mock("@/api", () => ({
   getAgentTrace: vi.fn(),
   refineAgentTraces: vi.fn(),
 }));
-// NamespaceSelector 挂载即自动选中 ns, 触发额外 listAgentTraces — mock 掉防干扰
-vi.mock("@/components/NamespaceSelector", () => ({
-  default: () => null,
-}));
+// activeNs 走 WorkspacePage 共享 context, 固定值防干扰
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useOutletContext: () => ({ activeNs: null }) };
+});
 
 import AgentTracesPage, { TraceDetailModal } from "./AgentTracesPage";
 import { listAgentTraces, getAgentTrace } from "@/api";

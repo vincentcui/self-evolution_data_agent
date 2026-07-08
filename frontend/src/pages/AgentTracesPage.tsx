@@ -6,8 +6,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Button, Modal, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useOutletContext } from "react-router-dom";
 import { getAgentTrace, listAgentTraces } from "@/api";
-import NamespaceSelector from "@/components/NamespaceSelector";
+import type { WorkspaceOutletContext } from "@/components/WorkspacePage";
 
 interface TraceRow {
   id: number;
@@ -312,9 +313,10 @@ export function TraceDetailModal({
 }
 
 export default function AgentTracesPage() {
+  const outletCtx = useOutletContext<WorkspaceOutletContext | null>();
+  const namespaceId = outletCtx?.activeNs?.id;
   const [rows, setRows] = useState<TraceRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [namespaceId, setNamespaceId] = useState<number | undefined>();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -390,13 +392,8 @@ export default function AgentTracesPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <h2>Agent Traces</h2>
+      <h2>Agent Traces{outletCtx?.activeNs ? ` — ${outletCtx.activeNs.name}` : ""}</h2>
       <Space style={{ marginBottom: 16 }}>
-        <NamespaceSelector
-          style={{ width: 160 }}
-          value={namespaceId}
-          onChange={(id) => setNamespaceId(id)}
-        />
         <Select
           allowClear
           placeholder="Status"

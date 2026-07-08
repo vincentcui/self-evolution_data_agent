@@ -709,5 +709,40 @@ class SessionOut(BaseModel):
 
 
 # ════════════════════════════════════════════
+#  工作台首页汇总
+# ════════════════════════════════════════════
+
+class WorkbenchNamespaceCardOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    description: str
+    created_at: datetime
+    ready: bool
+    datasource_count: int
+    session_count: int
+    git_parsed_count: int
+    git_total_count: int
+    knowledge_count: int
+
+
+class WorkbenchRecentSessionOut(BaseModel):
+    id: str
+    namespace_id: int
+    namespace_name: str
+    title: str
+    updated_at: datetime | None
+
+
+class WorkbenchSummaryOut(BaseModel):
+    accessible_count: int
+    ready_count: int
+    pending_count: int
+    recent_session_count: int
+    namespaces: list[WorkbenchNamespaceCardOut]
+    recent_sessions: list[WorkbenchRecentSessionOut]
+
+
+# ════════════════════════════════════════════
 #  查询（最后一个占位符，保留模块空白尾部）
 # ════════════════════════════════════════════

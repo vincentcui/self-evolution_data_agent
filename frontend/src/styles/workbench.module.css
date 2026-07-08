@@ -1,0 +1,278 @@
+/* ════════════════════════════════════════════
+ *  WorkbenchHomePage — 工作台首页 (全屏, 无侧边栏)
+ * ════════════════════════════════════════════ */
+
+.page {
+  min-height: 100vh;
+  background: #f5f7fa;
+  padding: 28px 32px 40px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin: 0;
+}
+
+.greeting {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin: 8px 0 4px;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #93a4c3;
+  margin: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── 统计卡片行 ── */
+.statsRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.statCard {
+  background: #fff;
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: #93a4c3;
+  margin-bottom: 6px;
+}
+
+.statValue {
+  font-size: 26px;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+
+/* ── 主体: 我的空间 (左) + 最近使用 (右) ── */
+.mainGrid {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+  align-items: start;
+  /* 防止子格撑破 grid track */
+  min-width: 0;
+}
+
+.sectionCard {
+  background: #fff;
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+/* 我的空间 + 最近使用 高度对齐 — 内部列表各自滚动 */
+.sectionCardFixed {
+  composes: sectionCard;
+  display: flex;
+  flex-direction: column;
+  height: 240px;
+  /* 关键: 防止内容撑破 grid track 宽度 */
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e3a5f;
+  margin: 0 0 2px;
+  flex-shrink: 0;
+}
+
+.sectionSubtitle {
+  font-size: 12px;
+  color: #93a4c3;
+  margin: 0 0 12px;
+  flex-shrink: 0;
+}
+
+/* 我的空间 — 单行横向排列, 超出出横向滚动条 */
+.nsGrid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 8px;
+}
+
+/* 每个卡片固定230px，超过容器宽度自然出滚动条 */
+.nsCard {
+  position: relative;
+  flex: 0 0 220px;
+  width: 220px;
+  border: 1px solid #e5eaf5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fafbff;
+}
+
+.nsCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* 状态标签绝对定位在卡片右上角 */
+.nsStatusTag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+/* 卡片相对定位，给状态标签定位用 */
+.nsCard {
+  position: relative;
+  flex: 0 0 220px;
+  width: 220px;
+  border: 1px solid #e5eaf5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fafbff;
+}
+
+.nsName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e3a5f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 留出右上角标签空间 */
+  padding-right: 56px;
+}
+
+.nsMoreBtn {
+  align-self: stretch !important;
+  height: auto !important;
+  opacity: 0.55;
+}
+
+.nsMoreBtn:hover {
+  opacity: 1;
+}
+
+.nsMeta {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.6;
+  flex: 1;
+}
+
+/* 待配置空间的提示文案 — 图中橙色细字 */
+.nsPendingHint {
+  font-size: 11px;
+  color: #f59e0b;
+  line-height: 1.5;
+}
+
+.nsEmpty {
+  color: #93a4c3;
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+/* ── 最近使用 ── */
+.recentList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.recentItem {
+  border-bottom: 1px solid #f0f2f8;
+  padding-bottom: 8px;
+  cursor: pointer;
+}
+
+.recentItem:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.recentTitle {
+  font-size: 12px;
+  color: #1e3a5f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentMeta {
+  font-size: 11px;
+  color: #93a4c3;
+  margin-top: 2px;
+}
+
+.recentEmpty {
+  color: #93a4c3;
+  font-size: 12px;
+  padding: 12px 0;
+}
+
+/* ── 科学使用路径 ── */
+.pathGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+
+.pathCard {
+  border: 1px solid #e5eaf5;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fafbff;
+}
+
+.pathStep {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-bottom: 6px;
+}
+
+.pathDesc {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.6;
+}

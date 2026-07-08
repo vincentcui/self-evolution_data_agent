@@ -11,7 +11,9 @@ import WorkspacePage from "./components/WorkspacePage";
 import LoginPage from "./pages/LoginPage";
 import ShareViewPage from "./pages/ShareViewPage";
 import ProfilePage from "./pages/ProfilePage";
-import NamespacePage from "./pages/NamespacePage";
+import WorkbenchHomePage from "./pages/WorkbenchHomePage";
+import DataSourcePage from "./pages/DataSourcePage";
+import GitRepoPage from "./pages/GitRepoPage";
 import ModelManagement from "./pages/ModelManagement";
 import KnowledgePage from "./pages/KnowledgePage";
 import ProfileManagement from "./pages/ProfileManagement";
@@ -39,10 +41,13 @@ const App: React.FC = () => (
           <Route path="/" element={<QueryPageWrapper />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
-        {/* 工作台 — 全屏独立布局 (脱离 Layout 会话侧边栏), 左侧 7 项导航 + 右侧 Outlet */}
-        <Route path="/workspace" element={<WorkspacePage />}>
-          <Route index element={<Navigate to="namespaces" replace />} />
-          <Route path="namespaces" element={<NamespacePage />} />
+        {/* 工作台首页 — 我的空间 + 统计卡 (无侧边栏, 全屏着陆页) */}
+        <Route path="/workspace" element={<WorkbenchHomePage />} />
+        {/* 工作台管理页 — 全屏独立布局 (脱离 Layout 会话侧边栏), 左侧 8 项导航 + 右侧 Outlet */}
+        <Route path="/workspace/manage" element={<WorkspacePage />}>
+          <Route index element={<Navigate to="datasources" replace />} />
+          <Route path="datasources" element={<DataSourcePage />} />
+          <Route path="repos" element={<GitRepoPage />} />
           <Route path="model-management" element={<ModelManagement />} />
           <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="profiles" element={<ProfileManagement />} />

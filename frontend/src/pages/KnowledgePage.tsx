@@ -12,12 +12,12 @@ import {
   message,
 } from "antd";
 import { PlusOutlined, SyncOutlined } from "@ant-design/icons";
+import { useOutletContext } from "react-router-dom";
 import * as api from "@/api";
 import type {
   DataSource,
   GitRepo,
   KnowledgeEntry,
-  Namespace,
   TerminologyConflict,
 } from "@/types";
 import globalStyles from "@/styles/global.module.css";
@@ -25,7 +25,7 @@ import styles from "@/styles/knowledge.module.css";
 import AuditQueue from "@/components/audit/AuditQueue";
 import CreateKnowledgeForm from "@/components/audit/CreateKnowledgeForm";
 import TerminologyConflictModal from "@/components/audit/TerminologyConflictModal";
-import NamespaceSelector from "@/components/NamespaceSelector";
+import type { WorkspaceOutletContext } from "@/components/WorkspacePage";
 import { SchemaCanonicalPanel } from "@/components/SchemaCanonicalPanel";
 import { ExtractionFailureList } from "@/components/extraction/ExtractionFailureList";
 
@@ -71,8 +71,8 @@ const NAV_GROUPS: { title: string; desc: string; items: { key: NavKey; label: st
 ];
 
 const KnowledgePage: React.FC = () => {
-  const [namespaces, setNamespaces] = useState<Namespace[]>([]);
-  const [activeNsId, setActiveNsId] = useState<number>();
+  const { activeNs } = useOutletContext<WorkspaceOutletContext>();
+  const activeNsId = activeNs?.id;
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [repos, setRepos] = useState<GitRepo[]>([]);
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
@@ -84,10 +84,6 @@ const KnowledgePage: React.FC = () => {
   /* Terminology Conflict 状态 (Phase 3 Task 3.3) */
   const [terminologyConflicts, setTerminologyConflicts] = useState<TerminologyConflict[]>([]);
   const [selectedTermConflict, setSelectedTermConflict] = useState<TerminologyConflict | null>(null);
-
-  useEffect(() => {
-    api.fetchNamespaces().then(setNamespaces);
-  }, []);
 
   const loadData = useCallback(async (nsId: number) => {
     const [k, repoRes, termConflicts, ds] = await Promise.all([
@@ -167,17 +163,17 @@ const KnowledgePage: React.FC = () => {
     "terminology-conflict": terminologyConflicts.length,
   }), [readiness.proposedCount, terminologyConflicts]);
 
-  const nsName = namespaces.find((n) => n.id === activeNsId)?.name;
-
   return (
     <div>
       {/* ── 页面头部 ── */}
       <div className={globalStyles.pageHeader}>
-        <div>
-          <h1 className={globalStyles.pageTitle}>知识库</h1>
-          <p className={globalStyles.pageSubtitle}>
-            业务术语、查询规则、SQL 示例
-          </p>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div>
+            <h1 className={globalStyles.pageTitle}>知识库</h1>
+            <p className={globalStyles.pageSubtitle}>
+              {activeNs ? `当前空间: ${activeNs.name}` : "业务术语、查询规则、SQL 示例"}
+            </p>
+          </div>
         </div>
         <Button
           type="primary"
@@ -193,15 +189,13 @@ const KnowledgePage: React.FC = () => {
         <div className={styles.empty}>请先选择命名空间</div>
       ) : null}
 
-      {/* ── 空间准备度概览（始终渲染，含命名空间选择器）── */}
+      {/* ── 空间准备度概览（始终渲染）── */}
       <div className={styles.readinessSection}>
         <div className={styles.readinessHeader}>
           <span className={styles.readinessEyebrow}>空间准备度</span>
-          <NamespaceSelector
-            style={{ width: 220 }}
-            value={activeNsId}
-            onChange={(id) => setActiveNsId(id)}
-          />
+          <span className={styles.readinessNsName}>
+            {activeNs ? activeNs.name : "未选择空间"}
+          </span>
         </div>
         {activeNsId && (
           <>
