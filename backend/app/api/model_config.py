@@ -23,10 +23,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
+    ROLE_SUPER_ADMIN,
     accessible_namespace_ids,
     assert_ns_access,
     get_current_user,
     require_admin_or_above,
+    role_at_least,
 )
 from app.config import settings
 from app.db.metadata import get_db
@@ -211,6 +213,18 @@ def _to_out(row: ModelConfig, namespace_name: str | None = None) -> ModelConfigO
     )
 
 
+async def _assert_config_write(db: AsyncSession, user: User, target_ns_id: int | None) -> None:
+    """模型配置写权限 (spec D2):
+    - 全局配置 (namespace_id=None): 仅 super_admin。
+    - 空间配置: owner∪granted (assert_ns_access, super_admin 豁免)。
+    """
+    if target_ns_id is None:
+        if not role_at_least(user, ROLE_SUPER_ADMIN):
+            raise HTTPException(status_code=403, detail="全局配置仅超级管理员可管理")
+    else:
+        await assert_ns_access(db, user, target_ns_id)
+
+
 async def _get_or_404(db: AsyncSession, config_id: int) -> ModelConfig:
     row = await db.get(ModelConfig, config_id)
     if not row or row.is_deleted:
@@ -276,7 +290,7 @@ async def list_configs(
 @router.post("/add", response_model=ModelConfigOut, status_code=201)
 async def add_config(
     body: ModelConfigIn,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """新增模型配置（不自动激活，需手动激活）."""
@@ -286,6 +300,7 @@ async def add_config(
 
     # EMBEDDING 强制 namespace_id = None (代码层约束)
     ns_id = body.namespace_id if body.model_type == "CHAT" else None
+    await _assert_config_write(db, user, ns_id)   # D2: 全局/EMBEDDING → 仅 super_admin
 
     # namespace 存在性校验 (避免 FK IntegrityError → 500)
     if ns_id is not None:
@@ -319,7 +334,7 @@ async def add_config(
     )
     db.add(row)
     await db.flush()  # 获取 row.id（自增主键）
-    await _write_audit(db, "create", _user, row=row, after=_safe_config_dict(row))
+    await _write_audit(db, "create", user, row=row, after=_safe_config_dict(row))
     await db.commit()
     await db.refresh(row)
     log.info("[model_config] 新增 id=%d provider=%s type=%s protocol=%s",
@@ -330,11 +345,12 @@ async def add_config(
 @router.put("/update", response_model=ModelConfigOut)
 async def update_config(
     body: ModelConfigUpdate,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """更新模型配置。API Key 若传 **** 则跳过更新（保留原值）."""
     row = await _get_or_404(db, body.id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # 已激活的 Embedding 配置不允许直接修改（会导致已有向量与新查询不兼容）
     if row.model_type == "EMBEDDING" and row.is_active:
@@ -376,7 +392,7 @@ async def update_config(
     await _write_audit(
         db,
         "update",
-        _user,
+        user,
         row=row,
         before=before_snapshot,
         after=_safe_config_dict(row),
@@ -394,11 +410,12 @@ async def update_config(
 @router.delete("/{config_id}", status_code=204)
 async def delete_config(
     config_id: int,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """逻辑删除模型配置。Chat 可直接删除；active Embedding 禁止删除。"""
     row = await _get_or_404(db, config_id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # 已激活的 Embedding 配置不允许直接删除（ChromaDB 里仍有旧向量）
     if row.model_type == "EMBEDDING" and row.is_active:
@@ -415,7 +432,7 @@ async def delete_config(
     row.is_deleted = True
     row.is_active = False
     row.updated_at = local_now()
-    await _write_audit(db, "delete", _user, row=row, before=before_snapshot)
+    await _write_audit(db, "delete", user, row=row, before=before_snapshot)
     await db.commit()
     if was_active:
         _clear_registry(model_type, namespace_id=ns_id)
@@ -424,11 +441,12 @@ async def delete_config(
 @router.post("/activate/{config_id}", response_model=ModelConfigOut)
 async def activate_config(
     config_id: int,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """激活指定配置。Chat 支持热切换；Embedding 仅允许首次激活（无 active 时）。"""
     row = await _get_or_404(db, config_id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # Embedding：已有其他 active 配置时禁止切换
     if row.model_type == "EMBEDDING":
@@ -460,14 +478,14 @@ async def activate_config(
     for other in others:
         other.is_active = False
         other.updated_at = local_now()
-        await _write_audit(db, "deactivate", _user, row=other)
+        await _write_audit(db, "deactivate", user, row=other)
 
     # flush 先把禁用语句发到 DB，确保唯一索引校验时旧记录已变为 False
     await db.flush()
 
     row.is_active = True
     row.updated_at = local_now()
-    await _write_audit(db, "activate", _user, row=row, after=_safe_config_dict(row))
+    await _write_audit(db, "activate", user, row=row, after=_safe_config_dict(row))
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -485,7 +503,7 @@ async def activate_config(
 @router.post("/test")
 async def test_connection(
     body: ModelConfigTestBody,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """测试连接（不入库，创建临时实例发送测试请求）.
@@ -499,6 +517,7 @@ async def test_connection(
     if _MASK in api_key and body.id is not None:
         row = await db.get(ModelConfig, body.id)
         if row and not row.is_deleted:
+            await _assert_config_write(db, user, row.namespace_id)   # 防越权借他空间真实 key
             api_key = row.api_key
         else:
             return {"success": False, "message": "配置不存在，无法获取 API Key"}
