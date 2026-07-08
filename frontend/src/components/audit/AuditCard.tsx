@@ -1,30 +1,27 @@
 /* ════════════════════════════════════════════
- *  AuditCard — 单条审核卡 (proposed/canonical/rejected 行为分支)
+ *  AuditCard — 单条审核卡 (对齐 knowledge-manager 设计稿)
+ *  布局: [ID] [body: header标签行 / title / path / summary] [side: time / actions]
  * ════════════════════════════════════════════ */
 
-import React, { useState } from "react";
-import { Button, Card, Checkbox, Modal, Space, Tag, Typography, message } from "antd";
+import React, { useRef, useState } from "react";
+import { Checkbox, Modal, message } from "antd";
 import {
   approveEntry, deleteKnowledgeWithMode, rejectEntry, restoreEntry,
 } from "@/api";
 import type { KnowledgeEntry } from "@/types";
-import { DB_TYPE_META } from "@/types";
 import EditCanonicalForm from "./EditCanonicalForm";
 import AuditLogTimeline from "./AuditLogTimeline";
-import { HypotheticalQueriesPanel } from "./HypotheticalQueriesPanel";
+import { HypotheticalQueriesPanel, type HypotheticalQueriesPanelRef } from "./HypotheticalQueriesPanel";
 import { RelatedEntriesPanel } from "./RelatedEntriesPanel";
+import s from "./AuditCard.module.css";
 
-const { Paragraph, Text } = Typography;
-
-const STATUS_COLORS: Record<string, string> = {
-  proposed: "orange", canonical: "green",
-  rejected: "red", superseded: "default",
-};
-
-// ── 字段中文映射 — AuditQueue STATUS_OPTIONS 同源, 此处用于卡片 Tag 文本 ──
 const STATUS_LABELS: Record<string, string> = {
   proposed: "待审", canonical: "已通过",
   rejected: "已拒绝", superseded: "已替代",
+};
+const STATUS_CLS: Record<string, string> = {
+  proposed: s.sProposed, canonical: s.sCanonical,
+  rejected: s.sRejected, superseded: s.sSuperseded,
 };
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -34,26 +31,19 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
   rule:           "查询规则",
   route_hint:     "路由偏好",
 };
+const ENTRY_TYPE_CLS: Record<string, string> = {
+  terminology:    s.pillTerminology,
+  instance_alias: s.pillInstanceAlias,
+  example:        s.pillExample,
+  rule:           s.pillRule,
+  route_hint:     s.pillRouteHint,
+};
 
 const SOURCE_LABELS: Record<string, string> = {
   schema:        "Schema 抽取",
   manual:        "手动",
   agent_learn:   "Agent 学习",
-  code_extract: "代码提取",
-};
-
-const TIER_LABELS: Record<string, string> = {
-  normal:   "普通",
-  critical: "关键",
-};
-
-// ── entry_type 颜色映射: UI 上显式呈现 6 类宪章边界, 不依赖默认灰 Tag 视觉混淆 ──
-const ENTRY_TYPE_COLORS: Record<string, string> = {
-  terminology:    "geekblue",
-  instance_alias: "purple",
-  example:        "green",
-  rule:           "orange",
-  route_hint:     "cyan",
+  code_extract:  "代码提取",
 };
 
 interface Props {
@@ -61,39 +51,7 @@ interface Props {
   selectable?: boolean;
   selected?: boolean;
   onSelect?: (checked: boolean) => void;
-  onAction?: () => void;  // 任何动作后回调
-}
-
-// ── terminology 路由展示 — 让审核者一眼看清条目对应的库表 ────────────────
-function TerminologyRouting({ payload }: { payload: Record<string, unknown> | null }) {
-  if (!payload) return null;
-  const db = payload.primary_database as string | undefined;
-  const coll = payload.primary_collection as string | undefined;
-  const dbType = payload.db_type as string | undefined;
-  const synonyms = (payload.synonyms as string[] | undefined) ?? [];
-  const sourceColls = (payload.source_collections as string[] | undefined) ?? [];
-  if (!db && !coll && !dbType && synonyms.length === 0) return null;
-  return (
-    <div style={{ marginBottom: 8, fontSize: 12 }}>
-      <Space size="small" wrap>
-        {dbType && <Tag color={DB_TYPE_META[dbType as keyof typeof DB_TYPE_META]?.color ?? "purple"}>{dbType}</Tag>}
-        {db && <Text type="secondary">数据库: <Text code>{db}</Text></Text>}
-        {coll && <Text type="secondary">集合: <Text code>{coll}</Text></Text>}
-      </Space>
-      {synonyms.length > 0 && (
-        <div style={{ marginTop: 4 }}>
-          <Text type="secondary">同义词: </Text>
-          {synonyms.map((s) => <Tag key={s}>{s}</Tag>)}
-        </div>
-      )}
-      {sourceColls.length > 1 && (
-        <div style={{ marginTop: 4 }}>
-          <Text type="secondary">关联集合: </Text>
-          {sourceColls.map((c) => <Tag key={c}>{c}</Tag>)}
-        </div>
-      )}
-    </div>
-  );
+  onAction?: () => void;
 }
 
 export default function AuditCard({
@@ -102,6 +60,9 @@ export default function AuditCard({
   const [editOpen, setEditOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
+  const hqRef = useRef<HypotheticalQueriesPanelRef>(null);
+
+  const hasHq = ["rule", "route_hint"].includes(entry.entry_type);
 
   const handleApprove = async () => {
     setApproving(true);
@@ -156,121 +117,165 @@ export default function AuditCard({
     });
   };
 
+  const createdAtShort = entry.created_at ? entry.created_at.slice(0, 10) : "";
+  const p = (entry.payload ?? {}) as Record<string, unknown>;
+
+  // 路径节点（route_hint 的 collection_path 或 example 的 collections）
+  const pathNodes: string[] = (() => {
+    if (entry.entry_type === "route_hint") {
+      return (p.collection_path as string[]) ?? [];
+    }
+    if (entry.entry_type === "example") {
+      return (p.collections as string[]) ?? [];
+    }
+    return [];
+  })();
+
+  // 摘要文字
+  const summary: string = (() => {
+    if (entry.entry_type === "example") return (p.result_summary as string) ?? "";
+    if (entry.entry_type === "route_hint") return (p.reason as string) ?? "";
+    return entry.description ?? "";
+  })();
+
+  // 术语信息 chips
+  const termChips: string[] = (() => {
+    if (entry.entry_type !== "terminology") return [];
+    const out: string[] = [];
+    const coll = p.primary_collection as string | undefined;
+    const db = p.primary_database as string | undefined;
+    const dbType = p.db_type as string | undefined;
+    if (coll) out.push(coll);
+    if (db) out.push(db);
+    if (dbType) out.push(dbType);
+    return out;
+  })();
+
+  // instance_alias chip
+  const aliasChip: string | null = (() => {
+    if (entry.entry_type !== "instance_alias") return null;
+    const db = p.target_database as string | undefined;
+    const coll = p.target_collection as string | undefined;
+    const idField = p.id_field as string | undefined;
+    const id = p.target_id as string | undefined;
+    return [db, coll, `${idField ?? "_id"}=${id ?? "?"}`].filter(Boolean).join(" · ");
+  })();
+
   return (
-    <Card size="small">
-      <Space style={{ marginBottom: 8 }}>
-        {selectable && (
-          <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
-        )}
-        <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{STATUS_LABELS[entry.status] ?? entry.status}</Tag>
-        <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}</Tag>
-        <Tag>{SOURCE_LABELS[entry.source] ?? entry.source}</Tag>
-        <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{TIER_LABELS[entry.tier] ?? entry.tier}</Tag>
-      </Space>
-      <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>
-        {entry.content}
-      </Paragraph>
-      {entry.entry_type === "terminology" && (
-        <TerminologyRouting payload={entry.payload} />
-      )}
-      {entry.entry_type === "instance_alias" && entry.payload && (
-        <div style={{ marginBottom: 8, fontSize: 12 }}>
-          <Space size="small" wrap>
-            <Tag color="purple">
-              {(entry.payload as Record<string, string>).target_database || "?"} /{" "}
-              {(entry.payload as Record<string, string>).target_collection || "?"}
-              {" · "}
-              {(entry.payload as Record<string, string>).id_field || "_id"} ={" "}
-              {(entry.payload as Record<string, string>).target_id || "?"}
-            </Tag>
-          </Space>
+    <div className={s.entryRow}>
+      {/* 中间内容 */}
+      <div className={s.entryBody}>
+        {/* 标签行 */}
+        <div className={s.entryHeader}>
+          {selectable && (
+            <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
+          )}
+          <span className={`${s.pill} ${ENTRY_TYPE_CLS[entry.entry_type] ?? ""}`}>
+            {ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}
+          </span>
+          <span className={s.dotSep}>·</span>
+          <span className={`${s.statusDot} ${STATUS_CLS[entry.status] ?? ""}`}>
+            {STATUS_LABELS[entry.status] ?? entry.status}
+          </span>
+          <span className={s.dotSep}>·</span>
+          <span className={s.sourceLabel}>
+            {SOURCE_LABELS[entry.source] ?? entry.source}
+          </span>
         </div>
-      )}
-      {entry.entry_type === "example" && entry.payload && (() => {
-        const p = entry.payload as Record<string, unknown>;
-        const targetCollection = (p.target_collection as string) ?? "";
-        const targetDatabase = (p.target_database as string) ?? "";
-        const resultSummary = (p.result_summary as string) ?? "";
-        return (
-          <div style={{ marginBottom: 8, fontSize: 12 }}>
-            <Space size="small" wrap>
-              {targetCollection && <Tag color="blue">{targetCollection}</Tag>}
-              {targetDatabase && <Tag color="cyan">{targetDatabase}</Tag>}
-            </Space>
-            {resultSummary && (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">{resultSummary}</Text>
-              </div>
+
+        {/* 标题 */}
+        <div className={s.entryTitle}>{entry.content}</div>
+
+        {/* 路径节点 */}
+        {pathNodes.length > 0 && (
+          <div className={s.entryPath}>
+            {pathNodes.map((n, i, arr) => (
+              <React.Fragment key={`${n}-${i}`}>
+                <span className={s.pnode}>{n}</span>
+                {i < arr.length - 1 && <span className={s.parrow}>→</span>}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* 术语 chips */}
+        {termChips.length > 0 && (
+          <div className={s.entryTermInfo}>
+            {termChips.map((c) => <span key={c} className={s.termChip}>{c}</span>)}
+            {((p.synonyms as string[]) ?? []).length > 0 && (
+              <span style={{ color: "#9ba5b2" }}>
+                同义词: {((p.synonyms as string[]) ?? []).join(", ")}
+              </span>
             )}
           </div>
-        );
-      })()}
-      {entry.entry_type === "route_hint" && entry.payload && (() => {
-        const p = entry.payload as Record<string, unknown>;
-        const path = (p.collection_path as string[]) ?? [];
-        const joins = (p.join_fields as Array<{ a: string; b: string }>) ?? [];
-        return (
-          <div style={{ marginBottom: 8, fontSize: 12 }}>
-            <div>
-              <Text type="secondary">路径: </Text>
-              {path.map((c, i, arr) => (
-                <span key={c}>
-                  <Tag color="cyan">{c}</Tag>
-                  {i < arr.length - 1 && <Text type="secondary"> → </Text>}
-                </span>
-              ))}
-            </div>
-            {joins.length > 0 && (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">连接: </Text>
-                {joins.map((j, i) => (
-                  <Tag key={`${j.a}:${j.b}:${i}`}>{j.a} ↔ {j.b}</Tag>
-                ))}
-              </div>
-            )}
-            <div style={{ marginTop: 4 }}>
-              <Tag>策略: {(p.cost_strategy as string) ?? "?"}</Tag>
-              <Text type="secondary" style={{ marginLeft: 8 }}>
-                {(p.reason as string) ?? ""}
-              </Text>
-            </div>
+        )}
+
+        {/* instance_alias chip */}
+        {aliasChip && (
+          <div className={s.entryTermInfo}>
+            <span className={s.termChip}>{aliasChip}</span>
           </div>
-        );
-      })()}
-      {entry.description && (
-        <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          {entry.description}
-        </Paragraph>
-      )}
-      {["rule", "route_hint"].includes(entry.entry_type) && (
-        <HypotheticalQueriesPanel
-          entryId={entry.id}
-          hypothetical_queries_json={entry.hypothetical_queries_json ?? "[]"}
-          onUpdated={onAction}
-        />
-      )}
-      {entry.related_entry_ids_json && entry.related_entry_ids_json !== "[]" && (
-        <RelatedEntriesPanel related_entry_ids_json={entry.related_entry_ids_json} />
-      )}
-      <Space>
-        {entry.status === "proposed" && (
-          <>
-            <Button type="primary" size="small" loading={approving} onClick={handleApprove}>通过</Button>
-            <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-            <Button size="small" danger onClick={handleReject}>拒绝</Button>
-          </>
         )}
-        {entry.status === "canonical" && (
-          <>
-            <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-            <Button size="small" danger onClick={handleSoftDelete}>下架</Button>
-          </>
+
+        {/* 摘要 */}
+        {summary && <div className={s.entrySummary}>{summary}</div>}
+
+        {/* HQ + 关联条目（保留原有功能） */}
+        {hasHq && (
+          <HypotheticalQueriesPanel
+            ref={hqRef}
+            entryId={entry.id}
+            hypothetical_queries_json={entry.hypothetical_queries_json ?? "[]"}
+            onUpdated={onAction}
+          />
         )}
-        {entry.status === "rejected" && (
-          <Button size="small" onClick={handleRestore}>恢复</Button>
+        {entry.related_entry_ids_json && entry.related_entry_ids_json !== "[]" && (
+          <RelatedEntriesPanel related_entry_ids_json={entry.related_entry_ids_json} />
         )}
-        <Button size="small" onClick={() => setLogOpen(true)}>审计日志</Button>
-      </Space>
+      </div>
+
+      {/* 右侧 时间 + 操作 */}
+      <div className={s.entrySide}>
+        {createdAtShort && <div className={s.entryTime}>{createdAtShort}</div>}
+        <div className={s.entryActions}>
+          {entry.status === "proposed" && (
+            <>
+              <button className={`${s.aBtn} ${s.aBtnPass}`} disabled={approving} onClick={handleApprove}>
+                {approving ? "通过中..." : "通过"}
+              </button>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
+              <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
+              <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleReject}>拒绝</button>
+            </>
+          )}
+          {entry.status === "canonical" && (
+            <>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
+              <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
+              <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleSoftDelete}>下架</button>
+            </>
+          )}
+          {entry.status === "rejected" && (
+            <>
+              {hasHq && (
+                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+                  编辑全部
+                </button>
+              )}
+              <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
+            </>
+          )}
+          <button className={`${s.aBtn} ${s.aBtnLog}`} onClick={() => setLogOpen(true)}>审计日志</button>
+        </div>
+      </div>
 
       <Modal title="编辑知识条目" open={editOpen} onCancel={() => setEditOpen(false)}
         footer={null} destroyOnClose width={720}>
@@ -281,6 +286,6 @@ export default function AuditCard({
         footer={null} destroyOnClose width={640}>
         <AuditLogTimeline entryId={entry.id} />
       </Modal>
-    </Card>
+    </div>
   );
 }

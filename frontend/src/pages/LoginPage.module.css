@@ -1,71 +1,191 @@
-/* ════════════════════════════════════════════
- *  LoginPage — 居中布局 + 卡片样式
- * ════════════════════════════════════════════ */
+/* LoginPage - split visual + form layout */
 
 .container {
   min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(420px, 0.95fr);
+  background: #fff;
+}
+
+.visualPane {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
+  padding: 40px;
+  background:
+    linear-gradient(180deg, #f8fcff 0%, #eef7ff 48%, #dcecff 100%);
 }
 
-.card {
-  width: 400px;
-  border-radius: 12px;
-  border: 1px solid #e0e7ff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
-  padding: 32px;
+.heroFrame {
+  position: relative;
+  z-index: 1;
+  width: min(94%, 920px);
+  max-height: 78vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heroImage {
+  width: 100%;
+  max-height: 78vh;
+  object-fit: contain;
+  filter: drop-shadow(0 26px 40px rgb(37 99 235 / 18%));
+  user-select: none;
+}
+
+.formPane {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px clamp(32px, 4vw, 58px);
+  background: #fff;
+}
+
+.loginBox {
+  width: 100%;
+  max-width: 500px;
 }
 
 .title {
-  font-size: 22px;
+  margin: 0;
+  color: #1f2430;
+  font-size: 34px;
   font-weight: 700;
-  color: #1e3a5f;
-  margin: 0 0 8px;
+  line-height: 1.25;
+  letter-spacing: 0;
   text-align: center;
 }
 
 .subtitle {
-  font-size: 12px;
-  color: #93c5fd;
-  margin: 0 0 32px;
+  margin: 18px 0 44px;
+  color: #8a93a3;
+  font-size: 18px;
+  line-height: 1.5;
+  letter-spacing: 0;
   text-align: center;
-  letter-spacing: 0.5px;
 }
 
 .form {
-  margin-top: 24px;
+  margin: 0;
 }
 
-/* ── Ant Design 覆盖 ── */
-:global(.ant-form-item-label > label) {
-  font-size: 13px;
-  font-weight: 500;
-  color: #1e3a5f;
+.form :global(.ant-form-item) {
+  margin-bottom: 24px;
 }
 
-:global(.ant-input),
-:global(.ant-input-password) {
-  border-radius: 8px;
-  border-color: #e0e7ff;
+.form :global(.ant-input),
+.form :global(.ant-input-affix-wrapper) {
+  height: 56px;
+  border-color: #e5e7ee;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 3%);
 }
 
-:global(.ant-input:focus),
-:global(.ant-input-password:focus) {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+.form :global(.ant-input) {
+  padding: 0 18px;
 }
 
-:global(.ant-btn-primary) {
-  background: #2563eb;
-  border-color: #2563eb;
-  border-radius: 8px;
-  height: 40px;
-  font-weight: 500;
+.form :global(.ant-input-affix-wrapper) {
+  padding: 0 16px 0 18px;
 }
 
-:global(.ant-btn-primary:hover) {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+.form :global(.ant-input-prefix) {
+  margin-right: 18px;
+  color: #6f75a6;
+  font-size: 23px;
+}
+
+.form :global(.ant-input-affix-wrapper > input.ant-input) {
+  height: auto;
+  padding: 0;
+  background: transparent;
+}
+
+.form :global(.ant-input:hover),
+.form :global(.ant-input-affix-wrapper:hover) {
+  border-color: #d4d8e4;
+}
+
+.form :global(.ant-input:focus),
+.form :global(.ant-input-affix-wrapper-focused) {
+  border-color: #2f6bed;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgb(47 107 237 / 10%);
+}
+
+.form :global(.ant-btn-primary) {
+  height: 58px;
+  margin-top: 38px;
+  border-color: #2368f3;
+  border-radius: 7px;
+  background: #2368f3;
+  box-shadow: 0 7px 16px rgb(35 104 243 / 24%);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.form :global(.ant-btn-primary:hover) {
+  border-color: #1f5fdf;
+  background: #1f5fdf;
+}
+
+@media (width <= 980px) {
+  .container {
+    grid-template-columns: 1fr;
+  }
+
+  .visualPane {
+    min-height: 46vh;
+    padding: 32px 24px;
+  }
+
+  .heroFrame {
+    width: min(92%, 640px);
+    max-height: 42vh;
+  }
+
+  .heroImage {
+    max-height: 42vh;
+  }
+
+  .formPane {
+    padding: 40px 24px 56px;
+  }
+
+  .loginBox {
+    max-width: 460px;
+  }
+
+  .title {
+    font-size: 30px;
+  }
+
+  .subtitle {
+    margin-bottom: 36px;
+    font-size: 17px;
+  }
+}
+
+@media (width <= 640px) {
+  .visualPane {
+    display: none;
+  }
+
+  .formPane {
+    min-height: 100vh;
+    padding: 36px 22px;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+
+  .subtitle {
+    font-size: 15px;
+  }
 }

@@ -9,6 +9,7 @@ import KnowledgePage from "@/pages/KnowledgePage";
 vi.mock("@/api", () => ({
   fetchKnowledge: vi.fn().mockResolvedValue([]),
   fetchRepos: vi.fn().mockResolvedValue({ repos: [] }),
+  fetchDataSources: vi.fn().mockResolvedValue([]),
   listTerminologyConflicts: vi.fn().mockResolvedValue({ conflicts: [] }),
   fetchAuditQueue: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, size: 20 }),
   createKnowledge: vi.fn(),
@@ -19,6 +20,10 @@ vi.mock("@/api", () => ({
   supersedeKnowledge: vi.fn(),
   addRepo: vi.fn(),
   parseRepo: vi.fn(),
+  schemaCanonicalApi: {
+    listCanonicals: vi.fn().mockResolvedValue([]),
+    listExtractionFailures: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 // activeNs 走 WorkspacePage 共享 context (取代 NamespaceSelector 自动选中)
