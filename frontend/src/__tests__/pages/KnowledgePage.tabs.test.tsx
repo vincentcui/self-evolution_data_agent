@@ -10,6 +10,7 @@ vi.mock("@/api", () => ({
   fetchNamespaces: vi.fn().mockResolvedValue([{ id: 1, name: "默认", slug: "default" }]),
   fetchKnowledge: vi.fn().mockResolvedValue([]),
   fetchRepos: vi.fn().mockResolvedValue({ repos: [] }),
+  fetchDataSources: vi.fn().mockResolvedValue([]),
   listTerminologyConflicts: vi.fn().mockResolvedValue({ conflicts: [] }),
   fetchAuditQueue: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, size: 20 }),
   createKnowledge: vi.fn(),

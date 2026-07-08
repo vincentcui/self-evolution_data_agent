@@ -217,3 +217,164 @@
   color: #93c5fd;
   font-size: 13px;
 }
+
+/* ════════════════════════════════════════════
+ *  左右两栏布局 + 空间准备度概览
+ * ════════════════════════════════════════════ */
+
+/* ── 空间准备度概览 ── */
+.readinessWrap {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.readinessCards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  flex: 1;
+}
+
+.readinessCard {
+  background: #fff;
+  border: 1px solid #e5e8ed;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.readinessLabel {
+  font-size: 12px;
+  color: #5a6878;
+  font-weight: 500;
+}
+
+.readinessValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a2332;
+  line-height: 1.2;
+}
+
+.readinessValueMuted {
+  font-size: 13px;
+  font-weight: 500;
+  color: #9ba5b2;
+}
+
+.readinessBadge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 110px;
+}
+
+.readinessBadgeNotReady {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+.readinessBadgePartial {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.readinessBadgeReady {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+/* ── 左右两栏骨架 ── */
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.sideNav {
+  flex: 0 0 200px;
+  background: #fff;
+  border: 1px solid #e5e8ed;
+  border-radius: 10px;
+  padding: 8px 0;
+  position: sticky;
+  top: 16px;
+}
+
+.navGroup {
+  padding: 4px 0;
+}
+
+.navGroupTitle {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ba5b2;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #5a6878;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.navItem:hover {
+  background: rgba(37, 99, 235, 0.04);
+  color: #1a2332;
+}
+
+.navItemActive {
+  composes: navItem;
+  background: rgba(37, 99, 235, 0.06);
+  color: #2563eb;
+  font-weight: 600;
+  border-left: 3px solid #2563eb;
+  padding-left: 13px;
+}
+
+.navBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #e8ecf0;
+  color: #5a6878;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.navBadgeActive {
+  composes: navBadge;
+  background: #2563eb;
+  color: #fff;
+}
+
+.contentArea {
+  flex: 1;
+  min-width: 0;
+}
+
