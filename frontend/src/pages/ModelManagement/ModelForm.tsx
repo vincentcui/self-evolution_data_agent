@@ -74,7 +74,9 @@ export default function ModelForm({ open, initial, onClose, onSuccess, namespace
   const isNamespaceLocked = namespaceId != null;
   const [form, setForm] = useState({ ...INIT });
   const isEmbedding = initial?.model_type === "EMBEDDING" || (!isEdit && form.model_type === "EMBEDDING");
-  const typeOptions: ModelType[] = ["CHAT", "EMBEDDING"];
+  // D2: 全局(含 EMBEDDING)仅 super_admin 可写 → 新增时对非 super_admin 隐藏 EMBEDDING,
+  // 避免提交后必然 403 的死路。编辑态类型本就锁定, 不受影响。
+  const typeOptions: ModelType[] = (!isEdit && !isSuperAdmin) ? ["CHAT"] : ["CHAT", "EMBEDDING"];
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
   const [saving, setSaving] = useState(false);
