@@ -254,9 +254,9 @@
 }
 
 .readinessValue {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1a2332;
+  font-size: 16px;
+  font-weight: 600;
+  color: #5a6878;
   line-height: 1.2;
 }
 
@@ -316,12 +316,19 @@
 }
 
 .navGroupTitle {
-  padding: 8px 16px 4px;
+  padding: 8px 16px 2px;
   font-size: 11px;
   font-weight: 600;
   color: #9ba5b2;
   text-transform: uppercase;
   letter-spacing: 0.4px;
+}
+
+.navGroupDesc {
+  padding: 0 16px 6px;
+  font-size: 11px;
+  color: #b8c0cc;
+  line-height: 1.4;
 }
 
 .navItem {

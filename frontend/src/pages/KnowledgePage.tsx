@@ -38,9 +38,10 @@ type NavKey =
   | "schema"
   | "extraction-failure";
 
-const NAV_GROUPS: { title: string; items: { key: NavKey; label: string }[] }[] = [
+const NAV_GROUPS: { title: string; desc: string; items: { key: NavKey; label: string }[] }[] = [
   {
     title: "知识资产",
+    desc: "正式知识与 Schema 治理",
     items: [
       { key: "knowledge", label: "知识条目" },
       { key: "schema", label: "Schema 管理" },
@@ -48,6 +49,7 @@ const NAV_GROUPS: { title: string; items: { key: NavKey; label: string }[] }[] =
   },
   {
     title: "待处理",
+    desc: "需要人工确认的知识治理任务",
     items: [
       { key: "audit-pending", label: "待审 (proposed)" },
       { key: "terminology-conflict", label: "术语冲突" },
@@ -55,10 +57,12 @@ const NAV_GROUPS: { title: string; items: { key: NavKey; label: string }[] }[] =
   },
   {
     title: "训练来源",
+    desc: "Git 仓库、解析与知识生产入口",
     items: [{ key: "repos", label: "Git 仓库" }],
   },
   {
     title: "历史与异常",
+    desc: "拒绝记录和抽取失败排查",
     items: [
       { key: "audit-rejected", label: "历史 (rejected)" },
       { key: "extraction-failure", label: "抽取失败" },
@@ -231,6 +235,7 @@ const KnowledgePage: React.FC = () => {
               {NAV_GROUPS.map((group) => (
                 <div key={group.title} className={styles.navGroup}>
                   <div className={styles.navGroupTitle}>{group.title}</div>
+                  <div className={styles.navGroupDesc}>{group.desc}</div>
                   {group.items.map((item) => {
                     const isActive = activeTab === item.key;
                     const badge = navBadges[item.key];
