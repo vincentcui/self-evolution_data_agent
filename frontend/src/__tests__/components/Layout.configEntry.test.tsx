@@ -17,7 +17,7 @@ vi.mock("@/hooks/useSessions", () => ({
 }));
 vi.mock("@/hooks/useReadiness", () => ({ useReadiness: () => ({ ready: true }) }));
 
-import Layout from "../Layout";
+import Layout from "@/components/Layout";
 
 const renderAs = (role: string) => {
   h.role = role;
