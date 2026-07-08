@@ -37,6 +37,9 @@ export default function ModelManagement() {
   // 两语境共用同一组件: workspace 挂载下发 activeNs; 配置中心裸 Outlet → ctx 为 null
   const ctx = useOutletContext<WorkspaceOutletContext | null | undefined>();
   const scopedNsId = ctx?.activeNs?.id;   // number | undefined
+  // 工作台语境下 activeNs 未就绪时,无法把新配置绑定到空间 → 禁用新增,避免提交 namespace_id=null 触发 403。
+  // 配置中心语境 ctx 为 null,不受影响。
+  const addBlocked = ctx != null && !ctx.activeNs;
   const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
   const [namespaces, setNamespaces] = useState<NamespaceOption[]>([]);
@@ -124,6 +127,8 @@ export default function ModelManagement() {
             type="primary"
             icon={<PlusOutlined />}
             className={styles.btnPrimary}
+            disabled={addBlocked}
+            title={addBlocked ? "空间加载中，请稍候" : undefined}
             onClick={() => { setEditing(null); setFormOpen(true); }}
           >
             新增配置
