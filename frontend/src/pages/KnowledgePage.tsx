@@ -210,22 +210,34 @@ const KnowledgePage: React.FC = () => {
             </div>
             <div className={styles.readinessCards}>
               <div className={styles.readinessCard}>
-                <span className={styles.readinessLabel}>数据源</span>
+                <span className={styles.readinessLabel}>
+                  <span className={`${styles.readinessDot} ${styles.dotGreen}`} />
+                  数据源
+                </span>
                 <span className={styles.readinessValue}>{readiness.dsCount}</span>
               </div>
               <div className={styles.readinessCard}>
-                <span className={styles.readinessLabel}>训练来源</span>
+                <span className={styles.readinessLabel}>
+                  <span className={`${styles.readinessDot} ${styles.dotSky}`} />
+                  训练来源
+                </span>
                 <span className={styles.readinessValue}>
                   {readiness.parsedRepos}
                   <span className={styles.readinessValueMuted}> / {readiness.totalRepos}</span>
                 </span>
               </div>
               <div className={styles.readinessCard}>
-                <span className={styles.readinessLabel}>知识审核</span>
+                <span className={styles.readinessLabel}>
+                  <span className={`${styles.readinessDot} ${styles.dotYellow}`} />
+                  知识审核
+                </span>
                 <span className={styles.readinessValue}>{readiness.proposedCount}</span>
               </div>
               <div className={styles.readinessCard}>
-                <span className={styles.readinessLabel}>可问数</span>
+                <span className={styles.readinessLabel}>
+                  <span className={`${styles.readinessDot} ${styles.dotBlue}`} />
+                  可问数
+                </span>
                 <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
               </div>
             </div>
