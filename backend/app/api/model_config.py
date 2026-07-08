@@ -18,11 +18,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_admin_or_above
+from app.auth import (
+    accessible_namespace_ids,
+    assert_ns_access,
+    get_current_user,
+    require_admin_or_above,
+)
 from app.config import settings
 from app.db.metadata import get_db
 from app.models.base import local_now
@@ -220,14 +225,36 @@ async def _get_or_404(db: AsyncSession, config_id: int) -> ModelConfig:
 @router.get("/list", response_model=list[ModelConfigOut])
 async def list_configs(
     namespace_id: int | None = None,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_admin_or_above),   # D1: 收紧到 admin+
     db: AsyncSession = Depends(get_db),
 ):
-    """获取未删除的模型配置列表（API Key 脱敏），可按 namespace 过滤."""
-    query = select(ModelConfig).where(ModelConfig.is_deleted.is_(False))
+    """未删除的模型配置列表（API Key 脱敏）。
+
+    作用域 (spec D1/D2):
+    - 带 namespace_id: 断言访问权后返回 该空间 ∪ 全局(NULL)。
+    - 不带 namespace_id: super_admin 见全部; admin 见 可访问空间 ∪ 全局(NULL)。
+    """
+    base = select(ModelConfig).where(ModelConfig.is_deleted.is_(False))
+
     if namespace_id is not None:
-        query = query.where(ModelConfig.namespace_id == namespace_id)
-    query = query.order_by(ModelConfig.model_type, ModelConfig.id)
+        await assert_ns_access(db, user, namespace_id)      # 无权 → 403
+        base = base.where(
+            or_(
+                ModelConfig.namespace_id == namespace_id,
+                ModelConfig.namespace_id.is_(None),
+            )
+        )
+    else:
+        allowed = await accessible_namespace_ids(db, user)  # super_admin → None
+        if allowed is not None:
+            base = base.where(
+                or_(
+                    ModelConfig.namespace_id.in_(allowed),
+                    ModelConfig.namespace_id.is_(None),
+                )
+            )
+
+    query = base.order_by(ModelConfig.model_type, ModelConfig.id)
     rows = (await db.execute(query)).scalars().all()
 
     # 批量查 namespace 名称，填充 namespace_name 字段
@@ -240,7 +267,10 @@ async def list_configs(
         )).all()
         ns_names = {row.id: row.name for row in ns_rows}
 
-    return [_to_out(r, ns_names.get(r.namespace_id) if r.namespace_id is not None else None) for r in rows]
+    return [
+        _to_out(r, ns_names.get(r.namespace_id) if r.namespace_id is not None else None)
+        for r in rows
+    ]
 
 
 @router.post("/add", response_model=ModelConfigOut, status_code=201)
@@ -506,7 +536,7 @@ async def test_connection(
 @router.get("/check-ready", response_model=CheckReadyOut)
 async def check_ready(
     namespace_id: int | None = None,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),   # 保持任意登录可查就绪 (plain user 需要)
     db: AsyncSession = Depends(get_db),
 ):
     """检查 Chat / Embedding 是否就绪。namespace_id 非 None 时检查该 namespace
@@ -514,6 +544,8 @@ async def check_ready(
 
     只检查 DB, 不读取 env / settings；env 有配置但 DB 无 active config 时仍返回 false。
     """
+    if namespace_id is not None:
+        await assert_ns_access(db, user, namespace_id)   # G5: 不能探测无权空间
     # 检查全局 EMBEDDING
     emb_ok = await db.scalar(
         select(ModelConfig.id).where(

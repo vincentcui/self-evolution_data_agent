@@ -78,7 +78,7 @@ async def test_list_filter_by_namespace(admin_client):
     resp = await admin_client.get(f"/api/model-config/list?namespace_id={ns_id}")
     assert resp.status_code == 200
     for c in resp.json():
-        assert c["namespace_id"] == ns_id
+        assert c["namespace_id"] in (ns_id, None)   # 新语义: 该空间 ∪ 全局
 
 
 @pytest.mark.asyncio
