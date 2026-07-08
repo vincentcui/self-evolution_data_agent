@@ -10,10 +10,13 @@ import json
 from typing import Any
 
 
-def non_empty_wins_checker(cands: list) -> tuple[Any, str] | None:
+def non_empty_wins_checker(
+    cands: list, *, namespace_id: int | None = None,
+) -> tuple[Any, str] | None:
     """description 一空一非空 → 取非空; 都非空且不同 → None (走下一条 rule).
 
     都空 → 任取第一个.
+    namespace_id 由 _try_rule 统一传入, 本 checker 不使用 (纯结构比较, 无 LLM 调用).
     """
     non_empty = [
         c for c in cands

@@ -100,6 +100,10 @@ def _get_openai_client(cfg: dict[str, Any] | None = None, namespace_id: int | No
     from app.engine.model_registry import registry
     if cfg is None:
         cfg = registry.resolve_chat_config(namespace_id)
+    # 未显式传 namespace_id 时, 从 cfg 自身携带的 namespace_id 推导,
+    # 保证 client 缓存落到正确的 namespace 槽 (分级配置隔离 + 删除时精准清槽).
+    if namespace_id is None and cfg is not None:
+        namespace_id = cfg.get("namespace_id")
     if cfg is None or cfg.get("protocol", "openai") != "openai":
         raise RuntimeError(
             "无激活的 openai Chat 配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"
@@ -114,6 +118,10 @@ def _get_claude_client(cfg: dict[str, Any] | None = None, namespace_id: int | No
     from app.engine.model_registry import registry
     if cfg is None:
         cfg = registry.resolve_chat_config(namespace_id)
+    # 未显式传 namespace_id 时, 从 cfg 自身携带的 namespace_id 推导,
+    # 保证 client 缓存落到正确的 namespace 槽 (分级配置隔离 + 删除时精准清槽).
+    if namespace_id is None and cfg is not None:
+        namespace_id = cfg.get("namespace_id")
     if cfg is None or cfg.get("protocol") != "anthropic":
         raise RuntimeError(
             "无激活的 anthropic Chat 配置，请前往「模型管理」页面添加并激活 CHAT 类型配置。"

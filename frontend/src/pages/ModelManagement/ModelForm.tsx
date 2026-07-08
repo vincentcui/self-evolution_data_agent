@@ -33,6 +33,8 @@ interface Props {
   namespaceName?: string;
   accessibleNamespaces?: NamespaceOption[];
   isSuperAdmin?: boolean;
+  /** chatOnly 模式 (从 NamespacePage 进入): 仅允许 CHAT, 隐藏 EMBEDDING */
+  chatOnly?: boolean;
 }
 
 /* ── 厂商默认配置 ──────────────────────────── */
@@ -68,12 +70,14 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "proxy", label: "网络代理", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
 ];
 
-export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin }: Props) {
+export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin, chatOnly }: Props) {
   const isEdit = !!initial;
   const effectiveNamespaceId = namespaceId ?? null;
   const isNamespaceLocked = namespaceId != null;
   const [form, setForm] = useState({ ...INIT });
   const isEmbedding = initial?.model_type === "EMBEDDING" || (!isEdit && form.model_type === "EMBEDDING");
+  /** chatOnly: 仅展示 CHAT 类型 (EMBEDDING 是全局配置, 不应在空间级 Tab 创建) */
+  const typeOptions: ModelType[] = chatOnly ? ["CHAT"] : ["CHAT", "EMBEDDING"];
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -194,15 +198,17 @@ export default function ModelForm({ open, initial, onClose, onSuccess, namespace
             <div className={styles.section} data-section="basic">
               <div className={styles.sectionTitle}>基本信息</div>
 
-              {/* 所属空间 — EMBEDDING 固定全局, 锁定模式下只读 */}
+              {/* 所属空间 — EMBEDDING 固定全局; 锁定/编辑模式下只读 (后端不允许修改 namespace_id) */}
               <div className={styles.row}>
                 <label className={styles.rowLabel}>所属空间</label>
                 <div className={styles.rowCtrl}>
                   {isEmbedding ? (
                     <span style={{ fontSize: 13, color: "#8c95a3" }}>全局</span>
-                  ) : isNamespaceLocked ? (
+                  ) : (isNamespaceLocked || isEdit) ? (
                     <span style={{ fontSize: 13, color: "#1a2332" }}>
-                      {namespaceName || `#${effectiveNamespaceId}`}
+                      {namespaceName
+                        || initial?.namespace_name
+                        || (initial?.namespace_id != null ? `#${initial.namespace_id}` : "全局")}
                     </span>
                   ) : (
                     <select
@@ -304,7 +310,7 @@ export default function ModelForm({ open, initial, onClose, onSuccess, namespace
                 </label>
                 <div className={styles.rowCtrl}>
                   <div className={styles.typeCards}>
-                    {(["CHAT", "EMBEDDING"] as ModelType[]).map((t) => {
+                    {typeOptions.map((t) => {
                       const isAnthropicEmbed = !isEmbeddingAllowed(form.provider) && t === "EMBEDDING";
                       const disabled = isEdit || isAnthropicEmbed;
                       return (

@@ -531,10 +531,19 @@ async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
         await conn.execute(text(
             "DROP INDEX IF EXISTS uq_model_configs_one_active_per_type"
         ))
+        # PG 15+ 支持 NULLS NOT DISTINCT: 保证 (model_type, NULL) 的全局兜底 active 唯一,
+        # 在应用层 activate_config 之外再加一层 DB 防御, 杜绝直接写路径产生两条 active 全局配置。
+        # 低版本 PG 不支持该语法, 退化为普通 partial unique index (仍由应用层保证唯一)。
+        pg_ver = 0
+        try:
+            pg_ver = int((await conn.scalar(text("SHOW server_version_num"))) or 0)
+        except Exception:
+            pg_ver = 0
+        nulls_not_distinct = "NULLS NOT DISTINCT" if pg_ver >= 150000 else ""
         await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
-            "ON model_configs (model_type, namespace_id) "
-            "WHERE is_active = TRUE AND is_deleted = FALSE"
+            f"CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
+            f"ON model_configs (model_type, namespace_id) {nulls_not_distinct} "
+            f"WHERE is_active = TRUE AND is_deleted = FALSE"
         ))
         log.info(
             "[schema_migrations] model_configs.namespace_id 列已添加, "

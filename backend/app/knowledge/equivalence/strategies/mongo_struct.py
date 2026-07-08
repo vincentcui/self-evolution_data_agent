@@ -86,13 +86,17 @@ def _enrich_descriptions(target: dict, all_choices: list[dict], depth: int = 0):
             _enrich_descriptions(sf, sub_pool[fname], depth + 1)
 
 
-def mongo_struct_checker(cands: list) -> tuple[Any, str] | None:
+def mongo_struct_checker(
+    cands: list, *, namespace_id: int | None = None,
+) -> tuple[Any, str] | None:
     """MongoDB 嵌套结构等价判定.
 
     比较 candidate_value_json 中的 sub_fields 结构:
     - 全部有 sub_fields 且递归结构等价 → 选最长 content 的 candidate
     - 无 sub_fields 但类型 boxing 等价 → 选装箱类型
     - 否则 → None (不等价)
+
+    namespace_id 由 _try_rule 统一传入, 本 checker 不使用 (纯结构比较, 无 LLM 调用).
     """
     contents: list[tuple[str, dict]] = []
     for c in cands:

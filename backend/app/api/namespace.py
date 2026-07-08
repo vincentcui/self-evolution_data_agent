@@ -495,15 +495,18 @@ async def get_readiness(
     )
     has_datasource = (ds_count or 0) > 0
 
-    # has_global_api_key
+    # has_chat_model: 该 namespace 专属 active CHAT 配置, 或全局兜底 active CHAT 配置
+    # (与 model-config/check-ready 的 namespace OR 全局兜底 判定保持一致)
     chat_active = await db.scalar(
         select(func.count()).select_from(ModelConfig).where(
             ModelConfig.model_type == "CHAT",
             ModelConfig.is_active.is_(True),
             ModelConfig.is_deleted.is_(False),
+            (ModelConfig.namespace_id == namespace_id)
+            | (ModelConfig.namespace_id.is_(None)),
         )
     )
-    has_global_api_key = (chat_active or 0) > 0
+    has_chat_model = (chat_active or 0) > 0
 
     # has_embedding_key
     embedding_active = await db.scalar(
@@ -523,10 +526,7 @@ async def get_readiness(
     )
     has_valid_schema = (schema_count or 0) > 0
 
-    ready = (
-        has_access and has_datasource and has_global_api_key
-        and has_embedding_key and has_valid_schema
-    )
+    ready = has_access and has_datasource and has_chat_model and has_valid_schema
 
     blockers: list[BlockerOut] = []
     if not has_access:
@@ -545,10 +545,10 @@ async def get_readiness(
             admin_route=f"/namespaces/{namespace_id}",
             user_action="请联系管理员配置数据源",
         ))
-    if not has_global_api_key:
+    if not has_chat_model:
         blockers.append(BlockerOut(
             type="no_api_key",
-            message="未配置全局默认 API Key",
+            message="未配置可用的 Chat 模型 (该空间专属或全局兜底)",
             admin_action="去配置 API Key",
             admin_route="/model-management",
             user_action="请联系管理员配置模型凭证",
@@ -575,7 +575,7 @@ async def get_readiness(
         checks={
             "has_access": has_access,
             "has_datasource": has_datasource,
-            "has_global_api_key": has_global_api_key,
+            "has_chat_model": has_chat_model,
             "has_embedding_key": has_embedding_key,
             "has_valid_schema": has_valid_schema,
         },

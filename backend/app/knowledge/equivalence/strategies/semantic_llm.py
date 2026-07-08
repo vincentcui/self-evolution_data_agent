@@ -117,7 +117,7 @@ def _build_prompt(cands: list) -> str:
 
 
 async def semantic_llm_checker(
-    cands: list, namespace_id: int | None = None,
+    cands: list, *, namespace_id: int | None = None,
 ) -> tuple[Any, str] | None:
     """LLM 语义等价判定.
 
