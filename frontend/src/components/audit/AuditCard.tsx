@@ -56,6 +56,14 @@ const ENTRY_TYPE_COLORS: Record<string, string> = {
   route_hint:     "cyan",
 };
 
+// ── status 圆点配色：黄色待审 / 绿色已通过 / 红色已拒绝 / 灰色已替代 ──
+const STATUS_DOT_COLORS: Record<string, string> = {
+  proposed:   "#f59e0b",
+  canonical:  "#16a34a",
+  rejected:   "#ef4444",
+  superseded: "#9ba5b2",
+};
+
 interface Props {
   entry: KnowledgeEntry;
   selectable?: boolean;
@@ -160,7 +168,8 @@ export default function AuditCard({
   const createdAtShort = entry.created_at ? entry.created_at.slice(0, 10) : "";
 
   return (
-    <Card size="small" bodyStyle={{ padding: "12px 16px" }}>
+    <Card size="small" bodyStyle={{ padding: "12px 16px" }}
+      style={{ width: "100%", boxShadow: "0 1px 2px rgba(0,0,0,0.04)", borderColor: "#eef1f5" }}>
       <div style={{ display: "flex", gap: 12 }}>
         {/* 左侧编号 */}
         <div style={{
@@ -172,15 +181,32 @@ export default function AuditCard({
 
         {/* 中间内容 */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          {/* 第一行：标签区（状态/类型/来源/级别 并排）*/}
+          {/* 第一行：标签区 — 类型(橙) + 圆点状态 + 来源(灰) */}
           <Space style={{ marginBottom: 6 }} size="small" wrap>
             {selectable && (
               <Checkbox checked={selected} onChange={(e) => onSelect?.(e.target.checked)} />
             )}
-            <Tag color={STATUS_COLORS[entry.status] ?? "default"}>{STATUS_LABELS[entry.status] ?? entry.status}</Tag>
-            <Tag color={ENTRY_TYPE_COLORS[entry.entry_type] ?? "default"}>{ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}</Tag>
-            <Tag>{SOURCE_LABELS[entry.source] ?? entry.source}</Tag>
-            <Tag color={entry.tier === "critical" ? "magenta" : "blue"}>{TIER_LABELS[entry.tier] ?? entry.tier}</Tag>
+            {/* 类型标签：橙色文字 */}
+            <span style={{
+              color: "#ea580c", fontSize: 12, fontWeight: 500,
+            }}>
+              {ENTRY_TYPE_LABELS[entry.entry_type] ?? entry.entry_type}
+            </span>
+            {/* 圆点 + 状态文字 */}
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              fontSize: 12, color: "#5a6878",
+            }}>
+              <span style={{
+                display: "inline-block", width: 7, height: 7, borderRadius: "50%",
+                background: STATUS_DOT_COLORS[entry.status] ?? "#9ba5b2",
+              }} />
+              {STATUS_LABELS[entry.status] ?? entry.status}
+            </span>
+            {/* 来源标签：灰色 */}
+            <span style={{ fontSize: 12, color: "#9ba5b2" }}>
+              {SOURCE_LABELS[entry.source] ?? entry.source}
+            </span>
           </Space>
 
           {/* 标题（content）*/}

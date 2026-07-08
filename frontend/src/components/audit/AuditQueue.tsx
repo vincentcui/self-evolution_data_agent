@@ -83,12 +83,13 @@ export default function AuditQueue({
       <Space style={{ marginBottom: 16 }} wrap>
         <Input.Search
           allowClear
+          variant="filled"
           placeholder="搜索 content/description/payload"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           style={{ width: 260 }}
         />
-        <Select placeholder="类型" allowClear value={entryType} onChange={setEntryType}
+        <Select placeholder="所有类型" allowClear variant="filled" value={entryType} onChange={setEntryType}
           options={[
             { label: "业务术语", value: "terminology" },
             { label: "实例别名", value: "instance_alias" },
@@ -96,7 +97,7 @@ export default function AuditQueue({
             { label: "查询规则", value: "rule" },
             { label: "路由偏好", value: "route_hint" },
           ]} style={{ width: 120 }} />
-        <Select placeholder="来源" allowClear value={source} onChange={setSource}
+        <Select placeholder="所有来源" allowClear variant="filled" value={source} onChange={setSource}
           options={[
             { label: "Schema 抽取", value: "schema" },
             { label: "手动", value: "manual" },
@@ -104,7 +105,7 @@ export default function AuditQueue({
             { label: "代码提取", value: "code_extract" },
           ]} style={{ width: 130 }} />
         {showStatusFilter && !status && (
-          <Select placeholder="状态" allowClear value={statusFilter} onChange={setStatusFilter}
+          <Select placeholder="所有状态" allowClear variant="filled" value={statusFilter} onChange={setStatusFilter}
             options={STATUS_OPTIONS} style={{ width: 140 }} />
         )}
         {showLockedStatusTag && (
@@ -124,7 +125,7 @@ export default function AuditQueue({
 
       <Spin spinning={loading}>
         {data && data.items.length === 0 ? <Empty /> : (
-          <Space direction="vertical" style={{ width: "100%" }}>
+          <Space direction="vertical" style={{ width: "100%" }} size="middle">
             {data?.items.map((entry) => (
               <AuditCard
                 key={entry.id} entry={entry}
