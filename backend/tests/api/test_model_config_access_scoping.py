@@ -198,3 +198,37 @@ async def test_test_connection_foreign_ns_config_forbidden(make_client, db):
         "model_name": "in-b", "model_type": "CHAT", "id": cfg.id,
     })
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_foreign_ns_config_forbidden(make_client, db):
+    """写端点直测: 普通 admin PUT /update 他空间配置 → 403。
+    guard 在 _get_or_404 之后、mutation 之前触发 (spec D2/D3)。"""
+    a = User(username="rbac_u1", role="admin", password_hash="x")
+    fo = User(username="rbac_fu1", role="admin", password_hash="x")
+    db.add_all([a, fo]); await db.flush()
+    theirs = Namespace(name="B", slug="rbac-ub1", created_by=fo.id)
+    db.add(theirs); await db.flush()
+    cfg = _cfg("in-b", theirs.id); db.add(cfg); await db.commit()
+    client = await make_client(role="admin", user_id=a.id, username="rbac_u1")
+    resp = await client.put("/api/model-config/update", json={
+        "id": cfg.id,
+        "provider": "openai", "base_url": "https://x", "api_key": "sk-x",
+        "model_name": "in-b", "model_type": "CHAT",
+    })
+    assert resp.status_code == 403
+
+
+# ═══ 就绪检查端点 (G5) ═════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_check_ready_foreign_namespace_forbidden(make_client, db):
+    """G5: admin 查无权 namespace 的 check-ready → 403 (不能探测无权空间就绪状态)。"""
+    a = User(username="rbac_cr1", role="admin", password_hash="x")
+    fo = User(username="rbac_fcr1", role="admin", password_hash="x")
+    db.add_all([a, fo]); await db.flush()
+    theirs = Namespace(name="B", slug="rbac-crb1", created_by=fo.id)
+    db.add(theirs); await db.commit()
+    client = await make_client(role="admin", user_id=a.id, username="rbac_cr1")
+    resp = await client.get(f"/api/model-config/check-ready?namespace_id={theirs.id}")
+    assert resp.status_code == 403
