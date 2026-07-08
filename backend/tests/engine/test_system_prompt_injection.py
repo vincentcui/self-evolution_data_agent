@@ -1,10 +1,10 @@
-"""Phase 4 Task 4.4: system_prompt 注入 critical / anchors / route_hints 3 段."""
+"""Phase 4 Task 4.4: system_prompt 注入 critical / anchors 2 段. route_hint 已摘除 (spec 2026-07-07)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from app.engine.tools.registry import build_system_prompt
-from app.knowledge.knowledge_loader import RouteHintCandidate, TerminologyAnchor
+from app.knowledge.knowledge_loader import TerminologyAnchor
 
 
 @dataclass
@@ -20,26 +20,20 @@ class _MockNs:
     slug: str = "test"
 
 
-def test_renders_3_sections_when_full():
+def test_renders_2_sections_when_full():
     anchors = [TerminologyAnchor(
         term="商品", target="c_category",
         database="db_q", db_type="mongodb",
         synonyms=["货品"], source_collections=["c_category"],
     )]
-    rh = [RouteHintCandidate(
-        question_pattern="商品→订单",
-        collection_path=["c_category", "c_product"],
-        cost_strategy="batched_count_only",
-        reason="多层连乘",
-    )]
     prompt = build_system_prompt(
         settings=_MockSettings(), namespace=_MockNs(),
-        anchors=anchors, critical=["默认 latestVersion=true"], route_hints=rh,
+        anchors=anchors, critical=["默认 latestVersion=true"], route_hints=[],
     )
     # KnowledgeBundle 渲染的 section header — base prompt 不含
     assert "## 关键规则 (critical)" in prompt
     assert "## 业务术语锚点 (terminology)" in prompt
-    assert "## 路由提示 (route_hint)" in prompt
+    assert "## 路由提示 (route_hint)" not in prompt
     assert "商品" in prompt
     assert "c_category" in prompt
     assert "默认 latestVersion=true" in prompt

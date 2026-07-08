@@ -151,6 +151,7 @@ pg_dump self_evolution_data_agent > self_evolution_data_agent-$(date +%Y%m%d).sq
 | `engine/llm.py` | 统一 LLM 调用入口；OpenAI 兼容协议（Qwen、GPT、DeepSeek、vLLM、Ollama）与 Anthropic 协议（Claude）双线路由 |
 | `engine/executor.py` | 查询全流程：加载数据源 → 澄清 → 路由引擎 → 安全检查 → 执行 → 可视化 → 存历史 |
 | `engine/agent_loop` | 多轮推理-行动循环，含工具调用、三桶配额、死循环检测 |
+| `engine/history_loader.py` | 从 QueryHistory 重建会话内多轮上下文，将最近 N 轮 user/assistant 对话注入 agent loop，使追问能消解指代（轮数按对话模型 `max_history_turns` 配置） |
 | `drivers/mysql.py` | MySQL 引擎（aiomysql + INFORMATION_SCHEMA 探查）|
 | `drivers/mongo.py` | MongoDB 引擎（Motor 异步 + Flavor 探测 DocumentDB 差异）|
 | `knowledge/` | Git 解析、`proposed → canonical` 审核状态机、检索、HyQE、A-MEM、衰减 |

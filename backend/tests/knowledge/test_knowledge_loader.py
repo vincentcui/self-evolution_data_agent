@@ -2,29 +2,24 @@
 
 真实 SQLite + ChromaDB (按 §06 规则不 mock).
 
-5 case:
+4 case:
 - basic_load_returns_bundle
 - critical_loaded
 - terminology_full_inject_when_k_zero
-- route_hint_capped_by_k
 - to_prompt_sections_renders_3_blocks
 """
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import settings
 from app.knowledge.knowledge_loader import (
     KnowledgeBundle,
-    RouteHintCandidate,
-    TerminologyAnchor,
     load_all_knowledge,
 )
 from app.knowledge.knowledge_retriever import upsert_knowledge_entry
 from app.models.knowledge_entry import KnowledgeEntry
 from app.models.namespace import Namespace
-
 
 # ════════════════════════════════════════════
 #  fixtures
@@ -158,54 +153,6 @@ async def seeded_ns_many_terminologies(
 
 
 @pytest_asyncio.fixture
-async def seeded_many_route_hints(
-    async_session, real_chromadb,
-) -> tuple[int, str, list[int]]:
-    """ns + 7 canonical route_hint KE (用于 k cap 验证)."""
-    import json
-    async with async_session() as db:
-        ns = Namespace(name="rh_ns", slug="rh_ns", description="phase4-rh")
-        db.add(ns)
-        await db.commit()
-        await db.refresh(ns)
-
-        ids: list[int] = []
-        for i in range(7):
-            payload_dict = {
-                "question_pattern": f"查询模式 {i}",
-                "collection_path": [f"coll_{i}", f"coll_{i}_b"],
-                "join_fields": [],
-                "avoid_path": [],
-                "cost_strategy": "default",
-                "reason": f"原因 {i}",
-            }
-            ke = KnowledgeEntry(
-                namespace_id=ns.id,
-                entry_type="route_hint",
-                status="canonical",
-                tier="normal",
-                content=f"route hint 查询客户订单 {i}",
-                source="manual",
-                payload=json.dumps(payload_dict),
-            )
-            db.add(ke)
-            await db.commit()
-            await db.refresh(ke)
-            ids.append(ke.id)
-            upsert_knowledge_entry(
-                slug=ns.slug,
-                entry_id=ke.id,
-                content=ke.content,
-                tier="normal",
-                namespace_id=ns.id,
-                entry_type="route_hint",
-                status="canonical",
-                payload=payload_dict,
-            )
-        return ns.id, ns.slug, ids
-
-
-@pytest_asyncio.fixture
 async def seeded_full_bundle(
     async_session, real_chromadb,
 ) -> tuple[int, str]:
@@ -324,21 +271,6 @@ async def test_terminology_full_inject_when_k_zero(
         bundle = await load_all_knowledge(db, ns_id, ns_slug, "业务术语")
     # terminology 不再经 bundle 加载, bundle 只含 critical + vector_hits + route_hints
     assert not hasattr(bundle, "terminology_for_prompt")
-
-
-@pytest.mark.asyncio
-async def test_route_hint_capped_by_k(
-    async_session, seeded_many_route_hints, monkeypatch,
-):
-    """route_hint 注入受 knowledge_route_hint_inject_k 限制."""
-    ns_id, ns_slug, ids = seeded_many_route_hints
-    monkeypatch.setattr(settings, "knowledge_route_hint_inject_k", 2)
-    monkeypatch.setattr(settings, "knowledge_retrieve_normal_n", 20)
-
-    async with async_session() as db:
-        bundle = await load_all_knowledge(db, ns_id, ns_slug, "查询客户订单")
-    assert len(bundle.route_hints_for_prompt) <= 2
-    assert all(isinstance(r, RouteHintCandidate) for r in bundle.route_hints_for_prompt)
 
 
 @pytest.mark.asyncio

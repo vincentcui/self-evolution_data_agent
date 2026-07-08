@@ -19,6 +19,7 @@ from app.auth import assert_ns_access, get_current_user, require_admin_or_above
 from app.config import settings
 from app.db.metadata import async_session as _new_db_session
 from app.db.metadata import get_db
+from app.engine import history_loader
 from app.engine.agent_loop import (
     AgentResult,
     cancel_agent,
@@ -26,6 +27,7 @@ from app.engine.agent_loop import (
     run_agent_loop,
 )
 from app.engine.agent_loop_dispatcher import build_bound_registry
+from app.engine.model_registry import registry
 from app.engine.sse_manager import (
     deregister_sse_session,
     format_sse_event,
@@ -59,6 +61,7 @@ from app.models import (
     Namespace,
     QueryHistory,
 )
+from app.models.model_config import DEFAULT_MAX_HISTORY_TURNS
 from app.models.user import User
 from app.schemas import (
     ClarifyResponseRequest,
@@ -276,6 +279,17 @@ async def query_stream(
         route_hints=bundle.route_hints_for_prompt,
     )
 
+    # 多轮上下文: 读同 session 最近 N 轮历史注入 agent_loop messages。
+    # max_turns 单一真相源 = 激活 CHAT 配置 model_configs.max_history_turns;
+    # 缺失时回落 DEFAULT_MAX_HISTORY_TURNS。
+    chat_cfg = registry.chat_config
+    max_turns = DEFAULT_MAX_HISTORY_TURNS
+    if chat_cfg and isinstance(chat_cfg.get("max_history_turns"), int):
+        max_turns = chat_cfg["max_history_turns"]
+    history_messages = await history_loader.build_history_messages(
+        db, session_id, ns.id, max_turns,
+    )
+
     async def _run_and_finalize() -> None:
         try:
             result = await run_agent_loop(
@@ -289,6 +303,7 @@ async def query_stream(
                 db=db,
                 namespace_id=ns.id,
                 session_id=session_id,
+                history_messages=history_messages,
             )
             # ── Cancel 盲区守卫 ──
             # _cancel_reason 可能在 run_agent_loop() 返回后 (已从 _active_agent_workers

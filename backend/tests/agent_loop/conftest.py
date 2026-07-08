@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.models.base import Base
+from app.engine import agent_loop as al
 from tests._db_schema_sync import prepare_test_schema
 
 TEST_DATABASE_URL = os.environ.get(
@@ -136,3 +136,18 @@ def fake_llm_end_turn():
         from app.engine.llm import ToolUseResponse
         return ToolUseResponse(text="hello", tool_calls=[], stop_reason="end_turn", usage={})
     return _llm
+
+
+@pytest.fixture
+def relax_quota(monkeypatch):
+    """放宽 agent_loop 配额/阈值, 让 Forced_Clarify / dead_loop 等行为可观测.
+
+    集中在 conftest 供 test_forced_clarify*.py 共享 (避免跨测试模块 import fixture).
+    """
+    monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
+    monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 3)
+    monkeypatch.setattr(al.settings, "agent_loop_error_class_window_size", 5)
+    monkeypatch.setattr(al.settings, "agent_loop_error_class_threshold", 2)
+    monkeypatch.setattr(al.settings, "agent_loop_max_forced_clarify_per_class", 1)

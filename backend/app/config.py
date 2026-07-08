@@ -181,8 +181,6 @@ class Settings(BaseSettings):
     """enum_sync_loop tick 间隔秒, env: IS_ENUM_SYNC_INTERVAL_SECS"""
 
     # ── Phase 4 Knowledge Loader (agent_loop 主链路单一入口) ──
-    knowledge_route_hint_inject_k: int = 5
-    """route_hint 注入 prompt 的数量上限, env: IS_KNOWLEDGE_ROUTE_HINT_INJECT_K"""
     knowledge_terminology_inject_k: int = 0
     """terminology 注入 prompt 的数量上限 (0 表示全量, 不裁剪), env: IS_KNOWLEDGE_TERMINOLOGY_INJECT_K"""
     knowledge_loader_timeout_secs: int = 10
@@ -328,10 +326,16 @@ class Settings(BaseSettings):
 
     # ── LLM Retry (P1-14) ────────────────────────────────
     llm_retry_max: int = 1
-    """LLM transient 错误 (5xx / TimeoutError / ConnectionError) 的最大重试次数
+    """LLM 通用 transient 错误 (5xx / TimeoutError / ConnectionError) 的最大重试次数
     (env: IS_LLM_RETRY_MAX, 默认 1).
 
-    4xx 不重试 (业务错误); 0 表示完全禁用 retry.
+    429 限流有专属预算 llm_rate_limit_retry_max; 其余 4xx 业务错误不重试; 0 表示禁用 retry.
+    """
+    llm_rate_limit_retry_max: int = 3
+    """429 限流的专属重试次数 (env: IS_LLM_RATE_LIMIT_RETRY_MAX, 默认 3).
+
+    限流窗口需更长冷却, 故 429 独立于通用 llm_retry_max, 给更大预算 + 更长退避
+    (尊重 Retry-After, 否则 5/10/20s 指数). 区别于 SDK 自带的亚秒级重试.
     """
 
     agent_loop_context_limit_tokens: int = 80_000

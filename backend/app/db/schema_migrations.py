@@ -596,6 +596,8 @@ async def run_all(engine: AsyncEngine) -> None:
     ])
     # migration_028 (timezone): datasources.timezone 列 + 存量回填
     await _ensure_datasources_timezone_column(engine)
+    # migration_029 (multi-turn-context): model_configs.max_history_turns 列 — 多轮历史注入轮数
+    await _ensure_model_config_max_history_turns_column(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:
@@ -1054,3 +1056,18 @@ async def _ensure_datasources_timezone_column(engine: AsyncEngine) -> None:
             "ALTER TABLE datasources ALTER COLUMN timezone DROP DEFAULT"
         ))
     log.info("[schema_migrations] datasources.timezone column ensured (migration_026)")
+
+
+async def _ensure_model_config_max_history_turns_column(engine: AsyncEngine) -> None:
+    """migration_029 (multi-turn-context): model_configs.max_history_turns 列(幂等).
+
+    - ADD COLUMN IF NOT EXISTS max_history_turns INTEGER NOT NULL DEFAULT 5
+    - 默认 5 与 app.models.model_config.DEFAULT_MAX_HISTORY_TURNS 语义锚定(跨语言硬写).
+    - 仅 CHAT 有效; EMBEDDING 行也存在该列但前端隐藏, 无害.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS "
+            "max_history_turns INTEGER NOT NULL DEFAULT 5"
+        ))
+    log.info("[schema_migrations] model_configs.max_history_turns column ensured (migration_029)")

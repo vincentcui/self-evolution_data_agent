@@ -18,6 +18,7 @@ export interface ModelConfig {
   model_type: ModelType;
   temperature?: number | null;
   max_tokens?: number | null;
+  max_history_turns?: number;
   is_active?: boolean;
   completions_path?: string | null;
   embeddings_path?: string | null;

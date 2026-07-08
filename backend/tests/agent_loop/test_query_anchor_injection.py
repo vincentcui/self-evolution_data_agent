@@ -20,13 +20,11 @@ from app.config import settings
 from app.engine.tools.registry import build_system_prompt
 from app.knowledge.knowledge_loader import (
     RouteHintCandidate,
-    TerminologyAnchor,
     load_all_knowledge,
 )
 from app.knowledge.knowledge_retriever import upsert_knowledge_entry
 from app.models.knowledge_entry import KnowledgeEntry
 from app.models.namespace import Namespace
-
 
 # ════════════════════════════════════════════
 #  fixtures — 复用 agent_loop conftest 的 db_session + chroma_isolated
@@ -96,8 +94,8 @@ async def test_anchors_render_in_system_prompt_after_load(seeded_ns_full, db_ses
     bundle = await load_all_knowledge(db_session, ns.id, ns.slug, "商品有几本？")
 
     # AC 自动机匹配 (需要先初始化)
-    from app.knowledge.terminology_automaton import match_terminology, rebuild
     from app.knowledge.knowledge_loader import batch_load_terminology
+    from app.knowledge.terminology_automaton import match_terminology, rebuild
     await rebuild(db_session, ns.id, ns.slug)
     term_ids = match_terminology(ns.slug, "商品有几本？")
     anchors = await batch_load_terminology(db_session, term_ids)
@@ -176,33 +174,29 @@ def test_empty_bundle_no_section_markers():
     assert "## 关键规则 (critical)" not in prompt
     assert "## 业务术语锚点 (terminology)" not in prompt
     assert "## 路由提示 (route_hint)" not in prompt
-    # 但模板骨架仍在 (max_iter / 死循环规避字样可校验存活)
-    assert "死循环规避" in prompt
+    # 但模板骨架仍在 (max_iter / 错误消费与循环规避字样可校验存活)
+    assert "错误消费与循环规避" in prompt
 
 
 # ════════════════════════════════════════════
-#  Test 4 — route_hint 段渲染 (直接构造 anchor 验证渲染规则, 不走 ChromaDB)
+#  Test 4 — route_hint 已从 system prompt 摘除 (spec 2026-07-07)
+#  route_hint entry 仍在向量集合可被 lookup_knowledge 召回
 # ════════════════════════════════════════════
 
-def test_route_hint_renders_with_path_and_pattern():
-    """直接构造 RouteHintCandidate → build_system_prompt 输出含 question_pattern / path."""
+def test_route_hint_not_injected_even_when_present():
+    """route_hint 从 system prompt 摘除 — 传入 route_hints 也不渲染."""
     fake_ns = Namespace(name="dummy2", slug="dummy2", description="")
     rh = RouteHintCandidate(
-        question_pattern="商品→订单",
-        collection_path=["c_category", "c_product"],
-        cost_strategy="default",
-        reason="跨集合 join",
+        question_pattern="订单关联用户", collection_path=["orders", "users"],
+        join_fields=[{"a": "orders.user_id", "b": "users.id"}], reason="step5 items→products",
     )
     prompt = build_system_prompt(
         settings=settings, namespace=fake_ns,
-        anchors=[],
-        critical=[],
+        anchors=[], critical=[],
         route_hints=[rh],
     )
-    assert "## 路由提示 (route_hint)" in prompt
-    assert "商品→订单" in prompt
-    assert "c_category" in prompt and "c_product" in prompt
-    assert "跨集合 join" in prompt
+    assert "## 路由提示 (route_hint)" not in prompt
+    assert "orders → users" not in prompt
 
 
 # ════════════════════════════════════════════

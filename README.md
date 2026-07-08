@@ -149,6 +149,7 @@ Natural language → LLM (Agent Loop + tool calls) → DB execution → chart / 
 | `engine/llm.py` | Unified LLM entry point; routes between OpenAI-compatible (Qwen, GPT, DeepSeek, vLLM, Ollama) and Anthropic (Claude) wire protocols |
 | `engine/executor.py` | Full query flow: load datasource → clarify → route engine → safety check → execute → visualize → persist |
 | `engine/agent_loop` | Multi-round reasoning-and-acting loop with tool calls, quota buckets, and dead-loop detection |
+| `engine/history_loader.py` | Rebuilds in-session multi-turn context from QueryHistory and injects recent user/assistant turns into the agent loop, so follow-up questions resolve references (turn count configurable per chat model via `max_history_turns`) |
 | `drivers/mysql.py` | MySQL driver (aiomysql + INFORMATION_SCHEMA introspection) |
 | `drivers/mongo.py` | MongoDB driver (Motor async + Flavor detection for DocumentDB differences) |
 | `knowledge/` | Agentic repo extraction (autonomous agent explores source → emits schema), `proposed → canonical` review state machine, retrieval, HyQE, A-MEM, decay |

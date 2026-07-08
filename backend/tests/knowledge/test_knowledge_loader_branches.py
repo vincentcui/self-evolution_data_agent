@@ -17,16 +17,12 @@ import pytest
 
 from app.knowledge.knowledge_loader import (
     KnowledgeBundle,
-    RouteHintCandidate,
-    TerminologyAnchor,
     _batch_load_route_hints,
     _empty_bundle,
-    _load_inner,
     batch_load_terminology,
     load_all_knowledge,
 )
 from app.models.knowledge_entry import KnowledgeEntry
-
 
 # ════════════════════════════════════════════
 #  KnowledgeBundle 渲染
@@ -53,38 +49,6 @@ def test_bundle_renders_critical_section():
     assert "## 关键规则 (critical)" in sections["critical_section"]
     assert "- 规则 A" in sections["critical_section"]
     assert "- 规则 B" in sections["critical_section"]
-
-
-def test_bundle_renders_route_hints_section():
-    """有 route_hints → 渲染路径 + 模式."""
-    b = KnowledgeBundle(
-        critical=[],
-        vector_hits=[],
-        route_hints_for_prompt=[
-            RouteHintCandidate(
-                question_pattern="某用户的订单",
-                collection_path=["users", "orders"],
-                reason="两层关联",
-            ),
-        ],
-    )
-    sections = b.to_prompt_sections()
-    assert "## 路由提示 (route_hint)" in sections["route_hints_section"]
-    assert "users → orders" in sections["route_hints_section"]
-    assert "某用户的订单" in sections["route_hints_section"]
-
-
-def test_bundle_renders_empty_path():
-    """collection_path 为空 → 显示 (空路径)."""
-    b = KnowledgeBundle(
-        critical=[],
-        vector_hits=[],
-        route_hints_for_prompt=[
-            RouteHintCandidate(question_pattern="x", collection_path=[]),
-        ],
-    )
-    sections = b.to_prompt_sections()
-    assert "(空路径)" in sections["route_hints_section"]
 
 
 # ════════════════════════════════════════════

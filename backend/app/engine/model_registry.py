@@ -245,6 +245,7 @@ class ModelRegistry:
             "protocol": row.protocol,
             "temperature": float(row.temperature) if row.temperature is not None else 0.1,
             "max_tokens": row.max_tokens or settings.llm_max_tokens_default,
+            "max_history_turns": row.max_history_turns,
             "completions_path": row.completions_path,
             "embeddings_path": row.embeddings_path,
             "proxy_enabled": row.proxy_enabled,

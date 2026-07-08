@@ -204,13 +204,18 @@ def _record_generation(
 
 # ════════════════════════════════════════════
 #  P1-14: LLM transient 错误分类
-#  5xx / Timeout / Connection 重试; 4xx 不重试 (业务错误)
+#  429 限流 / 5xx / Timeout / Connection / 空响应 重试;
+#  其余 4xx (bad_request / auth_error 等业务错误) 不重试.
 # ════════════════════════════════════════════
 
-def _is_transient_llm_error(exc: BaseException) -> bool:
-    """判断异常是否 transient (网络抖动 / 5xx / Timeout / 限流 / 空响应), 应重试.
+_HTTP_TOO_MANY_REQUESTS = 429  # noqa: hardcode  # 限流状态码 (协议常量)
 
-    4xx (bad_request / auth_error 等业务错误) 不重试.
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    """判断异常是否 transient (429 限流 / 5xx / Timeout / Connection / 空响应), 应重试.
+
+    429 限流是教科书级瞬态错误 — 上游在说"慢一点", 退避后重试即可成功.
+    其余 4xx (bad_request / auth_error) 是永久业务错误, 不重试.
     """
     if isinstance(exc, EmptyLLMResponseError):
         return True
@@ -219,15 +224,61 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
     if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
         return True
     if isinstance(exc, openai.APIStatusError):
-        return exc.status_code >= 500
+        return exc.status_code == _HTTP_TOO_MANY_REQUESTS or exc.status_code >= 500
 
     # ── Anthropic (Claude) ──
     if isinstance(exc, (anthropic.APITimeoutError, anthropic.APIConnectionError)):
         return True
     if isinstance(exc, anthropic.APIStatusError):
-        return exc.status_code >= 500
+        return exc.status_code == _HTTP_TOO_MANY_REQUESTS or exc.status_code >= 500
 
     return False
+
+
+def _status_code_of(exc: BaseException) -> int | None:
+    """从 SDK 异常取 HTTP status_code (无 response 属性返回 None)."""
+    resp = getattr(exc, "response", None)
+    return getattr(resp, "status_code", None)
+
+
+def _retry_after_secs(exc: BaseException) -> float | None:
+    """解析 response 的 Retry-After 头 (秒). 缺失/非法返回 None.
+
+    httpx.Headers 大小写不敏感, headers.get("retry-after") 即可命中.
+    """
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_budget(exc: BaseException) -> int:
+    """该异常类型的最大重试次数. 429 限流给专属更大预算, 其余瞬态用通用预算."""
+    if _status_code_of(exc) == _HTTP_TOO_MANY_REQUESTS:
+        return settings.llm_rate_limit_retry_max
+    return settings.llm_retry_max
+
+
+def _retry_wait_secs(exc: BaseException, attempt: int) -> float:
+    """重试退避秒数.
+
+    429 限流: 优先尊重 Retry-After (cap 60s), 否则 5/10/20 指数退避 —
+      限流窗口需更长冷却, 区别于 SDK 自带的亚秒级重试.
+    其余瞬态 (5xx/Timeout/Connection): 1/2/4 ... cap 10s 短退避.
+    """
+    if _status_code_of(exc) == _HTTP_TOO_MANY_REQUESTS:
+        ra = _retry_after_secs(exc)
+        if ra is not None:
+            return min(ra, 60.0)
+        return min(2 ** attempt * 5, 20.0)
+    return min(2 ** attempt, 10.0)
 
 
 # ════════════════════════════════════════════
@@ -324,22 +375,24 @@ def _openai_chat(messages: list[dict], cfg: dict[str, Any],
 def _openai_chat_with_retry(messages: list[dict], cfg: dict[str, Any],
                             temperature: float | None = None, max_tokens: int | None = None,
                             extra_body: dict | None = None) -> str:
-    """OpenAI-compatible chat + transient-error retry (指数退避, 上限 llm_retry_max)."""
-    last_exc: BaseException | None = None
-    for attempt in range(settings.llm_retry_max + 1):
+    """OpenAI-compatible chat + transient-error retry (按异常类型取退避预算)."""
+    attempt = 0
+    while True:
         try:
             return _openai_chat(messages, cfg, temperature, max_tokens, extra_body=extra_body)
         except Exception as e:
-            if not _is_transient_llm_error(e) or attempt == settings.llm_retry_max:
+            if not _is_transient_llm_error(e):
                 raise
-            last_exc = e
-            wait_secs = min(2 ** attempt, 10)
+            budget = _retry_budget(e)
+            if attempt >= budget:
+                raise
+            wait_secs = _retry_wait_secs(e, attempt)
             logger.warning(
-                "openai transient error retry %d/%d after %ds: %s",
-                attempt + 1, settings.llm_retry_max, wait_secs, e,
+                "openai transient error retry %d/%d after %.1fs: %s",
+                attempt + 1, budget, wait_secs, e,
             )
             time.sleep(wait_secs)
-    raise last_exc  # type: ignore[misc]  # unreachable
+            attempt += 1
 
 
 # ════════════════════════════════════════════
@@ -512,22 +565,24 @@ def _claude_chat_with_retry(
     temperature: float | None = None, max_tokens: int | None = None,
     thinking: bool = False,
 ) -> str:
-    """Claude chat with transient-error retry (指数退避, 最多 settings.llm_retry_max 次重试)."""
-    last_exc: BaseException | None = None
-    for attempt in range(settings.llm_retry_max + 1):
+    """Claude chat with transient-error retry (按异常类型取退避预算)."""
+    attempt = 0
+    while True:
         try:
             return _claude_chat(messages, cfg, temperature, max_tokens, thinking=thinking)
         except Exception as e:
-            if not _is_transient_llm_error(e) or attempt == settings.llm_retry_max:
+            if not _is_transient_llm_error(e):
                 raise
-            last_exc = e
-            wait_secs = min(2 ** attempt, 10)
+            budget = _retry_budget(e)
+            if attempt >= budget:
+                raise
+            wait_secs = _retry_wait_secs(e, attempt)
             logger.warning(
-                "claude transient error retry %d/%d after %ds: %s",
-                attempt + 1, settings.llm_retry_max, wait_secs, e,
+                "claude transient error retry %d/%d after %.1fs: %s",
+                attempt + 1, budget, wait_secs, e,
             )
             time.sleep(wait_secs)
-    raise last_exc  # type: ignore[misc]  # unreachable
+            attempt += 1
 
 
 # ════════════════════════════════════════════

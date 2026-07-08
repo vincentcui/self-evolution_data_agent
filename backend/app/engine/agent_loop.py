@@ -176,6 +176,7 @@ async def run_agent_loop(
     db: "AsyncSession | None" = None,
     namespace_id: int | None = None,
     session_id: str | None = None,
+    history_messages: list[dict] | None = None,
 ) -> AgentResult:
     """Agent 主循环 (与设计文档 §2 完全对齐).
 
@@ -188,6 +189,9 @@ async def run_agent_loop(
         user_correction_queue: 用户纠偏事件队列 (abort/redirect/param_override).
         system_prompt: 已构建好的 system prompt 文本.
         llm: 注入点 — 测试用 FakeLLM, 生产留 None 走 chat_completion_with_tools.
+        history_messages: 多轮上下文成对 user/assistant 历史消息 (build_history_messages
+            产出), 注入到 system_prompt 之后、当前 question 之前; None/[] 时走单轮路径
+            (行为与改动前一致, 回归零风险).
 
     Returns:
         AgentResult — final_answer / iterations / stop_reason / tool_trace.
@@ -215,6 +219,8 @@ async def run_agent_loop(
         messages: list[dict] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        if history_messages:
+            messages.extend(history_messages)
         messages.append({"role": "user", "content": question})
 
         usage_total: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
@@ -477,13 +483,33 @@ async def run_agent_loop(
                 caps = await _resolve_caps_for_error(db, namespace_id, tool_trace, fired_class)
                 clarify_fn = tools_registry.get("clarify_with_user")
                 if clarify_fn is not None:
-                    ans = await clarify_fn(
-                        question=_forced_clarify_question(
-                            fired_class, caps, error_window.count(fired_class)
-                        ),
-                        options=FORCED_CLARIFY_OPTIONS,
-                        reason=f"重复命中错误类 {fired_class}",
+                    _fc_question = _forced_clarify_question(
+                        fired_class, caps, error_window.count(fired_class)
                     )
+                    _fc_reason = f"重复命中错误类 {fired_class}"
+                    ans = await clarify_fn(
+                        question=_fc_question,
+                        options=FORCED_CLARIFY_OPTIONS,
+                        reason=_fc_reason,
+                    )
+                    # Forced_Clarify 是系统发起的 clarify_with_user 调用, 必须落 tool_trace —
+                    # 否则聊天页 (snap.tool_trace 重建) / 提炼页 (tool_trace_compact 投影)
+                    # 都看不到这次澄清 (渲染器早已支持 clarify_with_user, 缺的只是落库).
+                    tool_trace.append({
+                        "id": f"forced_clarify_{iteration}",
+                        "name": "clarify_with_user",
+                        "input": {
+                            "question": _fc_question,
+                            "options": list(FORCED_CLARIFY_OPTIONS),
+                            "reason": _fc_reason,
+                        },
+                        "output": {
+                            "user_answer": ans.get("user_answer"),
+                            "timeout": ans.get("timeout", False),
+                            "pending_id": ans.get("pending_id"),
+                        },
+                        "status": "ok",
+                    })
                     if ans.get("timeout"):  # R5.10
                         await _abandon_pending(trace_id)
                         stop_reason = "forced_clarify_timeout"

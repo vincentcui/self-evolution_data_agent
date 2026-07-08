@@ -26,7 +26,7 @@ from app.auth import get_current_user, require_admin_or_above
 from app.config import settings
 from app.db.metadata import get_db
 from app.models.base import local_now
-from app.models.model_config import ModelConfig
+from app.models.model_config import DEFAULT_MAX_HISTORY_TURNS, ModelConfig
 from app.models.user import User
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ class ModelConfigIn(BaseModel):
     protocol: str = Field("openai", pattern=r"^(openai|anthropic)$")
     temperature: float | None = 0.0
     max_tokens: int | None = Field(default_factory=lambda: settings.llm_max_tokens_default)
+    max_history_turns: int = Field(default=DEFAULT_MAX_HISTORY_TURNS, ge=0)
     completions_path: str | None = None
     embeddings_path: str | None = None
     proxy_enabled: bool = False
@@ -77,6 +78,7 @@ class ModelConfigOut(BaseModel):
     protocol: str
     temperature: float | None
     max_tokens: int | None
+    max_history_turns: int
     is_active: bool
     completions_path: str | None
     embeddings_path: str | None
@@ -132,6 +134,7 @@ def _safe_config_dict(row: ModelConfig) -> dict:
         "model_type": row.model_type,
         "temperature": float(row.temperature) if row.temperature is not None else None,
         "max_tokens": row.max_tokens,
+        "max_history_turns": row.max_history_turns,
         "completions_path": row.completions_path,
         "embeddings_path": row.embeddings_path,
         "proxy_enabled": row.proxy_enabled,
@@ -184,6 +187,7 @@ def _to_out(row: ModelConfig) -> ModelConfigOut:
         protocol=row.protocol,
         temperature=float(row.temperature) if row.temperature is not None else 0.0,
         max_tokens=row.max_tokens,
+        max_history_turns=row.max_history_turns,
         is_active=row.is_active,
         completions_path=row.completions_path,
         embeddings_path=row.embeddings_path,
@@ -240,6 +244,7 @@ async def add_config(
         protocol=proto,
         temperature=body.temperature,
         max_tokens=body.max_tokens,
+        max_history_turns=body.max_history_turns,
         completions_path=body.completions_path,
         embeddings_path=body.embeddings_path,
         proxy_enabled=body.proxy_enabled,
@@ -293,6 +298,7 @@ async def update_config(
     # model_type 不允许修改
     row.temperature = body.temperature
     row.max_tokens = body.max_tokens
+    row.max_history_turns = body.max_history_turns
     row.completions_path = body.completions_path
     row.embeddings_path = body.embeddings_path
     row.proxy_enabled = body.proxy_enabled

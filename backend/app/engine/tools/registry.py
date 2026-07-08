@@ -12,13 +12,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.engine.tools.catalog_tools import list_databases, list_tables
 from app.engine.tools.data_access_tools import (
     estimate_cost,
     execute_query,
     fetch_schema,
     inspect_values,
 )
-from app.engine.tools.catalog_tools import list_databases, list_tables
 from app.engine.tools.interaction_tools import clarify_with_user
 from app.engine.tools.knowledge_tools import lookup_knowledge, save_knowledge
 from app.engine.tools.plan_tools import (
@@ -112,7 +112,7 @@ FIELD_PROBE_TOOLS: frozenset[str] = frozenset({"inspect_values"})
 #  仅暴露 LLM-visible 字段, 不含 runtime context kwargs
 # ════════════════════════════════════════════
 
-_LOOKUP_ENTRY_TYPES = ["instance_alias", "example", "rule", "route_hint"]
+_LOOKUP_ENTRY_TYPES = ["terminology", "instance_alias", "example", "rule", "route_hint"]
 _SAVE_ENTRY_TYPES = ["terminology", "instance_alias", "example", "rule", "route_hint"]
 
 
@@ -121,21 +121,35 @@ TOOL_SPECS: list[dict] = [
     {
         "name": "lookup_knowledge",
         "description": (
-            "从知识库检索相关条目. "
-            "Use when: 问题里出现未在锚点覆盖的业务名词/别名, "
-            "或多层关联查询前需要历史路径骨架. "
-            "Do not use when: 锚点已覆盖该术语, 或 fetch_schema 已拿到足够信息. "
-            "返回: 每条含 content/entry_type/distance/payload. "
-            "example payload: {question_pattern:语义骨架, "
-            "collections:[表名/集合名], "
-            "join_keys:[{from:源表.字段, "
-            "to:目标表.字段}], "
-            "final_query_plan:{steps:[{db_type:数据库类型, database, "
+            "检索知识库的历史成功模式与业务术语路由. "
+            "Use when: 多步关联查询前找历史成功的查询模板; "
+            "召回的知识提到你尚不掌握库/表路由的集合或术语时, "
+            "用该术语作 query 再查一次 (types=[\"terminology\"]) 拿它的库/表路由; "
+            "问题里的业务名词未在锚点出现时查术语. "
+            "Do not use when: fetch_schema 已拿到足够字段, "
+            "或前一次同 query 召回为空且判断知识库确实无相关条目. "
+            "types 按需选: "
+            "terminology(业务术语→库/表路由) / instance_alias(口语别名→具体记录ID) / "
+            "example(问题-查询成功对, 含可执行 final_query_plan) / "
+            "route_hint(跨集合导航路径) / "
+            "rule(业务约束或关联模式); 不传 types 则全类型混合检索. "
+            "返回: 每条含 content/entry_type/distance/payload. 各类型 payload 字段: "
+            "terminology {term:业务名词, target:所属表/集合, "
+            "database:所属库, db_type:数据库类型, synonyms:[同义词]}; "
+            "instance_alias {alias:口语别名, "
+            "target_collection:目标表/集合, target_database:目标库, "
+            "target_id:目标记录ID, id_field:ID字段名(_id默认)}; "
+            "example {question_pattern:语义骨架, collections:[表名/集合名], "
+            "join_keys:[{from:源表.字段, to:目标表.字段}], "
+            "final_query_plan:{steps:[{db_type:数据库类型, database:库名, "
             "collection:表名/集合名, operation:sql|aggregate|filter, "
-            "query:{sql:SQL串 或 pipeline:[Mongo聚合阶段]}}]}, "
-            "result_summary?:结果描述}. "
-            "route_hint payload: {question_pattern:问题模式, "
-            "collection_path:[有序集合路径], reason:路径理由}. "
+            "query:{sql:SQL串 或 pipeline:[聚合阶段]}}]}, "
+            "result_summary?:结果描述}; "
+            "route_hint {question_pattern:问题模式, "
+            "collection_path:[有序集合路径], reason:路径理由}; "
+            "rule {rule_text:规则描述, "
+            "rule_kind:business_constraint|filter_default|join_pattern, "
+            "priority:优先级(默认0)}. "
             "输入示例: {\"query\": \"订单关联用户\", \"types\": [\"example\"], \"k\": 5}"
         ),
         "input_schema": {
@@ -535,9 +549,14 @@ MongoDB 用 {{pipeline: [...]}} 或 {{filter: {{...}}}}
 - 用户只问 "个数/占比" → execute_query(mode="count"), 照常写取数 query 驱动返标量总数; \
 要每组明细数量走 mode="single" 自行分组.
 
-# 死循环规避
+# 错误消费与循环规避
 
-同一 tool 同样参数不要连调 — 检测到重复立即停, 改策略或 clarify_with_user.
+工具报错是修复指引。处理步骤:
+- 先读错误信息: 逐字读, 它常直接指出哪个字段或哪个语法有问题, 比你猜的准确.
+- 再判类别: 这轮报错是"当前思路下某步写法不对"还是"当前思路本身走不通"? — 不要默认属于其一.
+- 同类场景不同写法: 方向对但写法有误 → 只改出错的那一步, 不整条换路.
+- 同类场景已试数种写法均失败: 大概率不是写法问题, 换策略或 clarify_with_user.
+- 避免无效重试: 连续同类错误时列已试写法, 不重复已失败的; 同一 tool 同样参数连调 — 立即停.
 
 # 证据不足时
 
@@ -550,8 +569,6 @@ MongoDB 用 {{pipeline: [...]}} 或 {{filter: {{...}}}}
 {critical_section}
 
 {anchors_section}
-
-{route_hints_section}
 
 {reflection_section}
 """
@@ -584,15 +601,6 @@ def build_system_prompt(
             )
         anchors_section = "\n".join(lines)
 
-    route_hints_section = ""
-    if route_hints:
-        lines = ["## 路由提示 (route_hint)"]
-        for r in route_hints:
-            path = " → ".join(r.collection_path) if r.collection_path else "(空)"
-            reason = f" — {r.reason}" if r.reason else ""
-            lines.append(f"- 模式: {r.question_pattern} | 路径: {path}{reason}")
-        route_hints_section = "\n".join(lines)
-
     # ── Stage 2 抓手 C: Self-RAG reflection — 走模板变量, 与 critical/anchors/route_hints
     #    同模式, 避免再被拼接到末尾时与 SYSTEM_PROMPT_TEMPLATE 内的工作流编号 (例如 8.) 撞号.
     reflection_section = ""
@@ -623,7 +631,6 @@ def build_system_prompt(
         humanize_hint=_HUMANIZE_HINT,
         critical_section=critical_section,
         anchors_section=anchors_section,
-        route_hints_section=route_hints_section,
         reflection_section=reflection_section,
     )
 

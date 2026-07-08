@@ -9,6 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.crypto import EncryptedString
 from app.models.base import LOCAL_NOW, Base
 
+DEFAULT_MAX_HISTORY_TURNS = 5
+"""多轮对话历史注入默认轮数(Python 侧单一真相源). DDL/前端跨语言各自硬写同值."""
+
 
 class ModelConfig(Base):
     """LLM / Embedding 模型配置，支持多厂商、热切换."""
@@ -39,6 +42,11 @@ class ModelConfig(Base):
 
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=12288)
     """最大输出 Token，仅 CHAT 有效"""
+
+    max_history_turns: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=DEFAULT_MAX_HISTORY_TURNS,
+    )
+    """多轮对话历史注入轮数(仅 CHAT 有效), 0=禁用注入, 默认 5."""
 
     # ── 路径覆盖（兼容非标准厂商）────────────────────────────
     completions_path: Mapped[str | None] = mapped_column(String(256), nullable=True)

@@ -57,17 +57,6 @@ class _FakeOpFailure(Exception):
         self.code = code
 
 
-@pytest.fixture
-def relax_quota(monkeypatch):
-    monkeypatch.setattr(al.settings, "agent_loop_max_exploratory_calls", 100)
-    monkeypatch.setattr(al.settings, "agent_loop_max_decisive_calls", 100)
-    monkeypatch.setattr(al.settings, "agent_loop_max_total_iterations", 100)
-    monkeypatch.setattr(al.settings, "agent_loop_dead_loop_window", 3)
-    monkeypatch.setattr(al.settings, "agent_loop_error_class_window_size", 5)
-    monkeypatch.setattr(al.settings, "agent_loop_error_class_threshold", 2)
-    monkeypatch.setattr(al.settings, "agent_loop_max_forced_clarify_per_class", 1)
-
-
 def _clarify_stub(answer="换个思路", timeout=False):
     async def _clarify(**kw):
         return {"user_answer": answer, "timeout": timeout, "pending_id": 1}

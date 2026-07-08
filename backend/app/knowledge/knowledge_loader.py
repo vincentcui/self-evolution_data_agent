@@ -26,12 +26,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 
+from langfuse import observe
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.engine.tools._mongo_helpers import record_span_io
-from langfuse import observe
 from app.knowledge.knowledge_retriever import KnowledgeHit, _retrieve_layer3
 from app.models.knowledge_entry import KnowledgeEntry
 
@@ -88,11 +88,11 @@ class KnowledgeBundle:
     route_hints_for_prompt: list[RouteHintCandidate]
 
     def to_prompt_sections(self) -> dict[str, str]:
-        """渲染 2 个 prompt section (critical / route_hints)."""
+        """渲染 prompt section. route_hint 已摘除 — 方法类知识由 LLM 主动 lookup_knowledge 召回."""
         return {
             "critical_section": self._render_critical(),
-            "anchors_section": "",  # terminology 已独立走 AC 自动机, 由调用方注入
-            "route_hints_section": self._render_route_hints(),
+            "anchors_section": "",  # terminology 走 AC 自动机, 由调用方注入
+            "route_hints_section": "",  # route_hint 不再注入 (spec 2026-07-07)
         }
 
     # ── 渲染辅助 ──
@@ -102,17 +102,6 @@ class KnowledgeBundle:
         lines = ["## 关键规则 (critical)"]
         lines.extend(f"- {c}" for c in self.critical)
         return "\n".join(lines)
-
-    def _render_route_hints(self) -> str:
-        if not self.route_hints_for_prompt:
-            return ""
-        lines = ["## 路由提示 (route_hint)"]
-        for r in self.route_hints_for_prompt:
-            path = " → ".join(r.collection_path) if r.collection_path else "(空路径)"
-            reason = f" — {r.reason}" if r.reason else ""
-            lines.append(f"- 模式: {r.question_pattern} | 路径: {path}{reason}")
-        return "\n".join(lines)
-
 
 # ════════════════════════════════════════════
 #  内部加载器
@@ -223,14 +212,8 @@ async def _load_inner(
     ))
     critical, vector_hits = await asyncio.gather(critical_task, vector_task)
 
-    # 拆 hits 按 entry_type → 取 ID 顺序 → SQL 批查 payload
-    rh_k = settings.knowledge_route_hint_inject_k
-
-    rh_ids = [h.entry_id for h in vector_hits if h.entry_type == "route_hint"]
-    if rh_k > 0:
-        rh_ids = rh_ids[:rh_k]
-
-    route_hints = await _batch_load_route_hints(db, rh_ids)
+    # route_hint 不再预注入 system prompt — 改由 LLM 按需 lookup_knowledge 召回 (spec 2026-07-07)
+    route_hints: list[RouteHintCandidate] = []
 
     bundle = KnowledgeBundle(
         critical=list(critical),
@@ -248,7 +231,7 @@ async def _load_inner(
         output={
             "critical_count": len(bundle.critical),
             "route_hint_count": len(bundle.route_hints_for_prompt),
-            "route_hint_hit_ids": rh_ids,
+            "route_hint_hit_ids": [],
         },
     )
     return bundle

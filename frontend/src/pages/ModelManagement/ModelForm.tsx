@@ -46,7 +46,7 @@ const MASK = "****";
 /* ── 初始表单状态 ──────────────────────────── */
 const INIT: Omit<ModelConfig, "id" | "is_active" | "created_at" | "updated_at"> = {
   provider: "", protocol: "openai", base_url: "", api_key: "", model_name: "",
-  model_type: "CHAT", temperature: 0.0, max_tokens: 12288,
+  model_type: "CHAT", temperature: 0.0, max_tokens: 12288, max_history_turns: 5,
   completions_path: "", embeddings_path: "",
   proxy_enabled: false, proxy_host: "", proxy_port: undefined, proxy_username: "", proxy_password: "",
 };
@@ -366,6 +366,24 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
                           onChange={(e) => set("max_tokens", parseInt(e.target.value) || 12288)} />
                         <button className={styles.stepBtn} type="button"
                           onClick={() => set("max_tokens", (form.max_tokens ?? 12288) + 100)}>+</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.row}>
+                    <label className={styles.rowLabel}>
+                      历史轮次
+                      <span className={styles.tooltip} data-tip="多轮对话注入的历史轮数, 0=禁用, 仅对话模型有效">?</span>
+                    </label>
+                    <div className={styles.rowCtrl}>
+                      <div className={styles.numGroup}>
+                        <button className={styles.stepBtn} type="button"
+                          onClick={() => set("max_history_turns", Math.max(0, (form.max_history_turns ?? 5) - 1))}>−</button>
+                        <input type="number" min={0} className={styles.numInput}
+                          value={form.max_history_turns ?? 5}
+                          onChange={(e) => set("max_history_turns", Math.max(0, parseInt(e.target.value) || 0))} />
+                        <button className={styles.stepBtn} type="button"
+                          onClick={() => set("max_history_turns", (form.max_history_turns ?? 5) + 1)}>+</button>
                       </div>
                     </div>
                   </div>
