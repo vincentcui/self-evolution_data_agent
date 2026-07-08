@@ -13,6 +13,8 @@ import {
 } from "@/api/modelConfig";
 import { fetchNamespaces } from "@/api";
 import { useAuth } from "@/context/AuthContext";
+import { useOutletContext } from "react-router-dom";
+import type { WorkspaceOutletContext } from "../../components/WorkspacePage";
 import { roleAtLeast } from "@/utils/role";
 import ModelForm from "./ModelForm";
 import type { NamespaceOption } from "./ModelForm";
@@ -32,6 +34,9 @@ const PROVIDER_META: Record<string, { label: string; abbr: string; cls: string }
 
 export default function ModelManagement() {
   const { user } = useAuth();
+  // 两语境共用同一组件: workspace 挂载下发 activeNs; 配置中心裸 Outlet → ctx 为 null
+  const ctx = useOutletContext<WorkspaceOutletContext | null>();
+  const scopedNsId = ctx?.activeNs?.id;   // number | undefined
   const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
   const [namespaces, setNamespaces] = useState<NamespaceOption[]>([]);
@@ -47,7 +52,7 @@ export default function ModelManagement() {
     setLoading(true);
     try {
       const [mcs, nss] = await Promise.all([
-        listModelConfigs(),
+        listModelConfigs(scopedNsId),
         fetchNamespaces(),
       ]);
       setConfigs(mcs);
@@ -56,7 +61,7 @@ export default function ModelManagement() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopedNsId]);
 
   const filtered = typeFilter
     ? configs.filter((c) => c.model_type === typeFilter)
