@@ -93,6 +93,7 @@ const Layout: React.FC = () => {
   const handleLogout = () => { logout(); navigate("/login"); };
 
   const isAdmin = roleAtLeast(user?.role, "admin");
+  const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
 
   const ncColors = getButtonColors(!activeSessionId, hoverNewChat);
   const cfgActive = location.pathname.startsWith("/config");
@@ -123,10 +124,10 @@ const Layout: React.FC = () => {
         </Button>
       </div>
 
-      {/* P0: 配置中心 (仅 admin) — 快捷进入模型管理 */}
-      {isAdmin && (
+      {/* 配置中心 (仅 super_admin) — 全局模型管理 */}
+      {isSuperAdmin && (
         <div style={{ padding: "4px 12px" }}>
-          <Button block icon={<SettingOutlined />} onClick={() => navigate("/config/model-management")}
+          <Button block icon={<SettingOutlined />} onClick={() => navigate("/config")}
             onMouseEnter={() => setHoverConfig(true)} onMouseLeave={() => setHoverConfig(false)}
             style={{ ...BUTTON_BASE_STYLE, ...cfgColors }}>
             配置中心
