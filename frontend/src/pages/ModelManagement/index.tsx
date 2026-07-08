@@ -35,7 +35,7 @@ const PROVIDER_META: Record<string, { label: string; abbr: string; cls: string }
 export default function ModelManagement() {
   const { user } = useAuth();
   // 两语境共用同一组件: workspace 挂载下发 activeNs; 配置中心裸 Outlet → ctx 为 null
-  const ctx = useOutletContext<WorkspaceOutletContext | null>();
+  const ctx = useOutletContext<WorkspaceOutletContext | null | undefined>();
   const scopedNsId = ctx?.activeNs?.id;   // number | undefined
   const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
@@ -301,6 +301,8 @@ export default function ModelManagement() {
         onSuccess={() => { setFormOpen(false); setEditing(null); load(); }}
         accessibleNamespaces={namespaces}
         isSuperAdmin={isSuperAdmin}
+        namespaceId={ctx?.activeNs?.id}
+        namespaceName={ctx?.activeNs?.name}
       />
     </div>
   );
