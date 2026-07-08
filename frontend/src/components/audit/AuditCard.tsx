@@ -4,19 +4,16 @@
  * ════════════════════════════════════════════ */
 
 import React, { useState } from "react";
-import { Button, Checkbox, Modal, Space, Tag, Typography, message } from "antd";
+import { Checkbox, Modal, message } from "antd";
 import {
   approveEntry, deleteKnowledgeWithMode, rejectEntry, restoreEntry,
 } from "@/api";
 import type { KnowledgeEntry } from "@/types";
-import { DB_TYPE_META } from "@/types";
 import EditCanonicalForm from "./EditCanonicalForm";
 import AuditLogTimeline from "./AuditLogTimeline";
 import { HypotheticalQueriesPanel } from "./HypotheticalQueriesPanel";
 import { RelatedEntriesPanel } from "./RelatedEntriesPanel";
 import s from "./AuditCard.module.css";
-
-const { Text } = Typography;
 
 const STATUS_LABELS: Record<string, string> = {
   proposed: "待审", canonical: "已通过",
@@ -245,21 +242,23 @@ export default function AuditCard({
         <div className={s.entryActions}>
           {entry.status === "proposed" && (
             <>
-              <Button type="primary" size="small" loading={approving} onClick={handleApprove}>通过</Button>
-              <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-              <Button size="small" danger onClick={handleReject}>拒绝</Button>
+              <button className={`${s.aBtn} ${s.aBtnPass}`} disabled={approving} onClick={handleApprove}>
+                {approving ? "通过中..." : "通过"}
+              </button>
+              <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
+              <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleReject}>拒绝</button>
             </>
           )}
           {entry.status === "canonical" && (
             <>
-              <Button size="small" onClick={() => setEditOpen(true)}>编辑</Button>
-              <Button size="small" danger onClick={handleSoftDelete}>下架</Button>
+              <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
+              <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleSoftDelete}>下架</button>
             </>
           )}
           {entry.status === "rejected" && (
-            <Button size="small" onClick={handleRestore}>恢复</Button>
+            <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
           )}
-          <Button size="small" onClick={() => setLogOpen(true)}>审计日志</Button>
+          <button className={`${s.aBtn} ${s.aBtnLog}`} onClick={() => setLogOpen(true)}>审计日志</button>
         </div>
       </div>
 
