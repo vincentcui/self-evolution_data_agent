@@ -259,7 +259,7 @@ export default function AuditCard({
           <button className={`${s.aBtn} ${s.aBtnLog}`} onClick={() => setLogOpen(true)}>审计日志</button>
           {hasHq && (
             <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
-              编辑HQ
+              编辑全部
             </button>
           )}
         </div>
