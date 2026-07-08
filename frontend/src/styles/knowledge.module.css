@@ -223,11 +223,37 @@
  * ════════════════════════════════════════════ */
 
 /* ── 空间准备度概览 ── */
+.readinessSection {
+  background: #f5f8ff;
+  border: 1px solid #e0e7ff;
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.readinessHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 14px;
+}
+
+.readinessEyebrow {
+  font-size: 12px;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.readinessTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a2332;
+}
+
 .readinessWrap {
   display: flex;
   align-items: stretch;
   gap: 12px;
-  margin-bottom: 16px;
 }
 
 .readinessCards {
@@ -238,8 +264,8 @@
 }
 
 .readinessCard {
-  background: #fff;
-  border: 1px solid #e5e8ed;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid #e0e7ff;
   border-radius: 10px;
   padding: 14px 16px;
   display: flex;
