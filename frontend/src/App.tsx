@@ -16,6 +16,7 @@ import WorkbenchHomePage from "./pages/WorkbenchHomePage";
 import DataSourcePage from "./pages/DataSourcePage";
 import GitRepoPage from "./pages/GitRepoPage";
 import ModelManagement from "./pages/ModelManagement";
+import RequireSuperAdmin from "./components/RequireSuperAdmin";
 import KnowledgePage from "./pages/KnowledgePage";
 import ProfileManagement from "./pages/ProfileManagement";
 import AgentTracesPage from "./pages/AgentTracesPage";
@@ -56,10 +57,12 @@ const App: React.FC = () => (
           <Route path="users" element={<UserManagePage />} />
           <Route path="shares" element={<ShareManagePage />} />
         </Route>
-        {/* 配置中心 — 全屏独立布局, 左侧导航 + 右侧 Outlet */}
-        <Route path="/config" element={<ConfigCenterPage />}>
-          <Route index element={<Navigate to="model-management" replace />} />
-          <Route path="model-management" element={<ModelManagement />} />
+        {/* 配置中心 — 仅 super_admin, 全屏独立布局 */}
+        <Route element={<RequireSuperAdmin />}>
+          <Route path="/config" element={<ConfigCenterPage />}>
+            <Route index element={<Navigate to="model-management" replace />} />
+            <Route path="model-management" element={<ModelManagement />} />
+          </Route>
         </Route>
       </Route>
     </Routes>
