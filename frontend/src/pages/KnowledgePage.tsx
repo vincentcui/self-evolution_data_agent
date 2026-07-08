@@ -205,7 +205,10 @@ const KnowledgePage: React.FC = () => {
                   <span className={`${styles.readinessDot} ${styles.dotGreen}`} />
                   数据源
                 </span>
-                <span className={styles.readinessValue}>{readiness.dsCount}</span>
+                <span className={styles.readinessValue}>
+                  {readiness.dsCount}
+                  <span className={styles.readinessValueMuted}> 个</span>
+                </span>
               </div>
               <div className={styles.readinessCard}>
                 <span className={styles.readinessLabel}>
@@ -214,7 +217,7 @@ const KnowledgePage: React.FC = () => {
                 </span>
                 <span className={styles.readinessValue}>
                   {readiness.parsedRepos}
-                  <span className={styles.readinessValueMuted}> / {readiness.totalRepos}</span>
+                  <span className={styles.readinessValueMuted}> / {readiness.totalRepos} 已解析</span>
                 </span>
               </div>
               <div className={styles.readinessCard}>
@@ -222,14 +225,20 @@ const KnowledgePage: React.FC = () => {
                   <span className={`${styles.readinessDot} ${styles.dotYellow}`} />
                   知识审核
                 </span>
-                <span className={styles.readinessValue}>{readiness.proposedCount}</span>
+                <span className={styles.readinessValue}>
+                  {readiness.proposedCount}
+                  <span className={styles.readinessValueMuted}> 项待处理</span>
+                </span>
               </div>
               <div className={styles.readinessCard}>
                 <span className={styles.readinessLabel}>
                   <span className={`${styles.readinessDot} ${styles.dotBlue}`} />
                   可问数
                 </span>
-                <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
+                <span className={styles.readinessValue}>
+                  {readiness.canonicalCount}
+                  <span className={styles.readinessValueMuted}> 条正式知识</span>
+                </span>
               </div>
             </div>
           </>
