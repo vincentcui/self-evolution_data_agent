@@ -245,12 +245,6 @@
   font-weight: 500;
 }
 
-.readinessNsName {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a2332;
-}
-
 .readinessCards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

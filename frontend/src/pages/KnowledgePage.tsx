@@ -193,9 +193,6 @@ const KnowledgePage: React.FC = () => {
       <div className={styles.readinessSection}>
         <div className={styles.readinessHeader}>
           <span className={styles.readinessEyebrow}>空间准备度</span>
-          <span className={styles.readinessNsName}>
-            {activeNs ? activeNs.name : "未选择空间"}
-          </span>
         </div>
         {activeNsId && (
           <>
