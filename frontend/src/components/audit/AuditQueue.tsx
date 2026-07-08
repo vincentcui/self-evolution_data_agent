@@ -125,7 +125,7 @@ export default function AuditQueue({
 
       <Spin spinning={loading}>
         {data && data.items.length === 0 ? <Empty /> : (
-          <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <div>
             {data?.items.map((entry) => (
               <AuditCard
                 key={entry.id} entry={entry}
@@ -139,7 +139,7 @@ export default function AuditQueue({
                 onAction={onAfterAction}
               />
             ))}
-          </Space>
+          </div>
         )}
       </Spin>
 
