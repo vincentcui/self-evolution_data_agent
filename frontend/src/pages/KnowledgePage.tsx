@@ -173,18 +173,11 @@ const KnowledgePage: React.FC = () => {
     <div>
       {/* ── 页面头部 ── */}
       <div className={globalStyles.pageHeader}>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <div>
-            <h1 className={globalStyles.pageTitle}>知识库</h1>
-            <p className={globalStyles.pageSubtitle}>
-              业务术语、查询规则、SQL 示例
-            </p>
-          </div>
-          <NamespaceSelector
-            style={{ width: 180, marginLeft: 16 }}
-            value={activeNsId}
-            onChange={(id) => setActiveNsId(id)}
-          />
+        <div>
+          <h1 className={globalStyles.pageTitle}>知识库</h1>
+          <p className={globalStyles.pageSubtitle}>
+            业务术语、查询规则、SQL 示例
+          </p>
         </div>
         <Button
           type="primary"
@@ -198,10 +191,20 @@ const KnowledgePage: React.FC = () => {
 
       {!activeNsId ? (
         <div className={styles.empty}>请先选择命名空间</div>
-      ) : (
-        <>
-          {/* ── 空间准备度概览 ── */}
-          <div className={styles.readinessSection}>
+      ) : null}
+
+      {/* ── 空间准备度概览（始终渲染，含命名空间选择器）── */}
+      <div className={styles.readinessSection}>
+        <div className={styles.readinessHeader}>
+          <span className={styles.readinessEyebrow}>空间准备度</span>
+          <NamespaceSelector
+            style={{ width: 220 }}
+            value={activeNsId}
+            onChange={(id) => setActiveNsId(id)}
+          />
+        </div>
+        {activeNsId && (
+          <>
             <div className={`${styles.readinessBadge} ${readiness.badge.cls}`}>
               {readiness.badge.text}
             </div>
@@ -226,8 +229,12 @@ const KnowledgePage: React.FC = () => {
                 <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
               </div>
             </div>
-          </div>
+          </>
+        )}
+      </div>
 
+      {activeNsId && (
+        <>
           {/* ── 左右两栏 ── */}
           <div className={styles.layout}>
             {/* 左侧分组导航 */}
