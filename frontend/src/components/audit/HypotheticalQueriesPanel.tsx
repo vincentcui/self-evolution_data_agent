@@ -5,7 +5,7 @@
  *  Phase 3: 加"编辑全部"按钮 + Modal 多行 TextArea.
  * ════════════════════════════════════════════ */
 
-import { useState } from "react";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import { Empty, Input, Modal, Tag, message } from "antd";
 import { editKnowledge } from "@/api";
 
@@ -21,11 +21,17 @@ interface Props {
   onUpdated?: () => void;
 }
 
-export function HypotheticalQueriesPanel({
-  entryId,
-  hypothetical_queries_json,
-  onUpdated,
-}: Props) {
+export interface HypotheticalQueriesPanelRef {
+  openEdit: () => void;
+}
+
+export const HypotheticalQueriesPanel = forwardRef<
+  HypotheticalQueriesPanelRef,
+  Props
+>(function HypotheticalQueriesPanel(
+  { entryId, hypothetical_queries_json, onUpdated },
+  ref,
+) {
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -41,6 +47,11 @@ export function HypotheticalQueriesPanel({
     setDraft(parsed.map((p) => p.q).join("\n"));
     setEditOpen(true);
   };
+
+  // 暴露 openEdit 给父组件（AuditCard 操作区按钮触发）
+  useImperativeHandle(ref, () => ({
+    openEdit: handleOpenEdit,
+  }));
 
   const handleSave = async () => {
     const hqs = draft
@@ -68,34 +79,10 @@ export function HypotheticalQueriesPanel({
 
   return (
     <div style={{ marginTop: 8 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
+      <div style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: "#999" }}>
           LLM 同步生成的假设触发问题, 用作 ChromaDB 多向量召回 key
         </span>
-        <button
-          onClick={handleOpenEdit}
-          style={{
-            padding: "4px 10px",
-            borderRadius: 5,
-            fontSize: 11,
-            fontWeight: 500,
-            cursor: "pointer",
-            border: "1px solid #93c5fd",
-            background: "#fff",
-            color: "#2563eb",
-            fontFamily: "inherit",
-            lineHeight: 1.4,
-          }}
-        >
-          编辑全部
-        </button>
       </div>
       {parsed.length === 0 ? (
         <Empty description="未生成假设触发问题 (仅 rule / route_hint 启用)" />
@@ -130,4 +117,4 @@ export function HypotheticalQueriesPanel({
       </Modal>
     </div>
   );
-}
+});

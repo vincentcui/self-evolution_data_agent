@@ -3,7 +3,7 @@
  *  布局: [ID] [body: header标签行 / title / path / summary] [side: time / actions]
  * ════════════════════════════════════════════ */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Checkbox, Modal, message } from "antd";
 import {
   approveEntry, deleteKnowledgeWithMode, rejectEntry, restoreEntry,
@@ -11,7 +11,7 @@ import {
 import type { KnowledgeEntry } from "@/types";
 import EditCanonicalForm from "./EditCanonicalForm";
 import AuditLogTimeline from "./AuditLogTimeline";
-import { HypotheticalQueriesPanel } from "./HypotheticalQueriesPanel";
+import { HypotheticalQueriesPanel, type HypotheticalQueriesPanelRef } from "./HypotheticalQueriesPanel";
 import { RelatedEntriesPanel } from "./RelatedEntriesPanel";
 import s from "./AuditCard.module.css";
 
@@ -60,6 +60,9 @@ export default function AuditCard({
   const [editOpen, setEditOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
+  const hqRef = useRef<HypotheticalQueriesPanelRef>(null);
+
+  const hasHq = ["rule", "route_hint"].includes(entry.entry_type);
 
   const handleApprove = async () => {
     setApproving(true);
@@ -218,8 +221,9 @@ export default function AuditCard({
         {summary && <div className={s.entrySummary}>{summary}</div>}
 
         {/* HQ + 关联条目（保留原有功能） */}
-        {["rule", "route_hint"].includes(entry.entry_type) && (
+        {hasHq && (
           <HypotheticalQueriesPanel
+            ref={hqRef}
             entryId={entry.id}
             hypothetical_queries_json={entry.hypothetical_queries_json ?? "[]"}
             onUpdated={onAction}
@@ -253,6 +257,11 @@ export default function AuditCard({
             <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
           )}
           <button className={`${s.aBtn} ${s.aBtnLog}`} onClick={() => setLogOpen(true)}>审计日志</button>
+          {hasHq && (
+            <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+              编辑HQ
+            </button>
+          )}
         </div>
       </div>
 
