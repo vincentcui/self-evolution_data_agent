@@ -201,36 +201,30 @@ const KnowledgePage: React.FC = () => {
       ) : (
         <>
           {/* ── 空间准备度概览 ── */}
-          <div className={styles.readinessSection}>
-            <div className={styles.readinessHeader}>
-              <span className={styles.readinessEyebrow}>空间准备度</span>
-              <span className={styles.readinessTitle}>当前命名空间</span>
+          <div className={styles.readinessWrap}>
+            <div className={styles.readinessCards}>
+              <div className={styles.readinessCard}>
+                <span className={styles.readinessLabel}>数据源</span>
+                <span className={styles.readinessValue}>{readiness.dsCount}</span>
+              </div>
+              <div className={styles.readinessCard}>
+                <span className={styles.readinessLabel}>训练来源</span>
+                <span className={styles.readinessValue}>
+                  {readiness.parsedRepos}
+                  <span className={styles.readinessValueMuted}> / {readiness.totalRepos}</span>
+                </span>
+              </div>
+              <div className={styles.readinessCard}>
+                <span className={styles.readinessLabel}>知识审核</span>
+                <span className={styles.readinessValue}>{readiness.proposedCount}</span>
+              </div>
+              <div className={styles.readinessCard}>
+                <span className={styles.readinessLabel}>可问数</span>
+                <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
+              </div>
             </div>
-            <div className={styles.readinessWrap}>
-              <div className={styles.readinessCards}>
-                <div className={styles.readinessCard}>
-                  <span className={styles.readinessLabel}>数据源</span>
-                  <span className={styles.readinessValue}>{readiness.dsCount}</span>
-                </div>
-                <div className={styles.readinessCard}>
-                  <span className={styles.readinessLabel}>训练来源</span>
-                  <span className={styles.readinessValue}>
-                    {readiness.parsedRepos}
-                    <span className={styles.readinessValueMuted}> / {readiness.totalRepos}</span>
-                  </span>
-                </div>
-                <div className={styles.readinessCard}>
-                  <span className={styles.readinessLabel}>知识审核</span>
-                  <span className={styles.readinessValue}>{readiness.proposedCount}</span>
-                </div>
-                <div className={styles.readinessCard}>
-                  <span className={styles.readinessLabel}>可问数</span>
-                  <span className={styles.readinessValue}>{readiness.canonicalCount}</span>
-                </div>
-              </div>
-              <div className={`${styles.readinessBadge} ${readiness.badge.cls}`}>
-                {readiness.badge.text}
-              </div>
+            <div className={`${styles.readinessBadge} ${readiness.badge.cls}`}>
+              {readiness.badge.text}
             </div>
           </div>
 
