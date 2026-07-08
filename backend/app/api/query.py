@@ -15,6 +15,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._clarify_extract_prompt import (
+    CLARIFY_EXTRACT_PROMPT,
+    VALID_CATEGORIES,
+)
+from app.api._session_cleanup import (
+    write_cancelled_history,
+)
 from app.auth import assert_ns_access, get_current_user, require_admin_or_above
 from app.config import settings
 from app.db.metadata import async_session as _new_db_session
@@ -42,20 +49,26 @@ from app.engine.tools.registry import (
     FIELD_PROBE_TOOLS,
     PROBE_TOOLS,
     TOOL_SPECS,
-    TOOL_TARGET_FIELD,
     build_system_prompt,
 )
 from app.engine.visualizer import render_chart
 from app.knowledge.trace_extractor import (
     derive_cost_strategy as _derive_cost_strategy_impl,
+)
+from app.knowledge.trace_extractor import (
     extract_collections as _extract_collections_impl,
+)
+from app.knowledge.trace_extractor import (
     extract_final_pipeline as _extract_final_pipeline_impl,
+)
+from app.knowledge.trace_extractor import (
     extract_join_fields as _extract_join_fields_impl,
-    normalize_query_plan as _normalize_query_plan_impl,
+)
+from app.knowledge.trace_extractor import (
     extract_join_keys as _extract_join_keys_impl,
 )
-from app.api._session_cleanup import (
-    write_cancelled_history,
+from app.knowledge.trace_extractor import (
+    normalize_query_plan as _normalize_query_plan_impl,
 )
 from app.models import (
     Namespace,
@@ -339,6 +352,7 @@ async def query_stream(
                 final_data["chart_option"] = presented["chart_option"]
                 final_data["category_column"] = presented["category_column"]
                 final_data["value_column"] = presented["value_column"]
+                final_data["series_by"] = presented["series_by"]
                 final_data["truncated"] = presented["truncated"]  # §4.6 显式透传
                 final_data["rendered_row_count"] = presented["rendered_row_count"]
                 final_data["total_row_count"] = presented["total_row_count"]
@@ -354,6 +368,7 @@ async def query_stream(
                 final_data.setdefault("chart_option", {})
                 final_data.setdefault("category_column", "")
                 final_data.setdefault("value_column", "")
+                final_data.setdefault("series_by", "")
                 final_data.setdefault("truncated", False)
                 final_data.setdefault("rendered_row_count", len(final_data.get("rows", [])))
                 final_data.setdefault("total_row_count", len(final_data.get("rows", [])))
@@ -477,6 +492,7 @@ def _resolve_present_result(trace: list[dict]) -> dict | None:
         "chart_option": chart_option,
         "category_column": chart_spec.get("x", ""),  # 兼容旧前端字段
         "value_column": chart_spec.get("value", ""),  # 切换图表类型时前端复用 LLM 选定的度量列
+        "series_by": chart_spec.get("series_by", ""),  # 切换图表类型时前端复用 LLM 选定的分组列
         "truncated": truncated,                       # §4.6 截断显式透传
         "rendered_row_count": len(rows),
         "total_row_count": total_row_count,           # 截断时为补 count 的精确总数
@@ -514,6 +530,7 @@ async def _write_query_history(
         chart_option_data = presented["chart_option"]
         category_column_data = presented["category_column"]
         value_column_data = presented["value_column"]
+        series_by_data = presented["series_by"]
         truncated_data = presented["truncated"]
         rendered_row_count_data = presented["rendered_row_count"]
         total_row_count_data = presented["total_row_count"]
@@ -527,6 +544,7 @@ async def _write_query_history(
         chart_option_data = {}
         category_column_data = ""
         value_column_data = ""
+        series_by_data = ""
         truncated_data = False
         rendered_row_count_data = len(rows_data)
         total_row_count_data = len(rows_data)
@@ -552,6 +570,7 @@ async def _write_query_history(
                 "chart_type": chart_type_data,
                 "category_column": category_column_data,
                 "value_column": value_column_data,
+                "series_by": series_by_data,
                 "chart_option": chart_option_data,
                 "truncated": truncated_data,
                 "rendered_row_count": rendered_row_count_data,
@@ -660,11 +679,6 @@ async def get_stream_status(trace_id: str, user: User = Depends(get_current_user
 # ════════════════════════════════════════════
 #  Phase 7: clarify_response 后台抽取 hook
 # ════════════════════════════════════════════
-
-from app.api._clarify_extract_prompt import (
-    CLARIFY_EXTRACT_PROMPT,
-    VALID_CATEGORIES,
-)
 
 
 async def _clarify_extract_hook(

@@ -12,11 +12,11 @@ import {
   message,
 } from "antd";
 import { PlusOutlined, SyncOutlined } from "@ant-design/icons";
+import { useOutletContext } from "react-router-dom";
 import * as api from "@/api";
 import type {
   GitRepo,
   KnowledgeEntry,
-  Namespace,
   TerminologyConflict,
 } from "@/types";
 import globalStyles from "@/styles/global.module.css";
@@ -24,13 +24,13 @@ import styles from "@/styles/knowledge.module.css";
 import AuditQueue from "@/components/audit/AuditQueue";
 import CreateKnowledgeForm from "@/components/audit/CreateKnowledgeForm";
 import TerminologyConflictModal from "@/components/audit/TerminologyConflictModal";
-import NamespaceSelector from "@/components/NamespaceSelector";
+import type { WorkspaceOutletContext } from "@/components/WorkspacePage";
 import { SchemaCanonicalPanel } from "@/components/SchemaCanonicalPanel";
 import { ExtractionFailureList } from "@/components/extraction/ExtractionFailureList";
 
 const KnowledgePage: React.FC = () => {
-  const [namespaces, setNamespaces] = useState<Namespace[]>([]);
-  const [activeNsId, setActiveNsId] = useState<number>();
+  const { activeNs } = useOutletContext<WorkspaceOutletContext>();
+  const activeNsId = activeNs?.id;
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [repos, setRepos] = useState<GitRepo[]>([]);
   const [showAddKnowledge, setShowAddKnowledge] = useState(false);
@@ -49,10 +49,6 @@ const KnowledgePage: React.FC = () => {
   /* Terminology Conflict 状态 (Phase 3 Task 3.3) */
   const [terminologyConflicts, setTerminologyConflicts] = useState<TerminologyConflict[]>([]);
   const [selectedTermConflict, setSelectedTermConflict] = useState<TerminologyConflict | null>(null);
-
-  useEffect(() => {
-    api.fetchNamespaces().then(setNamespaces);
-  }, []);
 
   const loadData = useCallback(async (nsId: number) => {
     const [k, repoRes, termConflicts] = await Promise.all([
@@ -126,8 +122,6 @@ const KnowledgePage: React.FC = () => {
     error: "error",
   };
 
-  const nsName = namespaces.find((n) => n.id === activeNsId)?.name;
-
   return (
     <div>
       {/* ── 页面头部 ── */}
@@ -136,14 +130,9 @@ const KnowledgePage: React.FC = () => {
           <div>
             <h1 className={globalStyles.pageTitle}>知识库</h1>
             <p className={globalStyles.pageSubtitle}>
-              业务术语、查询规则、SQL 示例
+              {activeNs ? `当前空间: ${activeNs.name}` : "业务术语、查询规则、SQL 示例"}
             </p>
           </div>
-          <NamespaceSelector
-            style={{ width: 180, marginLeft: 16 }}
-            value={activeNsId}
-            onChange={(id) => setActiveNsId(id)}
-          />
         </div>
         <Button
           type="primary"

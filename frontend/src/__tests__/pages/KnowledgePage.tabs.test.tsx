@@ -7,7 +7,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import KnowledgePage from "@/pages/KnowledgePage";
 
 vi.mock("@/api", () => ({
-  fetchNamespaces: vi.fn().mockResolvedValue([{ id: 1, name: "默认", slug: "default" }]),
   fetchKnowledge: vi.fn().mockResolvedValue([]),
   fetchRepos: vi.fn().mockResolvedValue({ repos: [] }),
   listTerminologyConflicts: vi.fn().mockResolvedValue({ conflicts: [] }),
@@ -22,9 +21,17 @@ vi.mock("@/api", () => ({
   parseRepo: vi.fn(),
 }));
 
+// activeNs 走 WorkspacePage 共享 context (取代 NamespaceSelector 自动选中)
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useOutletContext: () => ({ activeNs: { id: 1, name: "默认", slug: "default" } }),
+  };
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
-  // NamespaceSelector 会把默认 ns 写入 localStorage, 各 test 保持隔离
   localStorage.clear();
 });
 
@@ -33,8 +40,7 @@ describe("KnowledgePage 知识条目 tab", () => {
     const { fetchAuditQueue } = await import("@/api");
     render(<KnowledgePage />);
 
-    // NamespaceSelector 挂载后自动选中第一个命名空间 (无 localStorage 记忆时),
-    // 知识条目 tab 默认激活 → AuditQueue 加载, fetchAuditQueue 被调用
+    // activeNs 已由共享 context 提供, 知识条目 tab 默认激活 → AuditQueue 加载, fetchAuditQueue 被调用
     await waitFor(() => expect(fetchAuditQueue).toHaveBeenCalled());
     const params = (fetchAuditQueue as any).mock.calls[0][0];
     expect(params.namespace_id).toBe(1);

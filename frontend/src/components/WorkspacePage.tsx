@@ -11,6 +11,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ArrowLeftOutlined,
   DatabaseOutlined,
+  GithubOutlined,
   BookOutlined,
   UserOutlined,
   RobotOutlined,
@@ -18,19 +19,30 @@ import {
   ExperimentOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
+import { useActiveNamespace } from "@/hooks/useActiveNamespace";
+import type { Namespace } from "@/types";
+
+/** 子路由管理页 (数据源/Git仓库/知识库/Trace提炼…) 经 useOutletContext 取共享的当前空间,
+ *  不再各自挂 NamespaceSelector 下拉框。 */
+export interface WorkspaceOutletContext {
+  activeNs: Namespace | null;
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
 
 /* ── 左侧导航宽度 — 与 Layout 侧边栏 (267px) 一致, 杜绝双菜单栏宽度错位 ── */
 const SIDEBAR_WIDTH = 267;
 
 /* ── 左侧导航项 — to 即路由 path, NavLink 自动 active ── */
 const navItems = [
-  { to: "/workspace/namespaces", icon: <DatabaseOutlined />, label: "命名空间" },
-  { to: "/workspace/model-management", icon: <RobotOutlined />, label: "模型管理" },
-  { to: "/workspace/knowledge", icon: <BookOutlined />, label: "知识库" },
-  { to: "/workspace/profiles", icon: <SettingOutlined />, label: "Profile 管理" },
-  { to: "/workspace/agent-traces", icon: <ExperimentOutlined />, label: "Trace 提炼" },
-  { to: "/workspace/users", icon: <UserOutlined />, label: "用户管理" },
-  { to: "/workspace/shares", icon: <ShareAltOutlined />, label: "分享管理" },
+  { to: "/workspace/manage/datasources", icon: <DatabaseOutlined />, label: "数据源" },
+  { to: "/workspace/manage/repos", icon: <GithubOutlined />, label: "Git 仓库" },
+  { to: "/workspace/manage/model-management", icon: <RobotOutlined />, label: "模型管理" },
+  { to: "/workspace/manage/knowledge", icon: <BookOutlined />, label: "知识库" },
+  { to: "/workspace/manage/profiles", icon: <SettingOutlined />, label: "Profile 管理" },
+  { to: "/workspace/manage/agent-traces", icon: <ExperimentOutlined />, label: "Trace 提炼" },
+  { to: "/workspace/manage/users", icon: <UserOutlined />, label: "用户管理" },
+  { to: "/workspace/manage/shares", icon: <ShareAltOutlined />, label: "分享管理" },
 ];
 
 /* NavLink active 样式 */
@@ -50,6 +62,7 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties 
 
 const WorkspacePage: React.FC = () => {
   const navigate = useNavigate();
+  const { activeNs, loading, refresh } = useActiveNamespace();
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "#fff", overflow: "hidden" }}>
@@ -64,9 +77,9 @@ const WorkspacePage: React.FC = () => {
           flexDirection: "column",
         }}
       >
-        {/* 左上角返回 — 回对话页 */}
+        {/* 左上角返回 — 回工作台首页 */}
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/workspace")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -83,10 +96,10 @@ const WorkspacePage: React.FC = () => {
           }}
         >
           <ArrowLeftOutlined />
-          返回对话
+          返回工作台
         </button>
 
-        {/* 工作台标题 */}
+        {/* 当前空间标题 — 替代原固定"工作台"文案 */}
         <div
           style={{
             padding: "14px 16px",
@@ -113,7 +126,18 @@ const WorkspacePage: React.FC = () => {
           >
             SE
           </span>
-          <span style={{ fontSize: 18, fontWeight: 600, color: "#1a1a1a" }}>工作台</span>
+          <span
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: "#1a1a1a",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {loading ? "" : activeNs?.name ?? "工作台"}
+          </span>
         </div>
 
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
@@ -126,9 +150,9 @@ const WorkspacePage: React.FC = () => {
         </nav>
       </aside>
 
-      {/* 右侧内容 — Outlet 渲染子路由管理页 */}
+      {/* 右侧内容 — Outlet 渲染子路由管理页, 共享当前空间 context */}
       <div style={{ flex: 1, overflow: "auto", padding: 24, background: "#f5f7fa" }}>
-        <Outlet />
+        <Outlet context={{ activeNs, loading, refresh }} />
       </div>
     </div>
   );

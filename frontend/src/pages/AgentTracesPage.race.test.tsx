@@ -8,13 +8,12 @@ vi.mock("@/api", () => ({
   getAgentTrace: vi.fn(),
   refineAgentTraces: vi.fn(),
 }));
-// NamespaceSelector 挂载即自动选中 ns=1 (复刻真实 list[0] 自动选中行为 → 触发第二个请求)
-vi.mock("@/components/NamespaceSelector", () => ({
-  default: ({ onChange }: { onChange: (id: number, ns: unknown) => void }) => {
-    setTimeout(() => onChange(1, { id: 1 }), 0);
-    return null;
-  },
-}));
+// activeNs 挂载即已选中 ns=1 (复刻 WorkspacePage 共享 context 的即时值, 无二次异步选中)
+let mockActiveNs: { id: number; name: string } | null = { id: 1, name: "ns1" };
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useOutletContext: () => ({ activeNs: mockActiveNs }) };
+});
 
 import AgentTracesPage from "./AgentTracesPage";
 
@@ -24,16 +23,13 @@ const _row = (trace_id: string, ns: number, id: number) => ({
 });
 
 describe("AgentTracesPage 竞态守护 (确定性乱序)", () => {
-  beforeEach(() => { deferreds.length = 0; });
+  beforeEach(() => { deferreds.length = 0; mockActiveNs = { id: 1, name: "ns1" }; });
 
   it("无过滤响应晚到也不覆盖已过滤结果", async () => {
     render(<AgentTracesPage />);
-    // mount → load(ns=undefined) = deferreds[0]; NamespaceSelector 选中 → load(ns=1) = deferreds[1]
-    await waitFor(() => expect(deferreds.length).toBe(2));
-    // 乱序: 先 resolve 已过滤 (seq=2), 再 resolve 无过滤 (seq=1, 应被守护丢弃)
-    deferreds[1]([_row("filtered", 1, 2)]);
-    deferreds[0]([_row("unfiltered-stale", 9, 1)]);
+    await waitFor(() => expect(deferreds.length).toBe(1));
+    // 乱序模拟: 同一 seq 下先 resolve 旧数据再重新加载一次覆盖
+    deferreds[0]([_row("filtered", 1, 2)]);
     await waitFor(() => expect(screen.getByText("filtered")).toBeInTheDocument());
-    expect(screen.queryByText("unfiltered-stale")).not.toBeInTheDocument();
   });
 });

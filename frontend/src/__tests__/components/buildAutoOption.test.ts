@@ -55,3 +55,50 @@ describe("buildAutoOption — 启发式 fallback (无 valueColumn)", () => {
     expect(series.length).toBeGreaterThan(1);
   });
 });
+
+/* ════════════════════════════════════════════
+ *  seriesBy pivot — 切换图表类型时复用 LLM 选定的分组列
+ *  回归 trace e1f70ac0: 后端折线空白后用户切柱状图, 旧 buildAutoOption
+ *  无 series_by → 仅 daily_total 单 series, 丢失站点分组.
+ * ════════════════════════════════════════════ */
+describe("buildAutoOption — seriesBy multi-series pivot", () => {
+  // 通用域: 两站点 × 两日 的日度量 (镜像 D/G × record_date × daily_total 结构)
+  const cols = ["station", "record_date", "daily_total"];
+  const srows: any[][] = [
+    ["D", "2024-01-01", 130996],
+    ["D", "2024-01-02", 78321],
+    ["G", "2024-01-01", 90000],
+    ["G", "2024-01-02", 91000],
+  ];
+
+  it("bar + seriesBy=station → 两条 series (D/G), 按 record_date 对齐", () => {
+    const opt = buildAutoOption("bar", srows, cols, "record_date", "daily_total", "station");
+    const series = opt.series as any[];
+    expect(series).toHaveLength(2);
+    const byName = Object.fromEntries(series.map((s) => [s.name, s.data])) as Record<string, any[]>;
+    expect(byName["D"]).toEqual([130996, 78321]);
+    expect(byName["G"]).toEqual([90000, 91000]);
+    expect(opt.xAxis.data).toEqual(["2024-01-01", "2024-01-02"]);
+    expect(opt.legend.data).toEqual(["D", "G"]);
+  });
+
+  it("line + seriesBy=station → 两条线, 缺格补 null", () => {
+    const partial: any[][] = [
+      ["D", "2024-01-01", 130996],
+      ["G", "2024-01-01", 90000],
+      ["G", "2024-01-02", 91000],
+    ];
+    const opt = buildAutoOption("line", partial, cols, "record_date", "daily_total", "station");
+    const byName = Object.fromEntries(
+      (opt.series as any[]).map((s) => [s.name, s.data]),
+    ) as Record<string, any[]>;
+    expect(byName["D"]).toEqual([130996, null]);
+    expect(byName["G"]).toEqual([90000, 91000]);
+  });
+
+  it("seriesBy 列不存在 → 退化为单 series (不抛)", () => {
+    const opt = buildAutoOption("bar", srows, cols, "record_date", "daily_total", "missing_col");
+    const series = opt.series as any[];
+    expect(series).toHaveLength(1);
+  });
+});

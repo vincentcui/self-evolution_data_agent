@@ -118,10 +118,10 @@ const Layout: React.FC = () => {
         </Button>
       </div>
 
-      {/* P0: 工作台 (仅 admin) — 路由跳转 /workspace/namespaces */}
+      {/* P0: 工作台 (仅 admin) — 路由跳转 /workspace 首页 */}
       {isAdmin && (
         <div style={{ padding: "4px 12px" }}>
-          <Button block icon={<AppstoreOutlined />} onClick={() => navigate("/workspace/namespaces")}
+          <Button block icon={<AppstoreOutlined />} onClick={() => navigate("/workspace")}
             onMouseEnter={() => setHoverWorkspace(true)} onMouseLeave={() => setHoverWorkspace(false)}
             style={{ ...BUTTON_BASE_STYLE, ...wsColors }}>
             工作台

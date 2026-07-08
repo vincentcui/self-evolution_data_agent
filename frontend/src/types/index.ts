@@ -126,6 +126,8 @@ export interface QueryResponse {
   chart_type: "line" | "bar" | "pie" | "card" | "table";
   category_column?: string;
   value_column?: string;
+  /* 切换图表类型时前端复用 LLM 选定的分组列 (multi-series pivot) */
+  series_by?: string;
   chart_option: Record<string, any>;
   performance_warning: string;
   /* §4.6 截断显式 (绝不静默): 渲染源撞 IS_RENDER_ROW_LIMIT 时透传 */
@@ -289,4 +291,39 @@ export interface ReadinessResult {
   ready: boolean;
   checks: Record<string, boolean>;
   blockers: Blocker[];
+}
+
+/* ════════════════════════════════════════════
+ *  工作台首页汇总
+ * ════════════════════════════════════════════ */
+
+export interface WorkbenchNamespaceCard {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  created_at: string;
+  ready: boolean;
+  datasource_count: number;
+  session_count: number;
+  git_parsed_count: number;
+  git_total_count: number;
+  knowledge_count: number;
+}
+
+export interface WorkbenchRecentSession {
+  id: string;
+  namespace_id: number;
+  namespace_name: string;
+  title: string;
+  updated_at: string | null;
+}
+
+export interface WorkbenchSummary {
+  accessible_count: number;
+  ready_count: number;
+  pending_count: number;
+  recent_session_count: number;
+  namespaces: WorkbenchNamespaceCard[];
+  recent_sessions: WorkbenchRecentSession[];
 }

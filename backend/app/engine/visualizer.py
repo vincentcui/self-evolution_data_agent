@@ -5,6 +5,7 @@
 """
 
 import math
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -33,12 +34,20 @@ def _is_time_column(series: pd.Series) -> bool:
 
 
 def _to_serializable(val):
-    """单值 JSON 化: pd.isna / inf / -inf → None, 其余原样."""
+    """单值 JSON 化: pd.isna / inf / -inf → None, Decimal → float, 其余数值原样.
+
+    ECharts value 轴需 number; MySQL 聚合 (SUM 等) 返回 Decimal, 若不强转会被
+    上层 json 序列化成字符串, 致数值轴渲染不可靠.
+    """
     if val is None:
         return None
     if isinstance(val, float):
         # 纯 Python float 在此分支内闭合处理: inf/nan → None, 否则原样 (本身已 JSON 可序列化).
         return None if (pd.isna(val) or math.isinf(val)) else val
+    if isinstance(val, Decimal):
+        # MySQL SUM/AVG 返回 Decimal; 强转 float 供 ECharts value 轴直绘.
+        fv = float(val)
+        return None if (math.isnan(fv) or math.isinf(fv)) else fv
     try:
         if pd.isna(val):
             return None
@@ -118,50 +127,48 @@ def _apply_code_label_map(rows: list[dict], code_label_map: dict) -> list[dict]:
     return out
 
 
-def _render_line(df: pd.DataFrame, x: str, value: str, series_by: str) -> tuple[str, dict]:
-    """x 去重升序; series_by 非空时按其唯一值 pivot 出多条线."""
+def _render_axis_chart(
+    df: pd.DataFrame, x: str, value: str, series_by: str, chart_type: str
+) -> tuple[str, dict]:
+    """line / bar 共享渲染. x 去重升序; series_by 非空时按其唯一值 pivot 出多条.
+
+    x 列只字符串化一次 (向量化 ``df[x].astype(str)``), x_data 与 lookup key 同源复用 ——
+    标量 ``str(r[x])`` 与向量化 ``astype(str)`` 对 datetime64 列产出不同字符串 (date-only
+    vs 带时间), 双路径会致 lookup 全 miss → series 全 None (trace e1f70ac0 回归).
+    """
     if not x or not value:
         return "table", {}
-    x_data = sorted(df[x].astype(str).unique().tolist())
+    # 单一字符串化源: x_data 与 lookup key 共用, 杜绝双路径漂移.
+    xs = df[x].astype(str)
+    x_data = sorted(xs.unique().tolist())
     if series_by:
+        sb = df[series_by].astype(str)
         series = []
-        for key in df[series_by].astype(str).unique().tolist():
-            sub = df[df[series_by].astype(str) == key]
-            lookup = {str(r[x]): _to_serializable(r[value]) for _, r in sub.iterrows()}
-            data = [lookup.get(xv) for xv in x_data]  # 缺格补 None
-            series.append({"name": key, "type": "line", "data": data})
+        for key in sb.unique().tolist():
+            mask = sb == key
+            lookup = dict(
+                zip(xs[mask].tolist(), [_to_serializable(v) for v in df.loc[mask, value].tolist()])
+            )
+            data = [lookup.get(xv) for xv in x_data]
+            series.append({"name": key, "type": chart_type, "data": data})
     else:
-        lookup = {str(r[x]): _to_serializable(r[value]) for _, r in df.iterrows()}
-        series = [{"name": value, "type": "line", "data": [lookup.get(xv) for xv in x_data]}]
-    return "line", {
+        lookup = dict(zip(xs.tolist(), [_to_serializable(v) for v in df[value].tolist()]))
+        series = [{"name": value, "type": chart_type, "data": [lookup.get(xv) for xv in x_data]}]
+    return chart_type, {
         "xAxis": {"type": "category", "data": x_data},
         "yAxis": {"type": "value"},
         "series": series,
         "tooltip": {"trigger": "axis"},
         "legend": {"data": [s["name"] for s in series]} if len(series) > 1 else {},
     }
+
+
+def _render_line(df: pd.DataFrame, x: str, value: str, series_by: str) -> tuple[str, dict]:
+    return _render_axis_chart(df, x, value, series_by, "line")
 
 
 def _render_bar(df: pd.DataFrame, x: str, value: str, series_by: str) -> tuple[str, dict]:
-    if not x or not value:
-        return "table", {}
-    x_data = sorted(df[x].astype(str).unique().tolist())
-    if series_by:
-        series = []
-        for key in df[series_by].astype(str).unique().tolist():
-            sub = df[df[series_by].astype(str) == key]
-            lookup = {str(r[x]): _to_serializable(r[value]) for _, r in sub.iterrows()}
-            series.append({"name": key, "type": "bar", "data": [lookup.get(xv) for xv in x_data]})
-    else:
-        lookup = {str(r[x]): _to_serializable(r[value]) for _, r in df.iterrows()}
-        series = [{"name": value, "type": "bar", "data": [lookup.get(xv) for xv in x_data]}]
-    return "bar", {
-        "xAxis": {"type": "category", "data": x_data},
-        "yAxis": {"type": "value"},
-        "series": series,
-        "tooltip": {"trigger": "axis"},
-        "legend": {"data": [s["name"] for s in series]} if len(series) > 1 else {},
-    }
+    return _render_axis_chart(df, x, value, series_by, "bar")
 
 
 def _render_pie(df: pd.DataFrame, x: str, value: str) -> tuple[str, dict]:
