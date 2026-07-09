@@ -66,9 +66,11 @@ export default function ModelManagement() {
 
   // 工作台语境下 activeNs 未就绪时跳过首次加载, 避免发出不带 namespace_id 的请求
   // (该请求返回所有可访问空间配置, 若晚于过滤后的请求返回会覆盖正确结果 — 竞态条件)
+  // addBlocked 由 ctx 派生, 工作台↔配置中心切换走不同路由 (组件 unmount/remount), 无实际过期风险
   useEffect(() => {
     if (addBlocked) return;
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedNsId]);
 
   const filtered = typeFilter

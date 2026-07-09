@@ -43,27 +43,32 @@ test("L3: 激活后 DB 状态变更 — is_active 唯一", async ({ page, reques
   expect(nsResp.status()).toBe(201);
   const nsId = (await nsResp.json()).id;
 
-  // 创建两条 CHAT config
-  const ids: number[] = [];
-  for (const i of [0, 1]) {
-    const resp = await request.post("/api/model-config/add", {
-      data: {
-        provider: "openai", base_url: `https://api${i}.openai.com`,
-        api_key: `sk-${i}`, model_name: `model-${i}`,
-        model_type: "CHAT", namespace_id: nsId,
-      },
-      headers,
-    });
-    ids.push((await resp.json()).id);
+  try {
+    // 创建两条 CHAT config
+    const ids: number[] = [];
+    for (const i of [0, 1]) {
+      const resp = await request.post("/api/model-config/add", {
+        data: {
+          provider: "openai", base_url: `https://api${i}.openai.com`,
+          api_key: `sk-${i}`, model_name: `model-${i}`,
+          model_type: "CHAT", namespace_id: nsId,
+        },
+        headers,
+      });
+      ids.push((await resp.json()).id);
+    }
+
+    // 激活第一条
+    const actResp = await request.post(`/api/model-config/activate/${ids[0]}`, undefined, { headers });
+    expect(actResp.status()).toBe(200);
+
+    // 断言：该 namespace 下仅一个 active
+    const listResp = await request.get(`/api/model-config/list?namespace_id=${nsId}`, { headers });
+    const configs = await listResp.json();
+    const activeCount = configs.filter((c: any) => c.is_active).length;
+    expect(activeCount).toBe(1);
+  } finally {
+    // 清理创建的 namespace (避免重复运行 slug 冲突)
+    await request.delete(`/api/namespaces/${nsId}`, { headers });
   }
-
-  // 激活第一条
-  const actResp = await request.post(`/api/model-config/activate/${ids[0]}`, undefined, { headers });
-  expect(actResp.status()).toBe(200);
-
-  // 断言：该 namespace 下仅一个 active
-  const listResp = await request.get(`/api/model-config/list?namespace_id=${nsId}`, { headers });
-  const configs = await listResp.json();
-  const activeCount = configs.filter((c: any) => c.is_active).length;
-  expect(activeCount).toBe(1);
 });
