@@ -64,7 +64,12 @@ export default function ModelManagement() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [scopedNsId]);
+  // 工作台语境下 activeNs 未就绪时跳过首次加载, 避免发出不带 namespace_id 的请求
+  // (该请求返回所有可访问空间配置, 若晚于过滤后的请求返回会覆盖正确结果 — 竞态条件)
+  useEffect(() => {
+    if (addBlocked) return;
+    load();
+  }, [scopedNsId]);
 
   const filtered = typeFilter
     ? configs.filter((c) => c.model_type === typeFilter)

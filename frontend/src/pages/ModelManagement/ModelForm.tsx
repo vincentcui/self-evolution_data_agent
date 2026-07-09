@@ -50,7 +50,6 @@ const PROVIDER_DEFAULTS: Record<string, { label: string; baseUrl: string; abbr: 
 // 从 modelFormUtils 导入，便于独立单元测试
 
 const PROVIDERS = Object.keys(PROVIDER_DEFAULTS);
-const MASK = "****";
 
 /* ── 初始表单状态 ──────────────────────────── */
 const INIT: Omit<ModelConfig, "id" | "is_active" | "created_at" | "updated_at"> = {
