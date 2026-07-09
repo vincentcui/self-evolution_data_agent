@@ -54,7 +54,6 @@ function resolveOverlayBlocker(
     { type: "no_datasource", desc: "当前空间还未配置数据源，添加数据源后才可以开始问数", action: "点击去添加数据源", target: "/workspace/manage/datasources" },
     { type: "no_schema", desc: "当前空间还未采集 Schema，采集 Schema 后才可以开始问数", action: "点击去采集 Schema", target: "/workspace/manage/datasources" },
     { type: "no_api_key", desc: "当前空间还未配置 API Key，配置后才可以开始问数", action: "点击去配置 API Key", target: "/config/model-management" },
-    { type: "no_embedding_key", desc: "当前空间还未配置 Embedding Key，配置后才可以开始问数", action: "点击去配置 Embedding Key", target: "/config/model-management" },
   ];
   for (const o of order) {
     if (blockers.some((b) => b.type === o.type)) return o;

@@ -1,10 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, devices } from "@playwright/test";
+import { login } from "./_rbac_helpers";
+
+test.use({ ...devices["Desktop Chrome"] });
 
 test.describe("Git Token Management e2e (L3 + L4)", () => {
   // ── L4: 路由守卫 — 非 super_admin 被重定向 ──
   test("普通 admin 访问 /config/git-token 被重定向 (L4)", async ({ page }) => {
-    // 先登录普通 admin (非 super_admin) — 需根据项目测试环境适配
-    // await login(page, "admin");
+    await login(page, "admin");
     await page.goto("/config/git-token");
     // RequireSuperAdmin 守卫应重定向到非 config 页面
     await page.waitForURL((url) => !url.pathname.startsWith("/config/git-token"), { timeout: 10000 });
@@ -12,8 +14,7 @@ test.describe("Git Token Management e2e (L3 + L4)", () => {
 
   // ── L3: 真实链路 — super_admin CRUD ──
   test("super_admin 管理全局 Git Token (L3)", async ({ page }) => {
-    // 登录 super_admin — 需根据项目测试环境适配
-    // await login(page, "admin");
+    await login(page, "admin");
 
     // 导航到配置中心 Git Token 页面
     await page.goto("/config/git-token");

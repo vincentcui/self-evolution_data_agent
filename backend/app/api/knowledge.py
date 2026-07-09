@@ -676,13 +676,8 @@ async def add_repo(
     global_token = await get_global_git_token(db)
     resolved_token = body.git_token or ns.git_token or global_token
 
-    # ── Step 1: Token 可用性检查 (显式 422, 在可达性校验之前) ──
-    # HTTPS URL 且 resolved_token 为空 → 可能是私有仓库, 提前拒绝
-    # (公开仓库无需 token, 不会触发此校验, 直接进入 Step 2 可达性校验)
-    if body.url.startswith("https://") and not resolved_token:
-        raise HTTPException(422, "私有仓库需要配置 Git 访问令牌")
-
-    # ── Step 2: 可达性校验 (写入 DB 之前) ──
+    # ── 可达性校验 (写入 DB 之前) ──
+    # 公开仓库无需 token 也能通过 git ls-remote 验证, 不提前阻断
     is_reachable, error_msg = await asyncio.to_thread(
         check_repo_reachable, body.url, resolved_token,
     )

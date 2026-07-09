@@ -79,7 +79,6 @@ const WorkbenchHomePage: React.FC = () => {
   const getPendingHint = (ns: NonNullable<WorkbenchSummary["namespaces"]>[number]): string | null => {
     if (ns.ready) return null;
     if (ns.datasource_count === 0) return "添加数据源后即可开始问数";
-    if (!ns.has_embedding_key) return "配置 Embedding Key 后即可开始问数";
     if (ns.git_parsed_count === 0 && ns.git_total_count > 0) return "Git 仓库尚未完成解析";
     if (ns.knowledge_count === 0) return "建议采集 Schema 或补充知识";
     return "配置未完成，进入空间继续配置";

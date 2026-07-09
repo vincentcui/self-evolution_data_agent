@@ -42,7 +42,7 @@ class GitTokenConfigUpdate(BaseModel):
     id: int
     name: str = Field(..., min_length=1, max_length=128)
     token: str = Field(..., min_length=1)
-    description: str = ""
+    description: str | None = None
 
 
 class GitTokenConfigOut(BaseModel):
@@ -130,7 +130,8 @@ async def update_config(
     row.name = body.name.strip()
     if _MASK not in body.token.strip():
         row.token = body.token.strip()
-    row.description = body.description
+    if body.description is not None:
+        row.description = body.description
     row.updated_at = local_now()
     await db.commit()
     await db.refresh(row)

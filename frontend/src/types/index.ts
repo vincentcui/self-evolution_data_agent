@@ -311,7 +311,6 @@ export interface WorkbenchNamespaceCard {
   git_parsed_count: number;
   git_total_count: number;
   knowledge_count: number;
-  has_embedding_key: boolean;
 }
 
 export interface WorkbenchRecentSession {
