@@ -12,16 +12,24 @@ from git import Repo
 from app.config import settings
 
 
-def clone_or_update(url: str, branch: str, repo_id: int) -> tuple[str, str]:
+def clone_or_update(
+    url: str,
+    branch: str,
+    repo_id: int,
+    *,
+    token: str = "",
+) -> tuple[str, str]:
     """
     克隆仓库到本地, 返回 (本地路径, 操作类型)
     操作类型: "pull" | "clone"
     如已存在则 pull 更新
+
+    token: 已按优先级解析的访问令牌 (HTTPS 场景使用), 空字符串表示公开仓库
     """
     local_path = os.path.join(settings.git_clone_dir, str(repo_id))
 
     # ── 注入 token 到 HTTPS URL ──
-    clone_url = _inject_token(url)
+    clone_url = _inject_token(url, token=token)
 
     if os.path.exists(local_path):
         try:
@@ -37,12 +45,14 @@ def clone_or_update(url: str, branch: str, repo_id: int) -> tuple[str, str]:
     return local_path, "clone"
 
 
-def _inject_token(url: str) -> str:
+def _inject_token(url: str, *, token: str = "") -> str:
     """
     将 token 注入 HTTPS URL
     https://github.com/user/repo.git → https://<token>@github.com/user/repo.git
+
+    token 为空时不注入, 返回原始 URL (公开仓库场景)
     """
-    if not settings.git_token:
+    if not token:
         return url
 
     # 只处理 HTTPS URL
@@ -55,4 +65,4 @@ def _inject_token(url: str) -> str:
         return url
 
     # 重构 URL: scheme://token@netloc/path
-    return f"{parsed.scheme}://{settings.git_token}@{parsed.netloc}{parsed.path}"
+    return f"{parsed.scheme}://{token}@{parsed.netloc}{parsed.path}"

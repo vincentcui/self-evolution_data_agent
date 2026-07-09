@@ -43,6 +43,15 @@ _GIT_REPO_NEW_COLS: list[ColumnSpec] = [
     ("term_refresh_stats_json", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
+# Namespace + GitRepo 新增 git_token 列 (2026-07-08 git-token-hierarchy)
+_NAMESPACE_GIT_TOKEN_NEW_COLS: list[ColumnSpec] = [
+    ("git_token", "TEXT NOT NULL DEFAULT ''"),
+]
+
+_GIT_REPO_GIT_TOKEN_NEW_COLS: list[ColumnSpec] = [
+    ("git_token", "TEXT NOT NULL DEFAULT ''"),
+]
+
 # SchemaCanonicalObject Phase 1 新增列 (2026-05-15 schema-knowledge-onboarding)
 _SCHEMA_CANONICAL_OBJECT_NEW_COLS: list[ColumnSpec] = [
     ("relationships_json", "TEXT NOT NULL DEFAULT '[]'"),
@@ -469,6 +478,40 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
     log.info("[schema_migrations] model_configs table ensured (migration_023)")
 
 
+async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
+    """migration_032 (git-token-hierarchy): git_token_configs 表.
+
+    全局 Git Token 配置中心, super_admin 通过配置中心页面管理.
+    token 由 EncryptedString TypeDecorator 在应用层 Fernet 加密后入库.
+    """
+    ddl = """
+    CREATE TABLE IF NOT EXISTS git_token_configs (
+        id           SERIAL PRIMARY KEY,
+        name         VARCHAR(128)  NOT NULL,
+        token        TEXT          NOT NULL DEFAULT '',
+        description  TEXT          NOT NULL DEFAULT '',
+        is_active    BOOLEAN       NOT NULL DEFAULT FALSE,
+        is_deleted   BOOLEAN       NOT NULL DEFAULT FALSE,
+        created_at   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
+        updated_at   TIMESTAMP     NULL,
+        created_by   INTEGER       REFERENCES users(id)
+    )
+    """
+    # 局部唯一索引: 同一时间仅允许一条 is_active=True 且未删除的记录
+    # (应用层 activate_config 先禁用其他 + DB 层防御并发双激活, 同 model_configs 模式)
+    # 注意: 必须用双括号 ((1)) — 常量表达式索引. 单括号 (1) 会被 PostgreSQL 解析为
+    # 第 1 列 (id), 索引落在 id 上对 is_active 毫无约束, 并发仍可双激活.
+    unique_active = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_git_token_configs_one_active "
+        "ON git_token_configs ((1)) "
+        "WHERE is_active = TRUE AND is_deleted = FALSE"
+    )
+    async with engine.begin() as conn:
+        await conn.execute(text(ddl))
+        await conn.execute(text(unique_active))
+    log.info("[schema_migrations] git_token_configs table ensured (migration_032)")
+
+
 async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
     """确保 terminology_conflicts.existing_entry_id 的 FK 为 ON DELETE CASCADE.
 
@@ -641,6 +684,11 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_model_config_max_history_turns_column(engine)
     # migration_030 (namespace-model-config): model_configs.namespace_id + 唯一索引重建
     await _migrate_model_config_namespace_id(engine)
+    # migration_031 (git-token-hierarchy): namespaces + git_repos 新增 git_token 列
+    await _add_missing(engine, "namespaces", _NAMESPACE_GIT_TOKEN_NEW_COLS)
+    await _add_missing(engine, "git_repos", _GIT_REPO_GIT_TOKEN_NEW_COLS)
+    # migration_032 (git-token-hierarchy): 全局 Git Token 配置中心表
+    await _ensure_git_token_configs_table(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:

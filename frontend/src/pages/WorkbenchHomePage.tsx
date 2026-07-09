@@ -269,6 +269,13 @@ const WorkbenchHomePage: React.FC = () => {
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} />
           </Form.Item>
+          <Form.Item
+            name="git_token"
+            label="Git Token"
+            tooltip="可选。该空间下所有仓库的默认 Git 访问令牌"
+          >
+            <Input.Password placeholder="ghp_xxxx (可选)" />
+          </Form.Item>
         </Form>
       </Modal>
     </div>

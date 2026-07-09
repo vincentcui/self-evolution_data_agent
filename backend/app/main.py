@@ -32,6 +32,9 @@ from app.api import (
     extraction_failure as extraction_failure_api,
 )
 from app.api import (
+    git_token_config as git_token_config_api,
+)
+from app.api import (
     history,
     knowledge,
     namespace,
@@ -495,6 +498,9 @@ app.include_router(feedback_api.router)
 
 # 工作台首页汇总
 app.include_router(workbench_api.router)
+
+# git-token-hierarchy: 全局 Git Token 配置中心 (super_admin only)
+app.include_router(git_token_config_api.router)
 
 
 @app.get("/api/health")

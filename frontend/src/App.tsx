@@ -16,6 +16,7 @@ import WorkbenchHomePage from "./pages/WorkbenchHomePage";
 import DataSourcePage from "./pages/DataSourcePage";
 import GitRepoPage from "./pages/GitRepoPage";
 import ModelManagement from "./pages/ModelManagement";
+import GitTokenManagement from "./pages/GitTokenManagement";
 import RequireSuperAdmin from "./components/RequireSuperAdmin";
 import KnowledgePage from "./pages/KnowledgePage";
 import ProfileManagement from "./pages/ProfileManagement";
@@ -62,6 +63,7 @@ const App: React.FC = () => (
           <Route path="/config" element={<ConfigCenterPage />}>
             <Route index element={<Navigate to="model-management" replace />} />
             <Route path="model-management" element={<ModelManagement />} />
+            <Route path="git-token" element={<GitTokenManagement />} />
           </Route>
         </Route>
       </Route>

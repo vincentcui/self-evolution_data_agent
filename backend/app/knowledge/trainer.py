@@ -499,6 +499,8 @@ async def run_training_pipeline_with_progress(
     repo_id: int, ns_id: int, ns_slug: str,
     repo_url: str, repo_branch: str,
     on_progress: ProgressCallback,
+    *,
+    token: str = "",
 ) -> ParseReport:
     """
     带进度回调的训练管道 — session-per-operation 模式
@@ -517,7 +519,9 @@ async def run_training_pipeline_with_progress(
     await _update_repo_status(repo_id, "cloning")
     await on_progress(2, "克隆仓库...")
     t_clone = time.time()
-    local_path, git_op = await asyncio.to_thread(clone_or_update, repo_url, repo_branch, repo_id)
+    local_path, git_op = await asyncio.to_thread(
+        clone_or_update, repo_url, repo_branch, repo_id, token=token,
+    )
     await _update_repo_fields(repo_id, local_path=local_path)
     log.info("[%s] %s 完成 耗时 %.1fs", name, git_op, time.time() - t_clone)
     await on_progress(10, "克隆完成")

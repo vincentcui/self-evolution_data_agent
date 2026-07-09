@@ -10,6 +10,7 @@ import React from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ArrowLeftOutlined,
+  KeyOutlined,
   RobotOutlined,
 } from "@ant-design/icons";
 
@@ -19,6 +20,7 @@ const SIDEBAR_WIDTH = 267;
 /* ── 左侧导航项 ── */
 const navItems = [
   { to: "/config/model-management", icon: <RobotOutlined />, label: "模型管理" },
+  { to: "/config/git-token", icon: <KeyOutlined />, label: "Git Token" },
 ];
 
 /* NavLink active 样式 */

@@ -27,6 +27,7 @@ from app.db.metadata import get_db
 from app.engine.drivers import get_driver
 from app.engine.registry import delete_knowledge_collection
 from app.knowledge.bulk_guard import BulkOperationGuard
+from app.knowledge.git_reachability import mask_token
 from app.models import DataSource, Namespace
 from app.models.model_config import ModelConfig
 from app.models.schema_canonical_object import SchemaCanonicalObject
@@ -50,6 +51,13 @@ router = APIRouter(prefix="/api/namespaces", tags=["namespaces"])
 log = logging.getLogger(__name__)
 
 
+def _mask_namespace_out(ns: Namespace) -> NamespaceOut:
+    """Namespace ORM → NamespaceOut, 手动计算 git_token_masked"""
+    out = NamespaceOut.model_validate(ns)
+    out.git_token_masked = mask_token(ns.git_token)
+    return out
+
+
 # ════════════════════════════════════════════
 #  命名空间 CRUD
 # ════════════════════════════════════════════
@@ -65,7 +73,7 @@ async def list_namespaces(
     if allowed is not None:
         stmt = stmt.where(Namespace.id.in_(allowed))
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return [_mask_namespace_out(ns) for ns in result.scalars().all()]
 
 
 @router.post("", response_model=NamespaceOut, status_code=201)
@@ -77,6 +85,7 @@ async def create_namespace(
     """创建命名空间。记录 created_by; admin 自动获得访问权 (super_admin 全局无需)。"""
     ns = Namespace(
         name=body.name, slug=body.slug, description=body.description,
+        git_token=body.git_token,
         created_by=actor.id,
     )
     db.add(ns)
@@ -85,7 +94,7 @@ async def create_namespace(
         db.add(UserNamespaceAccess(user_id=actor.id, namespace_id=ns.id))
     await db.commit()
     await db.refresh(ns)
-    return ns
+    return _mask_namespace_out(ns)
 
 
 @router.put("/{ns_id}", response_model=NamespaceOut)
@@ -101,9 +110,11 @@ async def update_namespace(
         ns.name = body.name
     if body.description is not None:
         ns.description = body.description
+    if body.git_token is not None:
+        ns.git_token = body.git_token
     await db.commit()
     await db.refresh(ns)
-    return ns
+    return _mask_namespace_out(ns)
 
 
 @router.delete("/{ns_id}")

@@ -129,6 +129,16 @@ async def require_admin_or_above(user: User = Depends(get_current_user)) -> User
     return user
 
 
+async def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    """仅 super_admin 可访问（Git Token 配置中心等纯 super-only 端点）。"""
+    if not role_at_least(user, ROLE_SUPER_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin access required",
+        )
+    return user
+
+
 async def assert_ns_access(db: AsyncSession, user: User, ns_id: int | None) -> None:
     """namespace 作用域断言 (owner∪granted)。super_admin 豁免。无权抛 403。
     用于操作 namespace 内部数据 (查询/知识库/术语/schema/分享…)。

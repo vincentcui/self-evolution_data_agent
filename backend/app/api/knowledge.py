@@ -10,8 +10,12 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.knowledge.git_reachability import check_repo_reachable, mask_token
+from app.knowledge.git_token_resolver import get_global_git_token
 
 from app.api._audit_helpers import (
     automaton_invalidate_safe,
@@ -667,12 +671,63 @@ async def add_repo(
     ns = await db.get(Namespace, ns_id)
     if not ns:
         raise HTTPException(404, "命名空间不存在")
-    repo = GitRepo(namespace_id=ns_id, url=body.url, branch=body.branch,
-                   profile_id=body.profile_id)
+
+    # ── Token 优先级解析: body.git_token > namespace.git_token > 全局配置中心 > settings.git_token ──
+    global_token = await get_global_git_token(db)
+    resolved_token = body.git_token or ns.git_token or global_token
+
+    # ── Step 1: Token 可用性检查 (显式 422, 在可达性校验之前) ──
+    # HTTPS URL 且 resolved_token 为空 → 可能是私有仓库, 提前拒绝
+    # (公开仓库无需 token, 不会触发此校验, 直接进入 Step 2 可达性校验)
+    if body.url.startswith("https://") and not resolved_token:
+        raise HTTPException(422, "私有仓库需要配置 Git 访问令牌")
+
+    # ── Step 2: 可达性校验 (写入 DB 之前) ──
+    is_reachable, error_msg = await asyncio.to_thread(
+        check_repo_reachable, body.url, resolved_token,
+    )
+    if not is_reachable:
+        raise HTTPException(422, error_msg)
+
+    repo = GitRepo(
+        namespace_id=ns_id, url=body.url, branch=body.branch,
+        profile_id=body.profile_id, git_token=body.git_token,
+    )
     db.add(repo)
     await db.commit()
     await db.refresh(repo)
     return _enrich_repo_out(repo)
+
+
+class RepoReachabilityTestBody(BaseModel):
+    url: str
+    git_token: str = ""
+
+
+@router.post("/api/namespaces/{ns_id}/repos/test-reachability")
+async def test_repo_reachability(
+    ns_id: int,
+    body: RepoReachabilityTestBody,
+    _user: User = Depends(require_ns_manage),
+    db: AsyncSession = Depends(get_db),
+):
+    """测试仓库可达性 (不入库). 解析 token 优先级后执行 git ls-remote.
+
+    前端 RepoManager 添加仓库表单旁的"测试可达性"按钮调用此端点.
+    """
+    ns = await db.get(Namespace, ns_id)
+    if not ns:
+        raise HTTPException(404, "命名空间不存在")
+
+    global_token = await get_global_git_token(db)
+    resolved_token = body.git_token or ns.git_token or global_token
+
+    is_reachable, error_msg = await asyncio.to_thread(
+        check_repo_reachable, body.url, resolved_token,
+    )
+    if is_reachable:
+        return {"success": True, "message": "仓库可达"}
+    return {"success": False, "message": error_msg}
 
 
 @router.patch("/api/namespaces/{ns_id}/repos/{repo_id}", response_model=GitRepoOut)
@@ -1075,6 +1130,7 @@ def _enrich_repo_out(repo: GitRepo) -> dict:
         "progress": repo.progress,
         "progress_message": repo.progress_message,
         "profile_id": repo.profile_id,
+        "git_token_masked": mask_token(repo.git_token),
     }
     if repo.parse_report:
         try:
