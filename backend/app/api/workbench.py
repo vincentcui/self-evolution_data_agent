@@ -63,7 +63,7 @@ async def get_workbench_summary(
                 ModelConfig.is_deleted.is_(False),
             )
         )).scalars().all()
-        ns_chat_active_ids = set(ns_chat_rows)
+        ns_chat_active_ids = {nid for nid in ns_chat_rows if nid is not None}
 
     # ── 全局是否有已激活 EMBEDDING 模型 (readiness 五项判定之一, 与 namespace 无关) ──
     embedding_active = await db.scalar(
