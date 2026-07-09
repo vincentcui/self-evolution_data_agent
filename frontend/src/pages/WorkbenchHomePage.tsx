@@ -14,15 +14,18 @@ import type { MenuProps } from "antd";
 import * as api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { clearLastNamespaceId, writeLastNamespaceId, readLastNamespaceId } from "@/hooks/useLastNamespaceId";
-import type { WorkbenchSummary } from "@/types";
+import { DB_TYPE_META, type WorkbenchSummary } from "@/types";
 import styles from "@/styles/workbench.module.css";
+
+/* 支持的数据库类型 — 与 DB_TYPE_META (types/index.ts) 同源, 不重复维护 */
+const DB_TYPE_LABELS = Object.values(DB_TYPE_META).map((m) => m.label).join("、");
 
 /* ── 科学使用路径 — 静态引导, 与图1一致 ── */
 const USAGE_PATH = [
   { step: "1 创建空间", desc: "独立多库隔离数据、知识和权限，形成清晰的上下文边界。" },
-  { step: "2 添加数据源", desc: "接入 MySQL 或 MongoDB，完成空间可访问的基础数据接入。" },
-  { step: "3 配置 API Key", desc: "填入大模型 API Key，配置当前空间可用的模型能力。" },
-  { step: "4 采集 Schema & 接入 Git", desc: "采集表结构，字段和字段业务含义，接入代码仓库理解上下文语义。" },
+  { step: "2 添加数据源", desc: `接入 ${DB_TYPE_LABELS}，完成空间可访问的基础数据接入。` },
+  { step: "3 配置 API Key", desc: "填入对话模型（Chat）与向量模型（Embedding）的 API Key，配置当前空间可用的模型能力。" },
+  { step: "4 采集 Schema 或接入 Git", desc: "二者选一或同时进行：采集表结构与字段业务含义，或接入代码仓库理解上下文语义。" },
   { step: "5 补充知识", desc: "补充术语、字段业务含义与业务规则，减少歧义。" },
   { step: "6 持续沉淀", desc: "从对话与 Trace 中沉淀经验知识，让空间越用越懂。" },
 ];
@@ -76,6 +79,7 @@ const WorkbenchHomePage: React.FC = () => {
   const getPendingHint = (ns: NonNullable<WorkbenchSummary["namespaces"]>[number]): string | null => {
     if (ns.ready) return null;
     if (ns.datasource_count === 0) return "添加数据源后即可开始问数";
+    if (!ns.has_embedding_key) return "配置 Embedding Key 后即可开始问数";
     if (ns.git_parsed_count === 0 && ns.git_total_count > 0) return "Git 仓库尚未完成解析";
     if (ns.knowledge_count === 0) return "建议采集 Schema 或补充知识";
     return "配置未完成，进入空间继续配置";

@@ -201,27 +201,28 @@ describe("AuditCard — entry_type type-specific blocks", () => {
     payload: routeHintPayload as unknown as Record<string, unknown>,
   } as unknown as KnowledgeEntry;
 
-  it("example 类型渲染 collections / chart_type / field_mappings", () => {
+  // AuditCard 重写 (PR#9) 后改表驱动渲染: example/route_hint 的 collections/collection_path
+  // 渲染为路径节点 (s.pnode + → 分隔), reason/result_summary 走摘要行; 不再展示
+  // chart_type/tool_count/field_mappings/join_fields/cost_strategy, 类型标签用 CSS module
+  // pill span 替代 antd Tag. 断言对齐重写后的真实实现.
+  it("example 类型渲染 collections 路径节点", () => {
     render(<AuditCard entry={exampleEntry} />);
-    expect(screen.getAllByText(/c_product/).length).toBeGreaterThan(0);
+    expect(screen.getByText("c_product")).toBeInTheDocument();
     expect(screen.getByText("c_category_group")).toBeInTheDocument();
-    expect(screen.getByText(/chart: bar/)).toBeInTheDocument();
-    expect(screen.getByText(/tools: 5/)).toBeInTheDocument();
-    expect(screen.getByText("c_product.categoryId")).toBeInTheDocument();
   });
 
-  it("route_hint 类型渲染 collection_path / join_fields / reason", () => {
+  it("route_hint 类型渲染 collection_path 路径 + reason 摘要", () => {
     render(<AuditCard entry={routeHintEntry} />);
-    expect(screen.getByText("c_product.categoryId ↔ c_category_group._id")).toBeInTheDocument();
+    expect(screen.getByText("c_product")).toBeInTheDocument();
+    expect(screen.getByText("c_category_group")).toBeInTheDocument();
     expect(screen.getByText("商品→订单两层关联")).toBeInTheDocument();
-    expect(screen.getByText(/策略: default/)).toBeInTheDocument();
   });
 
-  it("entry_type Tag 颜色按 ENTRY_TYPE_COLORS 上色", () => {
-    const { container } = render(<AuditCard entry={exampleEntry} />);
-    const tags = Array.from(container.querySelectorAll(".ant-tag"));
-    const exampleTag = tags.find((el) => el.textContent === "示例查询");
-    expect(exampleTag).toBeTruthy();
-    expect(exampleTag!.className).toMatch(/ant-tag-green/);
+  it("entry_type 渲染类型标签 pill (示例查询)", () => {
+    render(<AuditCard entry={exampleEntry} />);
+    const pill = screen.getByText("示例查询");
+    expect(pill).toBeInTheDocument();
+    // 重写后用 CSS module pill class (ENTRY_TYPE_CLS), 非 antd ant-tag-green
+    expect(pill.className).toMatch(/pill/);
   });
 });

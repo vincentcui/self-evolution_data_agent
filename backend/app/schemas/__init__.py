@@ -672,7 +672,7 @@ class FeedbackCreate(BaseModel):
 # ════════════════════════════════════════════
 
 class BlockerOut(BaseModel):
-    type: str  # no_datasource | no_api_key | no_schema | no_access
+    type: str  # no_datasource | no_api_key | no_embedding_key | no_schema | no_access
     message: str
     admin_action: str
     admin_route: str = ""
@@ -724,6 +724,7 @@ class WorkbenchNamespaceCardOut(BaseModel):
     git_parsed_count: int
     git_total_count: int
     knowledge_count: int
+    has_embedding_key: bool
 
 
 class WorkbenchRecentSessionOut(BaseModel):

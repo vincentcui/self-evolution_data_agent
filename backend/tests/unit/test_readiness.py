@@ -40,6 +40,17 @@ async def _add_active_chat_config(db):
     await db.commit()
 
 
+async def _add_active_embedding_config(db):
+    cfg = ModelConfig(
+        provider="openai", protocol="openai",
+        base_url="https://example.invalid/v1", api_key="test-key",
+        model_name="test-embedding", model_type="EMBEDDING",
+        is_active=True, is_deleted=False,
+    )
+    db.add(cfg)
+    await db.commit()
+
+
 async def _add_schema(db, ns_id: int):
     sco = SchemaCanonicalObject(
         namespace_id=ns_id, db_type="mysql", database="test",
@@ -51,10 +62,11 @@ async def _add_schema(db, ns_id: int):
 
 @pytest.mark.asyncio
 async def test_readiness_all_ready(make_client, db):
-    """四条件全满足 → ready=true, blockers=[]."""
+    """五条件全满足 → ready=true, blockers=[]."""
     ns_id = await _setup_ns(db, "r1", "r1")
     await _add_datasource(db, ns_id)
     await _add_active_chat_config(db)
+    await _add_active_embedding_config(db)
     await _add_schema(db, ns_id)
 
     client = await make_client(role="super_admin")
@@ -70,6 +82,7 @@ async def test_readiness_no_datasource(make_client, db):
     """无数据源 → ready=false + blocker no_datasource."""
     ns_id = await _setup_ns(db, "r2", "r2")
     await _add_active_chat_config(db)
+    await _add_active_embedding_config(db)
     await _add_schema(db, ns_id)
 
     client = await make_client(role="super_admin")
@@ -85,6 +98,7 @@ async def test_readiness_no_api_key(make_client, db):
     """无 API Key → ready=false + blocker no_api_key."""
     ns_id = await _setup_ns(db, "r3", "r3")
     await _add_datasource(db, ns_id)
+    await _add_active_embedding_config(db)
     await _add_schema(db, ns_id)
 
     client = await make_client(role="super_admin")
@@ -96,11 +110,28 @@ async def test_readiness_no_api_key(make_client, db):
 
 
 @pytest.mark.asyncio
+async def test_readiness_no_embedding_key(make_client, db):
+    """无 Embedding Key → ready=false + blocker no_embedding_key."""
+    ns_id = await _setup_ns(db, "r3e", "r3e")
+    await _add_datasource(db, ns_id)
+    await _add_active_chat_config(db)
+    await _add_schema(db, ns_id)
+
+    client = await make_client(role="super_admin")
+    resp = await client.get(f"/api/namespaces/{ns_id}/readiness")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ready"] is False
+    assert any(b["type"] == "no_embedding_key" for b in data["blockers"])
+
+
+@pytest.mark.asyncio
 async def test_readiness_no_schema(make_client, db):
     """无 Schema → ready=false + blocker no_schema."""
     ns_id = await _setup_ns(db, "r4", "r4")
     await _add_datasource(db, ns_id)
     await _add_active_chat_config(db)
+    await _add_active_embedding_config(db)
 
     client = await make_client(role="super_admin")
     resp = await client.get(f"/api/namespaces/{ns_id}/readiness")

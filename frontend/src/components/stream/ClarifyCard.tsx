@@ -15,6 +15,8 @@ export const ClarifyCard: React.FC<{
   const finalAnswer = isCustom ? customText.trim() : selected.trim();
   const submit = () => { if (finalAnswer) onSubmit(pending.pendingId, finalAnswer); };
 
+  const hasOtherOption = (pending.options ?? []).some((o) => o.startsWith("其他"));
+
   return (
     <Card title="🤔 需要你的澄清" style={{ borderColor: "#1677ff", marginTop: 8 }}>
       <p>{pending.question}</p>
@@ -24,8 +26,14 @@ export const ClarifyCard: React.FC<{
           <>
             <Radio.Group value={selected} onChange={(e) => setSelected(e.target.value)}>
               <Space direction="vertical">
-                {pending.options.map((o) => <Radio key={o} value={o}>{o}</Radio>)}
-                <Radio value={CUSTOM_INPUT_KEY}>其他（自定义输入）</Radio>
+                {pending.options.map((o) =>
+                  o.startsWith("其他") ? (
+                    <Radio key={o} value={CUSTOM_INPUT_KEY}>其他（自定义输入）</Radio>
+                  ) : (
+                    <Radio key={o} value={o}>{o}</Radio>
+                  )
+                )}
+                {!hasOtherOption && <Radio value={CUSTOM_INPUT_KEY}>其他（自定义输入）</Radio>}
               </Space>
             </Radio.Group>
             {isCustom && (

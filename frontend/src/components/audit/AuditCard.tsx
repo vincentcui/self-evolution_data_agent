@@ -161,6 +161,13 @@ export default function AuditCard({
     return [db, coll, `${idField ?? "_id"}=${id ?? "?"}`].filter(Boolean).join(" · ");
   })();
 
+  // 「编辑全部」按钮 — proposed / canonical / rejected 三态操作区共用, 抽出消重复
+  const editAllBtn = hasHq ? (
+    <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
+      编辑全部
+    </button>
+  ) : null;
+
   return (
     <div className={s.entryRow}>
       {/* 中间内容 */}
@@ -243,33 +250,21 @@ export default function AuditCard({
               <button className={`${s.aBtn} ${s.aBtnPass}`} disabled={approving} onClick={handleApprove}>
                 {approving ? "通过中..." : "通过"}
               </button>
-              {hasHq && (
-                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
-                  编辑全部
-                </button>
-              )}
+              {editAllBtn}
               <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
               <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleReject}>拒绝</button>
             </>
           )}
           {entry.status === "canonical" && (
             <>
-              {hasHq && (
-                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
-                  编辑全部
-                </button>
-              )}
+              {editAllBtn}
               <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => setEditOpen(true)}>编辑</button>
               <button className={`${s.aBtn} ${s.aBtnReject}`} onClick={handleSoftDelete}>下架</button>
             </>
           )}
           {entry.status === "rejected" && (
             <>
-              {hasHq && (
-                <button className={`${s.aBtn} ${s.aBtnEdit}`} onClick={() => hqRef.current?.openEdit()}>
-                  编辑全部
-                </button>
-              )}
+              {editAllBtn}
               <button className={`${s.aBtn} ${s.aBtnRecover}`} onClick={handleRestore}>恢复</button>
             </>
           )}
@@ -278,12 +273,12 @@ export default function AuditCard({
       </div>
 
       <Modal title="编辑知识条目" open={editOpen} onCancel={() => setEditOpen(false)}
-        footer={null} destroyOnClose width={720}>
+        footer={null} destroyOnHidden width={720}>
         <EditCanonicalForm entry={entry}
           onDone={() => { setEditOpen(false); onAction?.(); }} />
       </Modal>
       <Modal title="审计时间线" open={logOpen} onCancel={() => setLogOpen(false)}
-        footer={null} destroyOnClose width={640}>
+        footer={null} destroyOnHidden width={640}>
         <AuditLogTimeline entryId={entry.id} />
       </Modal>
     </div>

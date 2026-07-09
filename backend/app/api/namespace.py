@@ -500,6 +500,16 @@ async def get_readiness(
     )
     has_global_api_key = (chat_active or 0) > 0
 
+    # has_embedding_key
+    embedding_active = await db.scalar(
+        select(func.count()).select_from(ModelConfig).where(
+            ModelConfig.model_type == "EMBEDDING",
+            ModelConfig.is_active.is_(True),
+            ModelConfig.is_deleted.is_(False),
+        )
+    )
+    has_embedding_key = (embedding_active or 0) > 0
+
     # has_valid_schema
     schema_count = await db.scalar(
         select(func.count()).select_from(SchemaCanonicalObject).where(
@@ -508,7 +518,10 @@ async def get_readiness(
     )
     has_valid_schema = (schema_count or 0) > 0
 
-    ready = has_access and has_datasource and has_global_api_key and has_valid_schema
+    ready = (
+        has_access and has_datasource and has_global_api_key
+        and has_embedding_key and has_valid_schema
+    )
 
     blockers: list[BlockerOut] = []
     if not has_access:
@@ -535,6 +548,14 @@ async def get_readiness(
             admin_route="/model-management",
             user_action="请联系管理员配置模型凭证",
         ))
+    if not has_embedding_key:
+        blockers.append(BlockerOut(
+            type="no_embedding_key",
+            message="未配置全局默认 Embedding Key",
+            admin_action="去配置 Embedding Key",
+            admin_route="/model-management",
+            user_action="请联系管理员配置 Embedding 模型凭证",
+        ))
     if not has_valid_schema:
         blockers.append(BlockerOut(
             type="no_schema",
@@ -550,6 +571,7 @@ async def get_readiness(
             "has_access": has_access,
             "has_datasource": has_datasource,
             "has_global_api_key": has_global_api_key,
+            "has_embedding_key": has_embedding_key,
             "has_valid_schema": has_valid_schema,
         },
         blockers=blockers,
