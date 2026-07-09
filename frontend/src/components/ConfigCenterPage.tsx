@@ -20,7 +20,7 @@ const SIDEBAR_WIDTH = 267;
 /* ── 左侧导航项 ── */
 const navItems = [
   { to: "/config/model-management", icon: <RobotOutlined />, label: "模型管理" },
-  { to: "/config/git-token", icon: <KeyOutlined />, label: "Git Token" },
+  { to: "/config/git-token", icon: <KeyOutlined />, label: "全局 Git Token" },
 ];
 
 /* NavLink active 样式 */

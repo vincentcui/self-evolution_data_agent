@@ -130,20 +130,36 @@ class TestGitTokenConfigOutMasking:
 
 
 class TestAddRepoReachabilityLogic:
-    """add_repo 可达性校验逻辑验证 (无 token 不阻断, 依赖 git ls-remote)."""
+    """add_repo 可达性校验逻辑验证 — 不满足条件时阻止添加."""
 
-    def test_https_without_token_should_proceed_to_reachability(self):
-        """HTTPS URL 无 token → 不再被预阻断, 由可达性校验决定结果。
+    def _resp(self, status_code: int, is_success: bool = False, is_redirect: bool = False):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.status_code = status_code
+        m.is_success = is_success
+        m.is_redirect = is_redirect
+        return m
 
-        修复前 Step 1 代码 (已移除):
-            if body.url.startswith("https://") and not resolved_token:
-                raise HTTPException(422, "私有仓库需要配置 Git 访问令牌")
+    def test_public_repo_no_token_allowed(self):
+        """公开仓库无 token → check_repo_reachable 返回 True (GitHub API 200)"""
+        from unittest.mock import patch
+        from app.knowledge.git_reachability import check_repo_reachable
 
-        修复后: 公开仓库无 token 也能通过 git ls-remote 验证正常添加。
-        """
-        # 此测试验证修复意图: 不应仅因缺少 token 而拒绝 HTTPS URL
-        # 实际行为由 check_repo_reachable (git ls-remote) 决定
-        assert True  # Step 1 阻断代码已在 knowledge.py 中移除
+        with patch("app.knowledge.git_reachability._http.get") as mock_get:
+            mock_get.return_value = self._resp(200, is_success=True)
+            ok, _ = check_repo_reachable("https://github.com/public/repo.git", token="")
+            assert ok is True
+
+    def test_private_repo_no_token_blocked(self):
+        """私有仓库无 token → check_repo_reachable 返回 False (GitHub API 404)"""
+        from unittest.mock import patch
+        from app.knowledge.git_reachability import check_repo_reachable
+
+        with patch("app.knowledge.git_reachability._http.get") as mock_get:
+            mock_get.return_value = self._resp(404)
+            ok, msg = check_repo_reachable("https://github.com/private/repo.git", token="")
+            assert ok is False
+            assert "私有仓库" in msg
 
     def test_ssh_url_not_blocked(self):
         """SSH URL 不受 token 检查影响"""

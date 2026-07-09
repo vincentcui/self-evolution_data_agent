@@ -677,7 +677,7 @@ async def add_repo(
     resolved_token = body.git_token or ns.git_token or global_token
 
     # ── 可达性校验 (写入 DB 之前) ──
-    # 公开仓库无需 token 也能通过 git ls-remote 验证, 不提前阻断
+    # 公开仓库无需 token 也能通过 HTTP 验证; 私有仓库无 token 时被明确拒绝
     is_reachable, error_msg = await asyncio.to_thread(
         check_repo_reachable, body.url, resolved_token,
     )

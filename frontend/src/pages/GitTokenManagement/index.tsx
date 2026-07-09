@@ -3,7 +3,7 @@ import { Table, Button, Modal, Form, Input, Tag, Popconfirm, message, Space } fr
 import { PlusOutlined, KeyOutlined } from "@ant-design/icons";
 import {
   fetchGitTokenConfigs, addGitTokenConfig, updateGitTokenConfig,
-  deleteGitTokenConfig, activateGitTokenConfig, testGitTokenConfig,
+  deleteGitTokenConfig, activateGitTokenConfig, deactivateGitTokenConfig, testGitTokenConfig,
 } from "@/api";
 import type { GitTokenConfig } from "@/types";
 
@@ -73,6 +73,16 @@ const GitTokenManagement: React.FC = () => {
     }
   };
 
+  const handleDeactivate = async (id: number) => {
+    try {
+      await deactivateGitTokenConfig(id);
+      message.success("已取消激活");
+      load();
+    } catch {
+      message.error("操作失败");
+    }
+  };
+
   const handleDelete = async (id: number) => {
     try {
       await deleteGitTokenConfig(id);
@@ -127,7 +137,9 @@ const GitTokenManagement: React.FC = () => {
           >
             测试
           </Button>
-          {!record.is_active && (
+          {record.is_active ? (
+            <Button size="small" type="link" onClick={() => handleDeactivate(record.id)}>取消激活</Button>
+          ) : (
             <Button size="small" type="link" onClick={() => handleActivate(record.id)}>激活</Button>
           )}
           <Button size="small" type="link" onClick={() => handleEdit(record)}>编辑</Button>
@@ -141,8 +153,13 @@ const GitTokenManagement: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}><KeyOutlined /> 全局 Git Token 管理</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <h2 style={{ margin: 0 }}><KeyOutlined /> 全局 Git Token</h2>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#94a3b8" }}>
+            当命名空间和仓库均未配置 Token 时，使用已激活的全局 Token 进行私有仓库认证
+          </p>
+        </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增</Button>
       </div>
       <Table columns={columns} dataSource={configs} rowKey="id" loading={loading} />
@@ -182,7 +199,7 @@ const GitTokenManagement: React.FC = () => {
             />
           </Form.Item>
           <p style={{ fontSize: 12, color: "#999" }}>
-            将使用该 Token 对指定仓库执行 git ls-remote 验证可达性（最长 10 秒）
+            使用该 Token 连接指定仓库，验证是否可达（超时 10 秒）
           </p>
         </Form>
       </Modal>

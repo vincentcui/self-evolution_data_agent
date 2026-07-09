@@ -51,8 +51,9 @@ const GitRepoPage: React.FC = () => {
     const vals = await tokenForm.validateFields();
     setSavingToken(true);
     try {
-      await api.updateNamespace(activeNs!.id, { git_token: vals.git_token });
-      message.success("Token 已更新");
+      // 显式传空字符串以清空 token (避免 undefined 被 JSON 序列化丢弃)
+      await api.updateNamespace(activeNs!.id, { git_token: vals.git_token ?? "" });
+      message.success(vals.git_token ? "Token 已更新" : "Token 已清空");
       setTokenModalOpen(false);
       tokenForm.resetFields();
       refresh();
@@ -93,7 +94,7 @@ const GitRepoPage: React.FC = () => {
                         <Tag>未配置</Tag>
                       )}
                       <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 8 }}>
-                        未配置时将使用全局配置中心 token 或环境变量兜底
+                        生效优先级: 仓库 Token &gt; 命名空间 Token &gt; 全局 Git Token
                       </span>
                     </div>
                     <Button
@@ -137,7 +138,7 @@ const GitRepoPage: React.FC = () => {
           <Form.Item
             name="git_token"
             label="Git Token"
-            tooltip="留空清除命名空间级 token, 退回全局配置中心或环境变量兜底"
+            tooltip="留空清除命名空间级 Token, 退回使用全局 Git Token"
           >
             <Input.Password placeholder="输入新 token 覆盖 (留空清除)" />
           </Form.Item>

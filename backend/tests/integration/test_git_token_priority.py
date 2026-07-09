@@ -48,20 +48,25 @@ class TestTokenPriorityIntegration:
         injected = _inject_token(url, token="")
         assert injected == url
 
-    @patch("app.knowledge.git_reachability.subprocess.run")
-    def test_reachability_check_with_valid_token(self, mock_run):
-        """可达性校验 — 有效 token"""
-        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="abc\trefs/heads/master\n")
+    @patch("app.knowledge.git_reachability._http.get")
+    def test_reachability_check_with_valid_token(self, mock_get):
+        """可达性校验 — 有效 token (GitHub → API)"""
+        m = MagicMock()
+        m.status_code = 200
+        m.is_success = True
+        m.is_redirect = False
+        mock_get.return_value = m
         ok, msg = check_repo_reachable("https://github.com/user/repo.git", token="valid_token")
         assert ok is True
 
-    @patch("app.knowledge.git_reachability.subprocess.run")
-    def test_reachability_check_with_invalid_token(self, mock_run):
-        """可达性校验 — 无效 token"""
-        mock_run.return_value = MagicMock(
-            returncode=128,
-            stderr="fatal: Authentication failed for https://github.com/user/repo.git/",
-        )
+    @patch("app.knowledge.git_reachability._http.get")
+    def test_reachability_check_with_invalid_token(self, mock_get):
+        """可达性校验 — 无效 token (GitHub → API)"""
+        m = MagicMock()
+        m.status_code = 401
+        m.is_success = False
+        m.is_redirect = False
+        mock_get.return_value = m
         ok, msg = check_repo_reachable("https://github.com/user/repo.git", token="bad_token")
         assert ok is False
         assert "无效" in msg or "不存在" in msg

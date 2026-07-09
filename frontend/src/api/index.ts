@@ -616,5 +616,8 @@ export const deleteGitTokenConfig = (id: number) =>
 export const activateGitTokenConfig = (id: number) =>
   http.post<GitTokenConfig>(`/git-token-config/activate/${id}`).then((r) => r.data);
 
+export const deactivateGitTokenConfig = (id: number) =>
+  http.post<GitTokenConfig>(`/git-token-config/deactivate/${id}`).then((r) => r.data);
+
 export const testGitTokenConfig = (data: { id: number; url: string }) =>
   http.post<{ success: boolean; message: string }>("/git-token-config/test", data).then((r) => r.data);

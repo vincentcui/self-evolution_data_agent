@@ -179,6 +179,22 @@ async def activate_config(
     return _to_out(row)
 
 
+@router.post("/deactivate/{config_id}", response_model=GitTokenConfigOut)
+async def deactivate_config(
+    config_id: int,
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """取消激活指定配置 (设为 is_active=False)。"""
+    row = await _get_or_404(db, config_id)
+    row.is_active = False
+    row.updated_at = local_now()
+    await db.commit()
+    await db.refresh(row)
+    log.info("[git_token_config] 取消激活 id=%d name=%s", row.id, row.name)
+    return _to_out(row)
+
+
 @router.post("/test")
 async def test_token_reachability(
     body: GitTokenTestBody,
