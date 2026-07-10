@@ -442,40 +442,18 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         "CREATE INDEX IF NOT EXISTS idx_model_configs_type_active "
         "ON model_configs (model_type, is_active) WHERE is_deleted = FALSE"
     )
-    dedupe_active = """
-    WITH ranked AS (
-        SELECT
-            id,
-            ROW_NUMBER() OVER (
-                PARTITION BY model_type, namespace_id
-                ORDER BY updated_at DESC NULLS LAST, id DESC
-            ) AS rn
-        FROM model_configs
-        WHERE is_active = TRUE AND is_deleted = FALSE
-    )
-    UPDATE model_configs AS mc
-    SET
-        is_active = FALSE,
-        updated_at = (now() AT TIME ZONE 'Asia/Shanghai')
-    FROM ranked
-    WHERE mc.id = ranked.id AND ranked.rn > 1
-    """
-    unique_active = (
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
-        "ON model_configs (model_type, namespace_id) "
-        "WHERE is_active = TRUE AND is_deleted = FALSE"
-    )
     alter_max_tokens_default = (
         "ALTER TABLE model_configs "
         "ALTER COLUMN max_tokens SET DEFAULT 12288"
     )
     async with engine.begin() as conn:
         await conn.execute(text(ddl))
-        await conn.execute(text(dedupe_active))
         await conn.execute(text(idx_type))
-        await conn.execute(text(unique_active))
         await conn.execute(text(alter_max_tokens_default))
     log.info("[schema_migrations] model_configs table ensured (migration_023)")
+    # 注: dedupe_active + unique_active (namespace_id 相关) 在 migration_031
+    # _migrate_model_config_namespace_id 里执行 — 须在 namespace_id 列加完后跑,
+    # 否则旧库升级时本函数先于加列执行, dedupe_active 引用 namespace_id 报 UndefinedColumnError.
 
 
 async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
@@ -600,6 +578,22 @@ async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
         await conn.execute(text(
             "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS namespace_id "
             "INTEGER REFERENCES namespaces(id) ON DELETE CASCADE"
+        ))
+        # Step 1.5: 去重同 (model_type, namespace_id) 的 active 行, 为唯一索引清障.
+        # 须在 namespace_id 列加完后执行 (旧库列由 Step 1 加); 放 _ensure_model_configs_table
+        # 会在加列前跑 → UndefinedColumnError (生产旧库升级实证).
+        await conn.execute(text(
+            "WITH ranked AS ("
+            "  SELECT id, ROW_NUMBER() OVER ("
+            "    PARTITION BY model_type, namespace_id"
+            "    ORDER BY updated_at DESC NULLS LAST, id DESC"
+            "  ) AS rn"
+            "  FROM model_configs"
+            "  WHERE is_active = TRUE AND is_deleted = FALSE"
+            ") "
+            "UPDATE model_configs AS mc SET is_active = FALSE, "
+            "updated_at = (now() AT TIME ZONE 'Asia/Shanghai') "
+            "FROM ranked WHERE mc.id = ranked.id AND ranked.rn > 1"
         ))
         # Step 2-3 必须同事务: 删除旧索引 + 重建新索引
         await conn.execute(text(
