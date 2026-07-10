@@ -79,7 +79,6 @@ const WorkbenchHomePage: React.FC = () => {
   const getPendingHint = (ns: NonNullable<WorkbenchSummary["namespaces"]>[number]): string | null => {
     if (ns.ready) return null;
     if (ns.datasource_count === 0) return "添加数据源后即可开始问数";
-    if (!ns.has_embedding_key) return "配置 Embedding Key 后即可开始问数";
     if (ns.git_parsed_count === 0 && ns.git_total_count > 0) return "Git 仓库尚未完成解析";
     if (ns.knowledge_count === 0) return "建议采集 Schema 或补充知识";
     return "配置未完成，进入空间继续配置";
@@ -268,6 +267,13 @@ const WorkbenchHomePage: React.FC = () => {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item
+            name="git_token"
+            label="Git Token"
+            tooltip="可选。该空间下所有仓库的默认 Git 访问令牌"
+          >
+            <Input.Password placeholder="ghp_xxxx (可选)" />
           </Form.Item>
         </Form>
       </Modal>

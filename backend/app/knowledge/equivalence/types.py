@@ -27,11 +27,16 @@ class EquivalenceChecker(Protocol):
     sync 与 async checker 共存 — promote 主流程统一以 `await` 调用,
     sync 函数返回的非 coroutine 结果由 `inspect.isawaitable` 判定后直接消费.
     类型注解上以 `CheckerResult | Awaitable[CheckerResult]` 联合表达.
+
+    namespace_id 由 _try_rule 统一传入; 结构性 checker (不调 LLM) 可忽略该参数,
+    LLM checker (如 semantic_llm) 用于按 namespace 解析模型配置.
     """
 
     def __call__(
         self,
         cands: list[SchemaCanonicalCandidate],
+        *,
+        namespace_id: int | None = None,
     ) -> CheckerResult | Awaitable[CheckerResult]:
         """返 (winner, reason) / None / 上述两者的 Awaitable."""
         ...

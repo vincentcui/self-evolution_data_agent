@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # ── Git ──
     git_clone_dir: str = "./data/repos"
     git_token: str = ""  # 私有仓库访问令牌 (GitHub PAT / GitLab token / Gitee token)
+    git_reachability_timeout_secs: int = 10
+    """Git 仓库可达性校验 (git ls-remote) 超时秒数. env: IS_GIT_REACHABILITY_TIMEOUT_SECS"""
 
     # ── 查询 ──
     query_row_limit: int = 1000  # noqa: hardcode

@@ -34,11 +34,13 @@ class NamespaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)  # noqa: hardcode
     slug: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9_-]+$")  # noqa: hardcode
     description: str = ""
+    git_token: str = ""
 
 
 class NamespaceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    git_token: str | None = None
 
 
 class NamespaceOut(BaseModel):
@@ -46,6 +48,7 @@ class NamespaceOut(BaseModel):
     name: str
     slug: str
     description: str
+    git_token_masked: str = ""
     created_at: datetime
     created_by: int | None = None
 
@@ -170,6 +173,7 @@ class GitRepoCreate(BaseModel):
     url: str
     branch: str = "master"
     profile_id: int | None = None    # agentic extractor profile
+    git_token: str = ""
 
 
 class GitRepoOut(BaseModel):
@@ -186,6 +190,7 @@ class GitRepoOut(BaseModel):
     progress: int = 0
     progress_message: str = ""
     profile_id: int | None = None    # agentic extractor profile (NULL=自动识别)
+    git_token_masked: str = ""
     model_config = {"from_attributes": True}
 
 
@@ -672,7 +677,7 @@ class FeedbackCreate(BaseModel):
 # ════════════════════════════════════════════
 
 class BlockerOut(BaseModel):
-    type: str  # no_datasource | no_api_key | no_embedding_key | no_schema | no_access
+    type: str  # no_datasource | no_api_key | no_schema | no_access
     message: str
     admin_action: str
     admin_route: str = ""
@@ -724,7 +729,6 @@ class WorkbenchNamespaceCardOut(BaseModel):
     git_parsed_count: int
     git_total_count: int
     knowledge_count: int
-    has_embedding_key: bool
 
 
 class WorkbenchRecentSessionOut(BaseModel):

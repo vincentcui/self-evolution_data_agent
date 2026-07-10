@@ -250,6 +250,7 @@ async def explore_repo(
     repo_path: str,
     skeleton: Skeleton,
     repo_name: str = "",
+    namespace_id: int | None = None,
 ) -> ExplorerResult:
     """Phase A V3: 无界工具循环探索仓库, 识别数据持久化文件/类.
 
@@ -300,6 +301,7 @@ async def explore_repo(
                 messages=messages,
                 tools=EXPLORER_TOOL_SPECS,
                 thinking=False,
+                namespace_id=namespace_id,
             )
         except Exception:
             logger.warning(

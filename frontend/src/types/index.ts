@@ -7,6 +7,7 @@ export interface Namespace {
   name: string;
   slug: string;
   description: string;
+  git_token_masked: string;
   created_at: string;
   created_by: number | null;
 }
@@ -59,6 +60,7 @@ export interface GitRepo {
   progress: number;
   progress_message: string;
   profile_id?: number | null;  // agentic extractor profile (NULL=自动识别)
+  git_token_masked: string;
 }
 
 export interface BatchStatus {
@@ -309,7 +311,6 @@ export interface WorkbenchNamespaceCard {
   git_parsed_count: number;
   git_total_count: number;
   knowledge_count: number;
-  has_embedding_key: boolean;
 }
 
 export interface WorkbenchRecentSession {
@@ -327,4 +328,16 @@ export interface WorkbenchSummary {
   recent_session_count: number;
   namespaces: WorkbenchNamespaceCard[];
   recent_sessions: WorkbenchRecentSession[];
+}
+
+/* ── 全局 Git Token 配置中心 ── */
+export interface GitTokenConfig {
+  id: number;
+  name: string;
+  token_masked: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+  created_by: number | null;
 }

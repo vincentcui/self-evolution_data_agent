@@ -40,12 +40,15 @@ interface Props {
   repos: GitRepo[];
   batchStatus?: BatchStatus | null;
   onReposChange: () => void;
+  nsTokenMasked?: string;
 }
 
-const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, onReposChange }) => {
+const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, onReposChange, nsTokenMasked = "" }) => {
   const [repoForm] = Form.useForm();
   const [parsing, setParsing] = useState<Set<number>>(new Set());
+  const [testingReachability, setTestingReachability] = useState<Set<number>>(new Set());
   const [profiles, setProfiles] = useState<api.ProfileOut[]>([]);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     api.fetchProfiles().then(setProfiles).catch(() => {});
@@ -83,10 +86,18 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
   /* ── CRUD ── */
   const handleAddRepo = async () => {
     const vals = await repoForm.validateFields();
-    await api.addRepo(nsId, vals);
-    message.success("仓库已添加");
-    repoForm.resetFields();
-    onReposChange();
+    setAdding(true);
+    try {
+      await api.addRepo(nsId, vals);
+      message.success("仓库已添加");
+      repoForm.resetFields();
+      onReposChange();
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      message.error(detail || "添加仓库失败");
+    } finally {
+      setAdding(false);
+    }
   };
 
   const handleDeleteRepo = async (repoId: number) => {
@@ -129,6 +140,19 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
       onReposChange();
     } catch {
       message.error("取消失败");
+    }
+  };
+
+  const handleTestRepoReachability = async (repoId: number, url: string) => {
+    setTestingReachability((prev) => new Set(prev).add(repoId));
+    try {
+      const res = await api.testRepoReachability(nsId, { url });
+      if (res.success) message.success(res.message);
+      else message.warning(res.message);
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || "测试请求失败");
+    } finally {
+      setTestingReachability((prev) => { const s = new Set(prev); s.delete(repoId); return s; });
     }
   };
 
@@ -219,7 +243,14 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
           <Form.Item name="profile_id" label="Profile" tooltip="选择正确的 profile 可提高 schema 识别准确率。不确定可不选。">
             <Select allowClear placeholder="不选 (自动识别)" style={{ width: 220 }} options={profileOptions} />
           </Form.Item>
-          <Button type="primary" onClick={handleAddRepo}>添加</Button>
+          <Form.Item
+            name="git_token"
+            label="Git Token"
+            tooltip="可选。留空时按优先级自动使用命名空间 Token 或全局 Git Token"
+          >
+            <Input.Password placeholder="ghp_xxxx (可选)" style={{ width: 160 }} />
+          </Form.Item>
+          <Button type="primary" onClick={handleAddRepo} loading={adding}>添加</Button>
         </Form>
         {pendingCount > 0 && (
           <Button icon={<ThunderboltOutlined />} onClick={() => handleBatchParse(false)}>
@@ -287,6 +318,14 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
               {repo.has_report && (
                 <Tag color={scoreColor(repo.completeness_score)}>{repo.completeness_score}分</Tag>
               )}
+              {/* Token 继承状态标签 — 设计 Section 8.2 */}
+              {repo.git_token_masked ? (
+                <Tag color="blue">独立令牌: {repo.git_token_masked}</Tag>
+              ) : nsTokenMasked ? (
+                <Tag>继承命名空间</Tag>
+              ) : (
+                <Tag>全局 Git Token</Tag>
+              )}
               {repo.worker_id ? (
                 <Button size="small" danger icon={<StopOutlined />} onClick={() => handleCancel(repo.id)}>
                   取消
@@ -305,6 +344,13 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
               )}
               <Button size="small" onClick={() => toggleMapping(repo.id)}>
                 {mappingRepoId === repo.id ? "收起映射" : "映射"}
+              </Button>
+              <Button
+                size="small"
+                loading={testingReachability.has(repo.id)}
+                onClick={() => handleTestRepoReachability(repo.id, repo.url)}
+              >
+                连接测试
               </Button>
               <Popconfirm
                 title="确认删除仓库?"

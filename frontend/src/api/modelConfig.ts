@@ -16,6 +16,8 @@ export interface ModelConfig {
   api_key: string;
   model_name: string;
   model_type: ModelType;
+  namespace_id?: number | null;
+  namespace_name?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
   max_history_turns?: number;
@@ -41,9 +43,11 @@ export interface CheckReadyResult {
   ready: boolean;
 }
 
-/** 获取全部模型配置（API Key 脱敏）*/
-export const listModelConfigs = () =>
-  http.get<ModelConfig[]>("/model-config/list").then((r) => r.data);
+/** 获取全部模型配置（API Key 脱敏），可按 namespace 过滤 */
+export const listModelConfigs = (namespaceId?: number) =>
+  http.get<ModelConfig[]>("/model-config/list", {
+    params: namespaceId != null ? { namespace_id: namespaceId } : undefined,
+  }).then((r) => r.data);
 
 /** 新增配置（不自动激活）*/
 export const addModelConfig = (cfg: Omit<ModelConfig, "id" | "is_active" | "created_at" | "updated_at">) =>
@@ -71,6 +75,8 @@ export const testModelConnection = (
     .post<{ success: boolean; message: string }>("/model-config/test", cfg)
     .then((r) => r.data);
 
-/** 检查 Chat + Embedding 是否都已激活 */
-export const checkModelReady = () =>
-  http.get<CheckReadyResult>("/model-config/check-ready").then((r) => r.data);
+/** 检查 Chat + Embedding 是否都已激活，可按 namespace 检查（含全局兜底） */
+export const checkModelReady = (namespaceId?: number) =>
+  http.get<CheckReadyResult>("/model-config/check-ready", {
+    params: namespaceId != null ? { namespace_id: namespaceId } : undefined,
+  }).then((r) => r.data);

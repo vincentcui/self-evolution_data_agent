@@ -10,8 +10,13 @@ import json
 from typing import Any
 
 
-def sample_values_union_checker(cands: list) -> tuple[Any, str] | None:
-    """sample_values 取并集, 选 cands[0] 写入合并结果."""
+def sample_values_union_checker(
+    cands: list, *, namespace_id: int | None = None,
+) -> tuple[Any, str] | None:
+    """sample_values 取并集, 选 cands[0] 写入合并结果.
+
+    namespace_id 由 _try_rule 统一传入, 本 checker 不使用 (纯结构比较, 无 LLM 调用).
+    """
     seen: set[str] = set()
     union: list[Any] = []
     for c in cands:

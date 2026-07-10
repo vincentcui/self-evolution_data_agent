@@ -41,25 +41,29 @@ async def get_workbench_summary(
     namespaces = (await db.execute(ns_stmt)).scalars().all()
     ns_ids = [ns.id for ns in namespaces]
 
-    # ── 全局是否有已激活 CHAT 模型 (readiness 四项判定之一, 与 namespace 无关) ──
-    chat_active = await db.scalar(
+    # ── 全局是否有已激活 CHAT 模型 (namespace_id IS NULL 的兜底配置) ──
+    global_chat_active = await db.scalar(
         select(func.count()).select_from(ModelConfig).where(
             ModelConfig.model_type == "CHAT",
+            ModelConfig.namespace_id.is_(None),
             ModelConfig.is_active.is_(True),
             ModelConfig.is_deleted.is_(False),
         )
     )
-    has_global_api_key = (chat_active or 0) > 0
+    has_global_chat = (global_chat_active or 0) > 0
 
-    # ── 全局是否有已激活 EMBEDDING 模型 (readiness 五项判定之一, 与 namespace 无关) ──
-    embedding_active = await db.scalar(
-        select(func.count()).select_from(ModelConfig).where(
-            ModelConfig.model_type == "EMBEDDING",
-            ModelConfig.is_active.is_(True),
-            ModelConfig.is_deleted.is_(False),
-        )
-    )
-    has_embedding_key = (embedding_active or 0) > 0
+    # ── 各空间是否有自己的已激活 CHAT 模型 (空间级配置) ──
+    ns_chat_active_ids: set[int] = set()
+    if ns_ids:
+        ns_chat_rows = (await db.execute(
+            select(ModelConfig.namespace_id).where(
+                ModelConfig.model_type == "CHAT",
+                ModelConfig.namespace_id.in_(ns_ids),
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_deleted.is_(False),
+            )
+        )).scalars().all()
+        ns_chat_active_ids = {nid for nid in ns_chat_rows if nid is not None}
 
     # ── 按 namespace 分组统计: 数据源数 / SCO 数(schema 已采集判据) ──
     ds_counts: dict[int, int] = {}
@@ -121,10 +125,7 @@ async def get_workbench_summary(
     for ns in namespaces:
         has_datasource = ds_counts.get(ns.id, 0) > 0
         has_valid_schema = schema_counts.get(ns.id, 0) > 0
-        ready = (
-            has_datasource and has_valid_schema
-            and has_global_api_key and has_embedding_key
-        )
+        ready = has_datasource and has_valid_schema and (has_global_chat or ns.id in ns_chat_active_ids)
         if ready:
             ready_count += 1
         cards.append(WorkbenchNamespaceCardOut(
@@ -139,7 +140,6 @@ async def get_workbench_summary(
             git_parsed_count=git_parsed_counts.get(ns.id, 0),
             git_total_count=git_total_counts.get(ns.id, 0),
             knowledge_count=knowledge_counts.get(ns.id, 0),
-            has_embedding_key=has_embedding_key,
         ))
 
     # ── 最近使用 — 当前用户跨空间最近会话 (按 updated_at desc) ──

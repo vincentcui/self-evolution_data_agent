@@ -15,6 +15,7 @@ import time
 import uuid
 
 from app.db.metadata import async_session
+from app.knowledge.git_token_resolver import get_global_git_token
 from app.logging_config import get_logger, trace_id_var
 from app.models import GitRepo, Namespace
 
@@ -111,6 +112,11 @@ async def start_parse_worker(repo_id: int, ns_id: int) -> str:
                 repo_url = repo.url
                 repo_branch = repo.branch
                 repo_name = repo_url.rsplit("/", 1)[-1].removesuffix(".git")
+                # ── Token 优先级解析: repo > ns > 全局配置中心 > env ──
+                repo_git_token = repo.git_token
+                ns_git_token = ns.git_token
+                global_token = await get_global_git_token(db)  # 配置中心 > env 兜底
+                resolved_token = repo_git_token or ns_git_token or global_token
 
                 repo.worker_id = worker_id
                 repo.parse_status = "parsing"
@@ -154,6 +160,7 @@ async def start_parse_worker(repo_id: int, ns_id: int) -> str:
                 await run_training_pipeline_with_progress(
                     repo_id, ns_id, ns_slug, repo_url, repo_branch,
                     on_progress,
+                    token=resolved_token,
                 )
                 elapsed = time.time() - t0
                 log.info("Worker 完成 %s worker_id=%s 耗时 %.1fs", repo_name, worker_id, elapsed)

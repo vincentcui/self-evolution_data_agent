@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.db.crypto import EncryptedString
 from app.models.base import Base, LOCAL_NOW
 
 
@@ -34,3 +35,5 @@ class GitRepo(Base):
     profile_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("extractor_profiles.id", ondelete="SET NULL"), nullable=True
     )
+    # ── 仓库级 Git Token (EncryptedString 加密存储) ──
+    git_token: Mapped[str] = mapped_column(EncryptedString, default="")

@@ -46,6 +46,7 @@ async def orchestrated_extraction(
     repo_path: str,
     hint_text: str | None = None,
     repo_name: str = "",
+    namespace_id: int | None = None,
 ) -> ExtractionResult:
     """Rev 2 divide-and-conquer 提取.
 
@@ -69,6 +70,7 @@ async def orchestrated_extraction(
             repo_path=repo_path,
             hint_text=hint_text,
             repo_name=repo_name,
+            namespace_id=namespace_id,
         )
 
     # ── 阶段 2: Explorer 语义过滤 ────────────────────────────────────
@@ -76,6 +78,7 @@ async def orchestrated_extraction(
         repo_path=repo_path,
         skeleton=skeleton,
         repo_name=repo_name,
+        namespace_id=namespace_id,
     )
 
     files_n = len(explorer_result.focus_files)
@@ -112,6 +115,7 @@ async def orchestrated_extraction(
             repo_path=repo_path,
             hint_text=hint_text,
             repo_name=repo_name,
+            namespace_id=namespace_id,
         )
 
     # ── 阶段 3: 均匀切片 ─────────────────────────────────────────────
@@ -134,6 +138,7 @@ async def orchestrated_extraction(
             skeleton=work_units[0] if work_units else None,
             hint_text=hint_text,
             repo_name=repo_name,
+            namespace_id=namespace_id,
         )
 
     # KEEP 此精确日志 — Gate 5 验收解析
@@ -166,6 +171,7 @@ async def orchestrated_extraction(
                         if repo_name
                         else wu.name
                     ),
+                    namespace_id=namespace_id,
                 )
                 return SubagentResult(work_unit_name=wu.name, result=result)
             except Exception:

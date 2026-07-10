@@ -11,13 +11,17 @@ from collections import defaultdict
 from typing import Any
 
 
-def enum_set_checker(cands: list) -> tuple[Any, str] | None:
+def enum_set_checker(
+    cands: list, *, namespace_id: int | None = None,
+) -> tuple[Any, str] | None:
     """enum (name, db_value) 集合等价或存在超集 → 选最大集.
 
     返回 (winner, audit_reason):
       - "enum_superset_selected": 已存在某个 candidate 是全集
       - "enum_superset_synthesized": 没有 candidate 是全集, 选 cands[0] 写入并集
     返回 None 表示有真冲突 (同 name 不同 db_value).
+
+    namespace_id 由 _try_rule 统一传入, 本 checker 不使用 (纯结构比较, 无 LLM 调用).
     """
     sets: list[tuple[set[tuple[str, Any]], Any]] = []
     for c in cands:

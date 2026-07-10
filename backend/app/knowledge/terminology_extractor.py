@@ -255,7 +255,9 @@ def _term_to_json(t: ExtractedTerm) -> dict:
 #  单批抽取 (Map)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _extract_one_batch(batch: list[CanonicalLite], batch_idx: int) -> list[ExtractedTerm]:
+def _extract_one_batch(
+    batch: list[CanonicalLite], batch_idx: int, namespace_id: int | None = None,
+) -> list[ExtractedTerm]:
     """单批 LLM 调用. 任何异常由调用方捕获 → 记失败批次."""
     corpus = "\n\n".join(c.to_prompt_line() for c in batch)
     log.info(
@@ -268,6 +270,7 @@ def _extract_one_batch(batch: list[CanonicalLite], batch_idx: int) -> list[Extra
             {"role": "user", "content": corpus},
         ],
         max_tokens=4096,  # noqa: hardcode
+        namespace_id=namespace_id,
     )
     if not raw or not raw.strip():
         raise LLMEmptyResponseError(f"batch={batch_idx} LLM 返回空")
@@ -282,7 +285,9 @@ class LLMEmptyResponseError(RuntimeError):
 #  归并 (Reduce)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _consolidate_one_pass(raw_terms: list[ExtractedTerm]) -> list[ExtractedTerm]:
+def _consolidate_one_pass(
+    raw_terms: list[ExtractedTerm], namespace_id: int | None = None,
+) -> list[ExtractedTerm]:
     """单次 LLM 归并. 若失败返回原 terms 的程序化去重版 (兜底不丢数据)."""
     if not raw_terms:
         return []
@@ -294,6 +299,7 @@ def _consolidate_one_pass(raw_terms: list[ExtractedTerm]) -> list[ExtractedTerm]
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             max_tokens=4096,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
         if not raw or not raw.strip():
             raise LLMEmptyResponseError("consolidation LLM 返回空")
@@ -325,16 +331,18 @@ def _dedup_by_term(terms: list[ExtractedTerm]) -> list[ExtractedTerm]:
     return list(merged.values())
 
 
-def _consolidate_terms(raw_terms: list[ExtractedTerm]) -> list[ExtractedTerm]:
+def _consolidate_terms(
+    raw_terms: list[ExtractedTerm], namespace_id: int | None = None,
+) -> list[ExtractedTerm]:
     """跨批次归并: 总数 ≤ 80 一次过; 否则分层归并."""
     if len(raw_terms) <= CONSOLIDATE_THRESHOLD:
-        return _consolidate_one_pass(raw_terms)
+        return _consolidate_one_pass(raw_terms, namespace_id=namespace_id)
     partial: list[ExtractedTerm] = []
     for chunk in _chunk(raw_terms, CONSOLIDATE_CHUNK):
-        partial.extend(_consolidate_one_pass(chunk))
+        partial.extend(_consolidate_one_pass(chunk, namespace_id=namespace_id))
     # 分层归并后可能还需一次总归并
     if len(partial) > CONSOLIDATE_CHUNK:
-        return _consolidate_one_pass(partial)
+        return _consolidate_one_pass(partial, namespace_id=namespace_id)
     return partial
 
 
@@ -393,7 +401,9 @@ def _filter_and_resolve_routing(
 #  公开入口
 # ══════════════════════════════════════════════════════════════════════════════
 
-def extract_terms_sync(canonicals: list[CanonicalLite]) -> tuple[list[ExtractedTerm], list[FailedBatch]]:
+def extract_terms_sync(
+    canonicals: list[CanonicalLite], namespace_id: int | None = None,
+) -> tuple[list[ExtractedTerm], list[FailedBatch]]:
     """同步版抽词 (供 asyncio.to_thread 包装). 返回 (consolidated_terms, failed_batches).
 
     失败策略:
@@ -409,7 +419,7 @@ def extract_terms_sync(canonicals: list[CanonicalLite]) -> tuple[list[ExtractedT
 
     for idx, batch in enumerate(_chunk(canonicals, BATCH_SIZE)):
         try:
-            terms = _extract_one_batch(batch, batch_idx=idx)
+            terms = _extract_one_batch(batch, batch_idx=idx, namespace_id=namespace_id)
             all_terms.extend(terms)
             log.info(
                 "[extract_terms] batch=%d 成功 canonicals=%d terms=%d",
@@ -447,7 +457,7 @@ def extract_terms_sync(canonicals: list[CanonicalLite]) -> tuple[list[ExtractedT
         )
 
     # Reduce
-    consolidated = _consolidate_terms(all_terms)
+    consolidated = _consolidate_terms(all_terms, namespace_id=namespace_id)
 
     # ID 级幻觉过滤 + 程序化反查路由 (collection / database 来自 canonical 真相源)
     canonicals_by_id = {c.canonical_id: c for c in canonicals}
@@ -460,6 +470,8 @@ def extract_terms_sync(canonicals: list[CanonicalLite]) -> tuple[list[ExtractedT
     return filtered, failed
 
 
-async def extract_terms(canonicals: list[CanonicalLite]) -> tuple[list[ExtractedTerm], list[FailedBatch]]:
+async def extract_terms(
+    canonicals: list[CanonicalLite], namespace_id: int | None = None,
+) -> tuple[list[ExtractedTerm], list[FailedBatch]]:
     """异步入口 — 线程池包裹同步 LLM 调用, 避免阻塞事件循环."""
-    return await asyncio.to_thread(extract_terms_sync, canonicals)
+    return await asyncio.to_thread(extract_terms_sync, canonicals, namespace_id)

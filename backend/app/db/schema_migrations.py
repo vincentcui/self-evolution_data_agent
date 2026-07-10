@@ -43,6 +43,15 @@ _GIT_REPO_NEW_COLS: list[ColumnSpec] = [
     ("term_refresh_stats_json", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
+# Namespace + GitRepo 新增 git_token 列 (2026-07-08 git-token-hierarchy)
+_NAMESPACE_GIT_TOKEN_NEW_COLS: list[ColumnSpec] = [
+    ("git_token", "TEXT NOT NULL DEFAULT ''"),
+]
+
+_GIT_REPO_GIT_TOKEN_NEW_COLS: list[ColumnSpec] = [
+    ("git_token", "TEXT NOT NULL DEFAULT ''"),
+]
+
 # SchemaCanonicalObject Phase 1 新增列 (2026-05-15 schema-knowledge-onboarding)
 _SCHEMA_CANONICAL_OBJECT_NEW_COLS: list[ColumnSpec] = [
     ("relationships_json", "TEXT NOT NULL DEFAULT '[]'"),
@@ -422,6 +431,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         proxy_port        INTEGER       NULL,
         proxy_username    VARCHAR(128)  NULL,
         proxy_password    TEXT          NULL,
+        namespace_id      INTEGER       NULL REFERENCES namespaces(id) ON DELETE CASCADE,
         is_active         BOOLEAN       NOT NULL DEFAULT FALSE,
         is_deleted        BOOLEAN       NOT NULL DEFAULT FALSE,
         created_at        TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
@@ -437,7 +447,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         SELECT
             id,
             ROW_NUMBER() OVER (
-                PARTITION BY model_type
+                PARTITION BY model_type, namespace_id
                 ORDER BY updated_at DESC NULLS LAST, id DESC
             ) AS rn
         FROM model_configs
@@ -452,7 +462,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
     """
     unique_active = (
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
-        "ON model_configs (model_type) "
+        "ON model_configs (model_type, namespace_id) "
         "WHERE is_active = TRUE AND is_deleted = FALSE"
     )
     alter_max_tokens_default = (
@@ -466,6 +476,40 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
         await conn.execute(text(unique_active))
         await conn.execute(text(alter_max_tokens_default))
     log.info("[schema_migrations] model_configs table ensured (migration_023)")
+
+
+async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
+    """migration_032 (git-token-hierarchy): git_token_configs 表.
+
+    全局 Git Token 配置中心, super_admin 通过配置中心页面管理.
+    token 由 EncryptedString TypeDecorator 在应用层 Fernet 加密后入库.
+    """
+    ddl = """
+    CREATE TABLE IF NOT EXISTS git_token_configs (
+        id           SERIAL PRIMARY KEY,
+        name         VARCHAR(128)  NOT NULL,
+        token        TEXT          NOT NULL DEFAULT '',
+        description  TEXT          NOT NULL DEFAULT '',
+        is_active    BOOLEAN       NOT NULL DEFAULT FALSE,
+        is_deleted   BOOLEAN       NOT NULL DEFAULT FALSE,
+        created_at   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
+        updated_at   TIMESTAMP     NULL,
+        created_by   INTEGER       REFERENCES users(id)
+    )
+    """
+    # 局部唯一索引: 同一时间仅允许一条 is_active=True 且未删除的记录
+    # (应用层 activate_config 先禁用其他 + DB 层防御并发双激活, 同 model_configs 模式)
+    # 注意: 必须用双括号 ((1)) — 常量表达式索引. 单括号 (1) 会被 PostgreSQL 解析为
+    # 第 1 列 (id), 索引落在 id 上对 is_active 毫无约束, 并发仍可双激活.
+    unique_active = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_git_token_configs_one_active "
+        "ON git_token_configs ((1)) "
+        "WHERE is_active = TRUE AND is_deleted = FALSE"
+    )
+    async with engine.begin() as conn:
+        await conn.execute(text(ddl))
+        await conn.execute(text(unique_active))
+    log.info("[schema_migrations] git_token_configs table ensured (migration_032)")
 
 
 async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
@@ -508,6 +552,46 @@ async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
         "[schema_migrations] terminology_conflicts existing_entry_id FK ensured "
         "ON DELETE CASCADE"
     )
+
+
+async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
+    """migration_030 (namespace-model-config): model_configs.namespace_id 列 + 重建唯一索引.
+
+    为 model_configs 表添加 namespace_id 列 (nullable, FK → namespaces.id CASCADE),
+    并将唯一索引从 (model_type) 重建为 (model_type, namespace_id),
+    以支持 per-namespace CHAT 配置 + 全局兜底。
+
+    Step 2-3 (DROP INDEX + CREATE INDEX) 在 engine.begin() 同一事务内执行,
+    若 DROP 成功但 CREATE 失败, 事务回滚, 旧索引保持 (唯一约束不丢失)。
+    """
+    async with engine.begin() as conn:
+        # Step 1: 新增列 (可独立执行, 幂等)
+        await conn.execute(text(
+            "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS namespace_id "
+            "INTEGER REFERENCES namespaces(id) ON DELETE CASCADE"
+        ))
+        # Step 2-3 必须同事务: 删除旧索引 + 重建新索引
+        await conn.execute(text(
+            "DROP INDEX IF EXISTS uq_model_configs_one_active_per_type"
+        ))
+        # PG 15+ 支持 NULLS NOT DISTINCT: 保证 (model_type, NULL) 的全局兜底 active 唯一,
+        # 在应用层 activate_config 之外再加一层 DB 防御, 杜绝直接写路径产生两条 active 全局配置。
+        # 低版本 PG 不支持该语法, 退化为普通 partial unique index (仍由应用层保证唯一)。
+        pg_ver = 0
+        try:
+            pg_ver = int((await conn.scalar(text("SHOW server_version_num"))) or 0)
+        except Exception:
+            pg_ver = 0
+        nulls_not_distinct = "NULLS NOT DISTINCT" if pg_ver >= 150000 else ""
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
+            f"ON model_configs (model_type, namespace_id) {nulls_not_distinct} "
+            f"WHERE is_active = TRUE AND is_deleted = FALSE"
+        ))
+        log.info(
+            "[schema_migrations] model_configs.namespace_id 列已添加, "
+            "唯一索引已重建为 (model_type, namespace_id)"
+        )
 
 
 async def run_all(engine: AsyncEngine) -> None:
@@ -598,6 +682,13 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_datasources_timezone_column(engine)
     # migration_029 (multi-turn-context): model_configs.max_history_turns 列 — 多轮历史注入轮数
     await _ensure_model_config_max_history_turns_column(engine)
+    # migration_030 (namespace-model-config): model_configs.namespace_id + 唯一索引重建
+    await _migrate_model_config_namespace_id(engine)
+    # migration_031 (git-token-hierarchy): namespaces + git_repos 新增 git_token 列
+    await _add_missing(engine, "namespaces", _NAMESPACE_GIT_TOKEN_NEW_COLS)
+    await _add_missing(engine, "git_repos", _GIT_REPO_GIT_TOKEN_NEW_COLS)
+    # migration_032 (git-token-hierarchy): 全局 Git Token 配置中心表
+    await _ensure_git_token_configs_table(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:

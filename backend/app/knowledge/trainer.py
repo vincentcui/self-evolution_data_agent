@@ -297,6 +297,7 @@ async def _run_enum_safety_net(local_path: str, ns_id: int, name: str) -> None:
         try:
             response = await chat_completion_with_tools(
                 messages=messages, tools=tool_specs, thinking=False,
+                namespace_id=ns_id,
             )
         except Exception:
             log.exception("[%s] enum agent LLM 调用失败 (iteration=%d)", name, iteration)
@@ -498,6 +499,8 @@ async def run_training_pipeline_with_progress(
     repo_id: int, ns_id: int, ns_slug: str,
     repo_url: str, repo_branch: str,
     on_progress: ProgressCallback,
+    *,
+    token: str = "",
 ) -> ParseReport:
     """
     带进度回调的训练管道 — session-per-operation 模式
@@ -516,7 +519,9 @@ async def run_training_pipeline_with_progress(
     await _update_repo_status(repo_id, "cloning")
     await on_progress(2, "克隆仓库...")
     t_clone = time.time()
-    local_path, git_op = await asyncio.to_thread(clone_or_update, repo_url, repo_branch, repo_id)
+    local_path, git_op = await asyncio.to_thread(
+        clone_or_update, repo_url, repo_branch, repo_id, token=token,
+    )
     await _update_repo_fields(repo_id, local_path=local_path)
     log.info("[%s] %s 完成 耗时 %.1fs", name, git_op, time.time() - t_clone)
     await on_progress(10, "克隆完成")
@@ -537,7 +542,9 @@ async def run_training_pipeline_with_progress(
     t_parse = time.time()
     hint_text = await _load_profile_hint(repo_id)
     from app.knowledge.skeleton.orchestrator import orchestrated_extraction
-    result = await orchestrated_extraction(repo_path=local_path, hint_text=hint_text, repo_name=name)
+    result = await orchestrated_extraction(
+        repo_path=local_path, hint_text=hint_text, repo_name=name, namespace_id=ns_id,
+    )
 
     # ── Step 3a: agent 状态守卫 ──
     if result.status == "failed":
@@ -643,7 +650,7 @@ async def run_training_pipeline_with_progress(
     t_eval = time.time()
     all_trained = ddls + jpa_docs
     report.duration_seconds = round(time.time() - start, 2)
-    report = await asyncio.to_thread(evaluate_parse_quality, report, all_trained)
+    report = await asyncio.to_thread(evaluate_parse_quality, report, all_trained, namespace_id=ns_id)
     log.info("[%s] 评估完成 耗时 %.1fs score=%d",
              name, time.time() - t_eval, report.completeness_score)
 

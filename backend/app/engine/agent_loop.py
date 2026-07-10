@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re as _re
@@ -215,7 +216,10 @@ async def run_agent_loop(
         }})
         logger.info("[agent_loop] trace=%s agent_started 已发送", trace_id)
 
-        llm_fn: LLMCallable = llm if llm is not None else chat_completion_with_tools
+        if llm is not None:
+            llm_fn: LLMCallable = llm
+        else:
+            llm_fn = functools.partial(chat_completion_with_tools, namespace_id=namespace_id)
         messages: list[dict] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})

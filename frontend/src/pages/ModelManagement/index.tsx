@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════
  *  模型配置管理页 — 参考 DataAgent 设计实现
  * ════════════════════════════════════════════ */
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button, message, Select } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import {
@@ -11,7 +11,13 @@ import {
   listModelConfigs,
   testModelConnection,
 } from "@/api/modelConfig";
+import { fetchNamespaces } from "@/api";
+import { useAuth } from "@/context/AuthContext";
+import { useOutletContext } from "react-router-dom";
+import type { WorkspaceOutletContext } from "../../components/WorkspacePage";
+import { roleAtLeast } from "@/utils/role";
 import ModelForm from "./ModelForm";
+import type { NamespaceOption } from "./ModelForm";
 import { hasOtherActiveEmbedding, isEmbeddingEditLocked } from "./modelFormUtils";
 import styles from "./ModelManagement.module.css";
 
@@ -27,7 +33,16 @@ const PROVIDER_META: Record<string, { label: string; abbr: string; cls: string }
 };
 
 export default function ModelManagement() {
+  const { user } = useAuth();
+  // 两语境共用同一组件: workspace 挂载下发 activeNs; 配置中心裸 Outlet → ctx 为 null
+  const ctx = useOutletContext<WorkspaceOutletContext | null | undefined>();
+  const scopedNsId = ctx?.activeNs?.id;   // number | undefined
+  // 工作台语境下 activeNs 未就绪时,无法把新配置绑定到空间 → 禁用新增,避免提交 namespace_id=null 触发 403。
+  // 配置中心语境 ctx 为 null,不受影响。
+  const addBlocked = ctx != null && !ctx.activeNs;
+  const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
+  const [namespaces, setNamespaces] = useState<NamespaceOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [formOpen, setFormOpen] = useState(false);
@@ -38,12 +53,25 @@ export default function ModelManagement() {
 
   const load = async () => {
     setLoading(true);
-    try { setConfigs(await listModelConfigs()); }
-    catch { message.error("加载失败"); }
+    try {
+      const [mcs, nss] = await Promise.all([
+        listModelConfigs(scopedNsId),
+        fetchNamespaces(),
+      ]);
+      setConfigs(mcs);
+      setNamespaces(nss.map((ns: { id: number; name: string }) => ({ id: ns.id, name: ns.name })));
+    } catch { message.error("加载失败"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  // 工作台语境下 activeNs 未就绪时跳过首次加载, 避免发出不带 namespace_id 的请求
+  // (该请求返回所有可访问空间配置, 若晚于过滤后的请求返回会覆盖正确结果 — 竞态条件)
+  // addBlocked 由 ctx 派生, 工作台↔配置中心切换走不同路由 (组件 unmount/remount), 无实际过期风险
+  useEffect(() => {
+    if (addBlocked) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedNsId]);
 
   const filtered = typeFilter
     ? configs.filter((c) => c.model_type === typeFilter)
@@ -95,7 +123,7 @@ export default function ModelManagement() {
       <div className={styles.viewHead}>
         <div>
           <h2 className={styles.title}>模型配置管理</h2>
-          <p className={styles.desc}>配置和管理 AI 模型参数，Chat 支持运行时切换；Embedding 切换需重建知识库索引</p>
+          <p className={styles.desc}>管理所有 Chat 配置和 Embedding 配置</p>
         </div>
       </div>
 
@@ -106,6 +134,8 @@ export default function ModelManagement() {
             type="primary"
             icon={<PlusOutlined />}
             className={styles.btnPrimary}
+            disabled={addBlocked}
+            title={addBlocked ? "空间加载中，请稍候" : undefined}
             onClick={() => { setEditing(null); setFormOpen(true); }}
           >
             新增配置
@@ -138,21 +168,22 @@ export default function ModelManagement() {
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <colgroup>
-            <col style={{ width: "4%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "11%" }} />
+            <col style={{ width: "3%" }} />
             <col style={{ width: "7%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "14%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "4%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "5%" }} />
             <col style={{ width: "6%" }} />
             <col style={{ width: "6%" }} />
-            <col style={{ width: "22%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "5%" }} />
+            <col style={{ width: "5%" }} />
+            <col style={{ width: "27%" }} />
           </colgroup>
           <thead>
             <tr>
-              <th>ID</th><th>提供商</th><th>模型名称</th><th>模型类型</th>
+              <th>ID</th><th>提供商</th><th>模型名称</th><th>类型</th><th>所属空间</th>
               <th>协议</th><th>API 地址</th><th>路径配置</th><th>温度</th><th>最大 Token</th>
               <th>状态</th><th>操作</th>
             </tr>
@@ -160,11 +191,13 @@ export default function ModelManagement() {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className={styles.emptyCell}>
+                <td colSpan={12} className={styles.emptyCell}>
                   暂无模型配置数据
                 </td>
               </tr>
             ) : filtered.map((cfg) => {
+              // D2: 非 super_admin 对全局配置(含 EMBEDDING)的写操作必然 403 → 禁用避免死路
+              const writeLocked = !isSuperAdmin && cfg.namespace_id == null;
               const pm = getProviderMeta(cfg.provider);
               const effectiveProtocol = cfg.protocol ?? (cfg.provider === "anthropic" ? "anthropic" : "openai");
               const pathDisplay = cfg.model_type === "CHAT"
@@ -181,9 +214,10 @@ export default function ModelManagement() {
                   <td><strong>{cfg.model_name}</strong></td>
                   <td>
                     <span className={`${styles.badgeType} ${cfg.model_type === "CHAT" ? styles.typeChat : styles.typeEmbed}`}>
-                      {cfg.model_type === "CHAT" ? "对话模型" : "嵌入模型"}
+                      {cfg.model_type === "CHAT" ? "对话" : "嵌入"}
                     </span>
                   </td>
+                  <td>{cfg.namespace_name || (cfg.namespace_id != null ? `#${cfg.namespace_id}` : "全局")}</td>
                   <td>
                     <span className={`${styles.badgeProtocol} ${effectiveProtocol === "anthropic" ? styles.protocolAnthropic : styles.protocolOpenai}`}>
                       {effectiveProtocol === "anthropic" ? "Anthropic" : "OpenAI"}
@@ -208,7 +242,8 @@ export default function ModelManagement() {
                       <button
                         className={`${styles.actBtn} ${styles.actTest} ${testingId === cfg.id ? styles.testing : ""}`}
                         onClick={() => handleTest(cfg)}
-                        disabled={testingId === cfg.id}
+                        disabled={testingId === cfg.id || writeLocked}
+                        title={writeLocked ? "全局配置仅超级管理员可管理" : undefined}
                       >
                         {testingId === cfg.id
                           ? <><span className={styles.spinIcon} />测试中...</>
@@ -223,7 +258,8 @@ export default function ModelManagement() {
                       <button
                         className={`${styles.actBtn} ${styles.actToggle} ${cfg.is_active ? styles.isActive : ""}`}
                         onClick={() => !cfg.is_active && handleActivate(cfg)}
-                        disabled={!!cfg.is_active || activatingId === cfg.id}
+                        disabled={!!cfg.is_active || activatingId === cfg.id || writeLocked}
+                        title={writeLocked ? "全局配置仅超级管理员可管理" : undefined}
                       >
                         {cfg.is_active ? "已激活" : (activatingId === cfg.id ? "激活中..." : "激活")}
                       </button>
@@ -231,12 +267,14 @@ export default function ModelManagement() {
                       {/* 编辑 */}
                       {(() => {
                         const embeddingLocked = isEmbeddingEditLocked(cfg);
+                        const editDisabled = embeddingLocked || writeLocked;
                         return (
                           <button
                             className={`${styles.actBtn} ${styles.actEdit}`}
-                            onClick={() => { if (!embeddingLocked) { setEditing(cfg); setFormOpen(true); } }}
-                            disabled={embeddingLocked}
-                            title={embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接修改" : undefined}
+                            onClick={() => { if (!editDisabled) { setEditing(cfg); setFormOpen(true); } }}
+                            disabled={editDisabled}
+                            title={writeLocked ? "全局配置仅超级管理员可管理"
+                              : embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接修改" : undefined}
                           >
                             编辑
                           </button>
@@ -246,12 +284,14 @@ export default function ModelManagement() {
                       {/* 删除（二次确认）*/}
                       {(() => {
                         const embeddingLocked = isEmbeddingEditLocked(cfg);
+                        const delDisabled = embeddingLocked || writeLocked;
                         return (
                           <button
                             className={`${styles.actBtn} ${styles.actDelete} ${deletingId === cfg.id ? styles.confirmDelete : ""}`}
-                            onClick={() => { if (!embeddingLocked) handleDelete(cfg); }}
-                            disabled={embeddingLocked}
-                            title={embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接删除" : undefined}
+                            onClick={() => { if (!delDisabled) handleDelete(cfg); }}
+                            disabled={delDisabled}
+                            title={writeLocked ? "全局配置仅超级管理员可管理"
+                              : embeddingLocked ? "已激活的 Embedding 配置涉及知识库索引，首期不支持直接删除" : undefined}
                           >
                             {deletingId === cfg.id ? "确认删除?" : "删除"}
                           </button>
@@ -271,6 +311,10 @@ export default function ModelManagement() {
         initial={editing}
         onClose={() => { setFormOpen(false); setEditing(null); }}
         onSuccess={() => { setFormOpen(false); setEditing(null); load(); }}
+        accessibleNamespaces={namespaces}
+        isSuperAdmin={isSuperAdmin}
+        namespaceId={ctx?.activeNs?.id}
+        namespaceName={ctx?.activeNs?.name}
       />
     </div>
   );

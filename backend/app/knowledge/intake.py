@@ -124,7 +124,9 @@ def _overflow_for(text: str, tier: str) -> bool:
 
 # ─────────────────────────── 对外 API ───────────────────────────
 @observe(name="knowledge_refine", as_type="chain")
-def refine_knowledge(entry_type: str, raw: str, tier: str) -> RefineResult:
+def refine_knowledge(
+    entry_type: str, raw: str, tier: str, namespace_id: int | None = None,
+) -> RefineResult:
     """
     精炼用户输入。LLM 失败时降级为返回原始内容 (description="", overflow=False)。
 
@@ -144,6 +146,7 @@ def refine_knowledge(entry_type: str, raw: str, tier: str) -> RefineResult:
              {"role": "user", "content": raw}],
             temperature=0.1,
             max_tokens=1024,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
     except Exception as e:
         # refine 失败保持 fallback — raw 原文本身有效 (P1-22 D9 有意识决策)
@@ -162,7 +165,7 @@ def refine_knowledge(entry_type: str, raw: str, tier: str) -> RefineResult:
 
 
 @observe(name="knowledge_split", as_type="chain")
-def propose_split(raw: str) -> list[RefineResult]:
+def propose_split(raw: str, namespace_id: int | None = None) -> list[RefineResult]:
     """
     critical tier 超长时让 LLM 拆成多条原子候选。
     LLM 故障 / 无 JSON / 解析失败均返回空列表。
@@ -173,6 +176,7 @@ def propose_split(raw: str) -> list[RefineResult]:
              {"role": "user", "content": raw}],
             temperature=0.2,  # 拆分比精炼需要更高创造性, 故略高于 refine 的 0.1
             max_tokens=2048,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
     except Exception as e:
         log.error("[intake] split LLM 失败: %s", e)
@@ -198,7 +202,9 @@ def propose_split(raw: str) -> list[RefineResult]:
 
 
 @observe(name="knowledge_conflict_detect", as_type="chain")
-def detect_conflicts(new_content: str, existing: list[dict]) -> ConflictReport:
+def detect_conflicts(
+    new_content: str, existing: list[dict], namespace_id: int | None = None,
+) -> ConflictReport:
     """
     与既有知识比对, 让 LLM 标记冲突。
     existing 每项需含 id/content; 空 list 时直接返回空报告 (不调 LLM)。
@@ -217,6 +223,7 @@ def detect_conflicts(new_content: str, existing: list[dict]) -> ConflictReport:
              {"role": "user", "content": user_msg}],
             temperature=0.1,
             max_tokens=1024,  # noqa: hardcode
+            namespace_id=namespace_id,
         )
     except Exception as e:
         log.error("[intake] conflict LLM 失败: %s", e)

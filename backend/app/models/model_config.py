@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.crypto import EncryptedString
@@ -72,6 +72,15 @@ class ModelConfig(Base):
 
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     """逻辑删除"""
+
+    # ── 命名空间关联 ──────────────────────────────────────────
+    namespace_id: Mapped[int | None] = mapped_column(
+        ForeignKey("namespaces.id", ondelete="CASCADE"),
+        nullable=True,
+        default=None,
+    )
+    """关联命名空间。NULL = 全局兜底配置；非 NULL = 该 namespace 专属配置。
+    EMBEDDING 行强制为 NULL（代码层约束，见 API 层校验）。"""
 
     # ── 审计 ─────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=LOCAL_NOW)

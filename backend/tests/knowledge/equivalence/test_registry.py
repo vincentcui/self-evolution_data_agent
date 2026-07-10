@@ -22,7 +22,7 @@ from app.knowledge.equivalence.types import EquivalenceChecker  # noqa: F401
 
 # ── 测试用 dummy checker ──
 
-def _dummy_checker(cands):
+def _dummy_checker(cands, *, namespace_id: int | None = None):
     """符合 EquivalenceChecker Protocol 的 dummy."""
     return None
 

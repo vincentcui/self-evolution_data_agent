@@ -19,11 +19,20 @@ import {
   isEmbeddingAllowed,
 } from "./modelFormUtils";
 
+export interface NamespaceOption {
+  id: number;
+  name: string;
+}
+
 interface Props {
   open: boolean;
   initial: ModelConfig | null;
   onClose: () => void;
   onSuccess: () => void;
+  namespaceId?: number | null;
+  namespaceName?: string;
+  accessibleNamespaces?: NamespaceOption[];
+  isSuperAdmin?: boolean;
 }
 
 /* ── 厂商默认配置 ──────────────────────────── */
@@ -41,12 +50,11 @@ const PROVIDER_DEFAULTS: Record<string, { label: string; baseUrl: string; abbr: 
 // 从 modelFormUtils 导入，便于独立单元测试
 
 const PROVIDERS = Object.keys(PROVIDER_DEFAULTS);
-const MASK = "****";
 
 /* ── 初始表单状态 ──────────────────────────── */
 const INIT: Omit<ModelConfig, "id" | "is_active" | "created_at" | "updated_at"> = {
   provider: "", protocol: "openai", base_url: "", api_key: "", model_name: "",
-  model_type: "CHAT", temperature: 0.0, max_tokens: 12288, max_history_turns: 5,
+  model_type: "CHAT", namespace_id: null, temperature: 0.0, max_tokens: 12288, max_history_turns: 5,
   completions_path: "", embeddings_path: "",
   proxy_enabled: false, proxy_host: "", proxy_port: undefined, proxy_username: "", proxy_password: "",
 };
@@ -59,9 +67,15 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "proxy", label: "网络代理", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> },
 ];
 
-export default function ModelForm({ open, initial, onClose, onSuccess }: Props) {
+export default function ModelForm({ open, initial, onClose, onSuccess, namespaceId, namespaceName, accessibleNamespaces, isSuperAdmin }: Props) {
   const isEdit = !!initial;
+  const effectiveNamespaceId = namespaceId ?? null;
+  const isNamespaceLocked = namespaceId != null;
   const [form, setForm] = useState({ ...INIT });
+  const isEmbedding = initial?.model_type === "EMBEDDING" || (!isEdit && form.model_type === "EMBEDDING");
+  // D2: 全局(含 EMBEDDING)仅 super_admin 可写 → 新增时对非 super_admin 隐藏 EMBEDDING,
+  // 避免提交后必然 403 的死路。编辑态类型本就锁定, 不受影响。
+  const typeOptions: ModelType[] = (!isEdit && !isSuperAdmin) ? ["CHAT"] : ["CHAT", "EMBEDDING"];
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [provOpen, setProvOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -75,7 +89,7 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
     setProvOpen(false);
     setForm(initial
       ? { ...INIT, ...initial, api_key: initial.api_key ?? "" }
-      : { ...INIT });
+      : { ...INIT, namespace_id: effectiveNamespaceId });
   }, [open, initial]);
 
   const set = (k: keyof typeof form, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
@@ -126,7 +140,10 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
     if (!form.base_url.trim()) { message.error("请输入 Base URL"); return; }
     setSaving(true);
     const protocol = protocolForProvider(form.provider, form.protocol as ModelProtocol);
-    const payload = { ...form, protocol };
+    const nsIdForSubmit = form.model_type === "EMBEDDING" ? null
+      : isNamespaceLocked ? effectiveNamespaceId
+      : form.namespace_id;
+    const payload = { ...form, protocol, namespace_id: nsIdForSubmit };
     try {
       if (isEdit) {
         await updateModelConfig({ ...payload, id: initial!.id! } as ModelConfigUpdate);
@@ -178,6 +195,39 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
             {/* ── 基本信息 ── */}
             <div className={styles.section} data-section="basic">
               <div className={styles.sectionTitle}>基本信息</div>
+
+              {/* 所属空间 — EMBEDDING 固定全局; 锁定/编辑模式下只读 (后端不允许修改 namespace_id) */}
+              <div className={styles.row}>
+                <label className={styles.rowLabel}>所属空间</label>
+                <div className={styles.rowCtrl}>
+                  {isEmbedding ? (
+                    <span style={{ fontSize: 13, color: "#8c95a3" }}>全局</span>
+                  ) : (isNamespaceLocked || isEdit) ? (
+                    <span style={{ fontSize: 13, color: "#1a2332" }}>
+                      {namespaceName
+                        || initial?.namespace_name
+                        || (initial?.namespace_id != null ? `#${initial.namespace_id}` : "全局")}
+                    </span>
+                  ) : (
+                    <select
+                      value={form.namespace_id ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        set("namespace_id", v === "" ? null : Number(v));
+                      }}
+                      style={{
+                        width: "100%", padding: "7px 10px", borderRadius: 8,
+                        border: "1.5px solid #e5e8ed", fontSize: 13, background: "#fff",
+                      }}
+                    >
+                      {isSuperAdmin && <option value="">全局</option>}
+                      {(accessibleNamespaces || []).map((ns) => (
+                        <option key={ns.id} value={ns.id}>{ns.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
 
               {/* 提供商 */}
               <div className={styles.row}>
@@ -258,7 +308,7 @@ export default function ModelForm({ open, initial, onClose, onSuccess }: Props) 
                 </label>
                 <div className={styles.rowCtrl}>
                   <div className={styles.typeCards}>
-                    {(["CHAT", "EMBEDDING"] as ModelType[]).map((t) => {
+                    {typeOptions.map((t) => {
                       const isAnthropicEmbed = !isEmbeddingAllowed(form.provider) && t === "EMBEDDING";
                       const disabled = isEdit || isAnthropicEmbed;
                       return (

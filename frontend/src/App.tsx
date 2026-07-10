@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "./components/Layout";
 import QueryPageWrapper from "./components/QueryPageWrapper";
 import WorkspacePage from "./components/WorkspacePage";
+import ConfigCenterPage from "./components/ConfigCenterPage";
 import LoginPage from "./pages/LoginPage";
 import ShareViewPage from "./pages/ShareViewPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -15,6 +16,8 @@ import WorkbenchHomePage from "./pages/WorkbenchHomePage";
 import DataSourcePage from "./pages/DataSourcePage";
 import GitRepoPage from "./pages/GitRepoPage";
 import ModelManagement from "./pages/ModelManagement";
+import GitTokenManagement from "./pages/GitTokenManagement";
+import RequireSuperAdmin from "./components/RequireSuperAdmin";
 import KnowledgePage from "./pages/KnowledgePage";
 import ProfileManagement from "./pages/ProfileManagement";
 import AgentTracesPage from "./pages/AgentTracesPage";
@@ -54,6 +57,14 @@ const App: React.FC = () => (
           <Route path="agent-traces" element={<AgentTracesPage />} />
           <Route path="users" element={<UserManagePage />} />
           <Route path="shares" element={<ShareManagePage />} />
+        </Route>
+        {/* 配置中心 — 仅 super_admin, 全屏独立布局 */}
+        <Route element={<RequireSuperAdmin />}>
+          <Route path="/config" element={<ConfigCenterPage />}>
+            <Route index element={<Navigate to="model-management" replace />} />
+            <Route path="model-management" element={<ModelManagement />} />
+            <Route path="git-token" element={<GitTokenManagement />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

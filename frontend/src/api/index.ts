@@ -59,9 +59,10 @@ export const createNamespace = (data: {
   name: string;
   slug: string;
   description?: string;
+  git_token?: string;
 }) => http.post<Namespace>("/namespaces", data).then((r) => r.data);
 
-export const updateNamespace = (id: number, data: { name?: string; description?: string }) =>
+export const updateNamespace = (id: number, data: { name?: string; description?: string; git_token?: string }) =>
   http.put<Namespace>(`/namespaces/${id}`, data).then((r) => r.data);
 
 export const deleteNamespace = async (id: number) => {
@@ -105,8 +106,11 @@ export const deleteDataSource = (nsId: number, dsId: number) =>
 export const fetchRepos = (nsId: number) =>
   http.get<RepoListResponse>(`/namespaces/${nsId}/repos`).then((r) => r.data);
 
-export const addRepo = (nsId: number, data: { url: string; branch?: string }) =>
+export const addRepo = (nsId: number, data: { url: string; branch?: string; profile_id?: number | null; git_token?: string }) =>
   http.post<GitRepo>(`/namespaces/${nsId}/repos`, data).then((r) => r.data);
+
+export const testRepoReachability = (nsId: number, data: { url: string; git_token?: string }) =>
+  http.post<{ success: boolean; message: string }>(`/namespaces/${nsId}/repos/test-reachability`, data).then((r) => r.data);
 
 export const deleteRepo = (nsId: number, repoId: number) =>
   http.delete(`/namespaces/${nsId}/repos/${repoId}`);
@@ -593,3 +597,27 @@ export const submitFeedback = (historyId: number, rating: "like" | "dislike") =>
 /* ── 工作台首页汇总 ── */
 export const getWorkbenchSummary = () =>
   http.get<WorkbenchSummary>("/workbench/summary").then((r) => r.data);
+
+/* ── 全局 Git Token 配置中心 ── */
+import type { GitTokenConfig } from "@/types";
+
+export const fetchGitTokenConfigs = () =>
+  http.get<GitTokenConfig[]>("/git-token-config/list").then((r) => r.data);
+
+export const addGitTokenConfig = (data: { name: string; token: string; description?: string }) =>
+  http.post<GitTokenConfig>("/git-token-config/add", data).then((r) => r.data);
+
+export const updateGitTokenConfig = (data: { id: number; name: string; token: string; description?: string }) =>
+  http.put<GitTokenConfig>("/git-token-config/update", data).then((r) => r.data);
+
+export const deleteGitTokenConfig = (id: number) =>
+  http.delete(`/git-token-config/${id}`);
+
+export const activateGitTokenConfig = (id: number) =>
+  http.post<GitTokenConfig>(`/git-token-config/activate/${id}`).then((r) => r.data);
+
+export const deactivateGitTokenConfig = (id: number) =>
+  http.post<GitTokenConfig>(`/git-token-config/deactivate/${id}`).then((r) => r.data);
+
+export const testGitTokenConfig = (data: { id: number; url: string }) =>
+  http.post<{ success: boolean; message: string }>("/git-token-config/test", data).then((r) => r.data);

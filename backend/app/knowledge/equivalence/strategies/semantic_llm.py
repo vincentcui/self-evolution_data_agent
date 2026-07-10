@@ -72,7 +72,7 @@ class _SemanticBudget:
         cls._remaining = 0
 
 
-async def _call_llm(prompt: str) -> str:
+async def _call_llm(prompt: str, namespace_id: int | None = None) -> str:
     """调用 LLM 获取语义等价判定结果 (raw JSON string).
 
     思考由全局默认关闭 (settings.llm_thinking_enabled=False), max_tokens=200 足够。
@@ -87,6 +87,7 @@ async def _call_llm(prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=200, thinking=False,
+        namespace_id=namespace_id,
     )
 
 
@@ -115,7 +116,9 @@ def _build_prompt(cands: list) -> str:
     )
 
 
-async def semantic_llm_checker(cands: list) -> tuple[Any, str] | None:
+async def semantic_llm_checker(
+    cands: list, *, namespace_id: int | None = None,
+) -> tuple[Any, str] | None:
     """LLM 语义等价判定.
 
     - 预算耗尽 → None
@@ -136,7 +139,7 @@ async def semantic_llm_checker(cands: list) -> tuple[Any, str] | None:
     prompt = _build_prompt(cands)
 
     try:
-        raw = await _call_llm(prompt)
+        raw = await _call_llm(prompt, namespace_id=namespace_id)
     except Exception as exc:
         log.warning("[semantic_llm] LLM call failed: %s", exc)
         return None

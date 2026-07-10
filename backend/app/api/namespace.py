@@ -27,6 +27,7 @@ from app.db.metadata import get_db
 from app.engine.drivers import get_driver
 from app.engine.registry import delete_knowledge_collection
 from app.knowledge.bulk_guard import BulkOperationGuard
+from app.knowledge.git_reachability import mask_token
 from app.models import DataSource, Namespace
 from app.models.model_config import ModelConfig
 from app.models.schema_canonical_object import SchemaCanonicalObject
@@ -50,6 +51,13 @@ router = APIRouter(prefix="/api/namespaces", tags=["namespaces"])
 log = logging.getLogger(__name__)
 
 
+def _mask_namespace_out(ns: Namespace) -> NamespaceOut:
+    """Namespace ORM → NamespaceOut, 手动计算 git_token_masked"""
+    out = NamespaceOut.model_validate(ns)
+    out.git_token_masked = mask_token(ns.git_token)
+    return out
+
+
 # ════════════════════════════════════════════
 #  命名空间 CRUD
 # ════════════════════════════════════════════
@@ -65,7 +73,7 @@ async def list_namespaces(
     if allowed is not None:
         stmt = stmt.where(Namespace.id.in_(allowed))
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return [_mask_namespace_out(ns) for ns in result.scalars().all()]
 
 
 @router.post("", response_model=NamespaceOut, status_code=201)
@@ -77,6 +85,7 @@ async def create_namespace(
     """创建命名空间。记录 created_by; admin 自动获得访问权 (super_admin 全局无需)。"""
     ns = Namespace(
         name=body.name, slug=body.slug, description=body.description,
+        git_token=body.git_token,
         created_by=actor.id,
     )
     db.add(ns)
@@ -85,7 +94,7 @@ async def create_namespace(
         db.add(UserNamespaceAccess(user_id=actor.id, namespace_id=ns.id))
     await db.commit()
     await db.refresh(ns)
-    return ns
+    return _mask_namespace_out(ns)
 
 
 @router.put("/{ns_id}", response_model=NamespaceOut)
@@ -101,9 +110,11 @@ async def update_namespace(
         ns.name = body.name
     if body.description is not None:
         ns.description = body.description
+    if body.git_token is not None:
+        ns.git_token = body.git_token
     await db.commit()
     await db.refresh(ns)
-    return ns
+    return _mask_namespace_out(ns)
 
 
 @router.delete("/{ns_id}")
@@ -218,6 +229,11 @@ async def delete_namespace(
 
     await db.delete(ns)
     await db.commit()
+
+    # 主动清 registry 内存槽 (FK CASCADE 删 DB 行但不清内存, 不清理会导致配置泄漏)
+    from app.engine.model_registry import registry
+    registry.refresh_chat(None, namespace_id=ns_id)
+    log.info("[namespace] deleted id=%s, registry chat slot cleared", ns_id)
 
     from app.engine.drivers import evict_datasource
     for did in ds_ids:
@@ -490,25 +506,18 @@ async def get_readiness(
     )
     has_datasource = (ds_count or 0) > 0
 
-    # has_global_api_key
+    # has_chat_model: 该 namespace 专属 active CHAT 配置, 或全局兜底 active CHAT 配置
+    # (与 model-config/check-ready 的 namespace OR 全局兜底 判定保持一致)
     chat_active = await db.scalar(
         select(func.count()).select_from(ModelConfig).where(
             ModelConfig.model_type == "CHAT",
             ModelConfig.is_active.is_(True),
             ModelConfig.is_deleted.is_(False),
+            (ModelConfig.namespace_id == namespace_id)
+            | (ModelConfig.namespace_id.is_(None)),
         )
     )
-    has_global_api_key = (chat_active or 0) > 0
-
-    # has_embedding_key
-    embedding_active = await db.scalar(
-        select(func.count()).select_from(ModelConfig).where(
-            ModelConfig.model_type == "EMBEDDING",
-            ModelConfig.is_active.is_(True),
-            ModelConfig.is_deleted.is_(False),
-        )
-    )
-    has_embedding_key = (embedding_active or 0) > 0
+    has_chat_model = (chat_active or 0) > 0
 
     # has_valid_schema
     schema_count = await db.scalar(
@@ -518,10 +527,7 @@ async def get_readiness(
     )
     has_valid_schema = (schema_count or 0) > 0
 
-    ready = (
-        has_access and has_datasource and has_global_api_key
-        and has_embedding_key and has_valid_schema
-    )
+    ready = has_access and has_datasource and has_chat_model and has_valid_schema
 
     blockers: list[BlockerOut] = []
     if not has_access:
@@ -540,21 +546,13 @@ async def get_readiness(
             admin_route=f"/namespaces/{namespace_id}",
             user_action="请联系管理员配置数据源",
         ))
-    if not has_global_api_key:
+    if not has_chat_model:
         blockers.append(BlockerOut(
             type="no_api_key",
-            message="未配置全局默认 API Key",
+            message="未配置可用的 Chat 模型 (该空间专属或全局兜底)",
             admin_action="去配置 API Key",
             admin_route="/model-management",
             user_action="请联系管理员配置模型凭证",
-        ))
-    if not has_embedding_key:
-        blockers.append(BlockerOut(
-            type="no_embedding_key",
-            message="未配置全局默认 Embedding Key",
-            admin_action="去配置 Embedding Key",
-            admin_route="/model-management",
-            user_action="请联系管理员配置 Embedding 模型凭证",
         ))
     if not has_valid_schema:
         blockers.append(BlockerOut(
@@ -570,8 +568,7 @@ async def get_readiness(
         checks={
             "has_access": has_access,
             "has_datasource": has_datasource,
-            "has_global_api_key": has_global_api_key,
-            "has_embedding_key": has_embedding_key,
+            "has_chat_model": has_chat_model,
             "has_valid_schema": has_valid_schema,
         },
         blockers=blockers,

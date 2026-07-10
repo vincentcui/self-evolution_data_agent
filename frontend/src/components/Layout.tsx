@@ -9,9 +9,10 @@
 
 import React, { useCallback, useRef, useState } from "react";
 import {
-  UserOutlined, LogoutOutlined, AppstoreOutlined, EditOutlined,
+  UserOutlined, LogoutOutlined, AppstoreOutlined,
+  EditOutlined, SettingOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Modal } from "antd";
 import { useAuth } from "@/context/AuthContext";
 import { SessionContext } from "@/context/SessionContext";
@@ -50,8 +51,10 @@ const Layout: React.FC = () => {
     loading: sessionsLoading, refresh,
   } = useSessions(nsId);
   const { ready } = useReadiness(nsId);
+  const location = useLocation();
   const [hoverWorkspace, setHoverWorkspace] = useState(false);
   const [hoverNewChat, setHoverNewChat] = useState(false);
+  const [hoverConfig, setHoverConfig] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [runningTraceId, setRunningTraceId] = useState<string | null>(null);
@@ -90,8 +93,11 @@ const Layout: React.FC = () => {
   const handleLogout = () => { logout(); navigate("/login"); };
 
   const isAdmin = roleAtLeast(user?.role, "admin");
+  const isSuperAdmin = roleAtLeast(user?.role, "super_admin");
 
   const ncColors = getButtonColors(!activeSessionId, hoverNewChat);
+  const cfgActive = location.pathname.startsWith("/config");
+  const cfgColors = getButtonColors(cfgActive, hoverConfig);
   const wsColors = getButtonColors(false, hoverWorkspace);
 
   /* Logo 区 — 仅 admin（user 在顶栏已有品牌区） */
@@ -117,6 +123,17 @@ const Layout: React.FC = () => {
           新对话
         </Button>
       </div>
+
+      {/* 配置中心 (仅 super_admin) — 全局模型管理 */}
+      {isSuperAdmin && (
+        <div style={{ padding: "4px 12px" }}>
+          <Button block icon={<SettingOutlined />} onClick={() => navigate("/config")}
+            onMouseEnter={() => setHoverConfig(true)} onMouseLeave={() => setHoverConfig(false)}
+            style={{ ...BUTTON_BASE_STYLE, ...cfgColors }}>
+            配置中心
+          </Button>
+        </div>
+      )}
 
       {/* P0: 工作台 (仅 admin) — 路由跳转 /workspace 首页 */}
       {isAdmin && (

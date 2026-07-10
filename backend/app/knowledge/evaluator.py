@@ -87,7 +87,7 @@ def _build_eval_prompt(report: ParseReport, trained_docs: list[str]) -> str:
 
 @observe(name="knowledge_evaluation", as_type="chain")
 def evaluate_parse_quality(
-    report: ParseReport, trained_docs: list[str]
+    report: ParseReport, trained_docs: list[str], namespace_id: int | None = None
 ) -> ParseReport:
     """
     LLM 评估解析质量, 填充 report 的 completeness_score、evaluation_summary.
@@ -108,12 +108,21 @@ def evaluate_parse_quality(
         ]
 
         # 首次尝试 evaluator_max_tokens_first, 截断则以 retry 上限重试一次
-        resp = chat_completion_checked(messages=messages, temperature=0.1,
-                                       max_tokens=settings.evaluator_max_tokens_first, thinking=False)
+        resp = chat_completion_checked(
+            messages=messages, temperature=0.1,
+            max_tokens=settings.evaluator_max_tokens_first, thinking=False,
+            namespace_id=namespace_id,
+        )
         if resp.truncated:
-            logger.warning("评估输出被截断 (len=%d), 以 max_tokens=%d 重试", len(resp.text), settings.evaluator_max_tokens_retry)
-            resp = chat_completion_checked(messages=messages, temperature=0.1,
-                                           max_tokens=settings.evaluator_max_tokens_retry, thinking=False)
+            logger.warning(
+                "评估输出被截断 (len=%d), 以 max_tokens=%d 重试",
+                len(resp.text), settings.evaluator_max_tokens_retry,
+            )
+            resp = chat_completion_checked(
+                messages=messages, temperature=0.1,
+                max_tokens=settings.evaluator_max_tokens_retry, thinking=False,
+                namespace_id=namespace_id,
+            )
             if resp.truncated:
                 logger.warning("重试仍截断 (len=%d), 尝试修复 JSON", len(resp.text))
 

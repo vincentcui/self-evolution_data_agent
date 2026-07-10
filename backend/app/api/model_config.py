@@ -18,11 +18,18 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_admin_or_above
+from app.auth import (
+    ROLE_SUPER_ADMIN,
+    accessible_namespace_ids,
+    assert_ns_access,
+    get_current_user,
+    require_admin_or_above,
+    role_at_least,
+)
 from app.config import settings
 from app.db.metadata import get_db
 from app.models.base import local_now
@@ -56,6 +63,7 @@ class ModelConfigIn(BaseModel):
     proxy_port: int | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
+    namespace_id: int | None = None
 
 
 class ModelConfigUpdate(ModelConfigIn):
@@ -80,6 +88,8 @@ class ModelConfigOut(BaseModel):
     max_tokens: int | None
     max_history_turns: int
     is_active: bool
+    namespace_id: int | None = None
+    namespace_name: str | None = None
     completions_path: str | None
     embeddings_path: str | None
     proxy_enabled: bool
@@ -132,6 +142,7 @@ def _safe_config_dict(row: ModelConfig) -> dict:
         "base_url": row.base_url,
         "model_name": row.model_name,
         "model_type": row.model_type,
+        "namespace_id": row.namespace_id,
         "temperature": float(row.temperature) if row.temperature is not None else None,
         "max_tokens": row.max_tokens,
         "max_history_turns": row.max_history_turns,
@@ -176,7 +187,7 @@ async def _write_audit(
         log.warning("[model_config] 审计写入失败（非致命）action=%s: %s", action, exc)
 
 
-def _to_out(row: ModelConfig) -> ModelConfigOut:
+def _to_out(row: ModelConfig, namespace_name: str | None = None) -> ModelConfigOut:
     return ModelConfigOut(
         id=row.id,
         provider=row.provider,
@@ -189,6 +200,8 @@ def _to_out(row: ModelConfig) -> ModelConfigOut:
         max_tokens=row.max_tokens,
         max_history_turns=row.max_history_turns,
         is_active=row.is_active,
+        namespace_id=row.namespace_id,
+        namespace_name=namespace_name,
         completions_path=row.completions_path,
         embeddings_path=row.embeddings_path,
         proxy_enabled=row.proxy_enabled,
@@ -198,6 +211,18 @@ def _to_out(row: ModelConfig) -> ModelConfigOut:
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+async def _assert_config_write(db: AsyncSession, user: User, target_ns_id: int | None) -> None:
+    """模型配置写权限 (spec D2):
+    - 全局配置 (namespace_id=None): 仅 super_admin。
+    - 空间配置: owner∪granted (assert_ns_access, super_admin 豁免)。
+    """
+    if target_ns_id is None:
+        if not role_at_least(user, ROLE_SUPER_ADMIN):
+            raise HTTPException(status_code=403, detail="全局配置仅超级管理员可管理")
+    else:
+        await assert_ns_access(db, user, target_ns_id)
 
 
 async def _get_or_404(db: AsyncSession, config_id: int) -> ModelConfig:
@@ -213,28 +238,79 @@ async def _get_or_404(db: AsyncSession, config_id: int) -> ModelConfig:
 
 @router.get("/list", response_model=list[ModelConfigOut])
 async def list_configs(
-    _user: User = Depends(get_current_user),
+    namespace_id: int | None = None,
+    user: User = Depends(require_admin_or_above),   # D1: 收紧到 admin+
     db: AsyncSession = Depends(get_db),
 ):
-    """获取全部未删除的模型配置列表（API Key 脱敏）."""
-    rows = (await db.execute(
-        select(ModelConfig)
-        .where(ModelConfig.is_deleted.is_(False))
-        .order_by(ModelConfig.model_type, ModelConfig.id)
-    )).scalars().all()
-    return [_to_out(r) for r in rows]
+    """未删除的模型配置列表（API Key 脱敏）。
+
+    作用域 (spec D1/D2):
+    - 带 namespace_id: 断言访问权后返回 该空间 ∪ 全局(NULL)。
+    - 不带 namespace_id: super_admin 见全部; admin 见 可访问空间 ∪ 全局(NULL)。
+    """
+    base = select(ModelConfig).where(ModelConfig.is_deleted.is_(False))
+
+    if namespace_id is not None:
+        await assert_ns_access(db, user, namespace_id)      # 无权 → 403
+        base = base.where(
+            or_(
+                ModelConfig.namespace_id == namespace_id,
+                ModelConfig.namespace_id.is_(None),
+            )
+        )
+    else:
+        allowed = await accessible_namespace_ids(db, user)  # super_admin → None
+        if allowed is not None:
+            base = base.where(
+                or_(
+                    ModelConfig.namespace_id.in_(allowed),
+                    ModelConfig.namespace_id.is_(None),
+                )
+            )
+
+    query = base.order_by(ModelConfig.model_type, ModelConfig.id)
+    rows = (await db.execute(query)).scalars().all()
+
+    # 批量查 namespace 名称，填充 namespace_name 字段
+    ns_ids = {r.namespace_id for r in rows if r.namespace_id is not None}
+    ns_names: dict[int, str] = {}
+    if ns_ids:
+        from app.models.namespace import Namespace
+        ns_rows = (await db.execute(
+            select(Namespace.id, Namespace.name).where(Namespace.id.in_(ns_ids))
+        )).all()
+        ns_names = {row.id: row.name for row in ns_rows}
+
+    return [
+        _to_out(r, ns_names.get(r.namespace_id) if r.namespace_id is not None else None)
+        for r in rows
+    ]
 
 
 @router.post("/add", response_model=ModelConfigOut, status_code=201)
 async def add_config(
     body: ModelConfigIn,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """新增模型配置（不自动激活，需手动激活）."""
     proto = protocol_for_provider(body.provider, body.protocol)
     if proto == "anthropic" and body.model_type == "EMBEDDING":
         raise HTTPException(400, "Anthropic 协议不支持 EMBEDDING 类型")
+
+    # EMBEDDING 强制 namespace_id = None (代码层约束)
+    ns_id = body.namespace_id if body.model_type == "CHAT" else None
+    await _assert_config_write(db, user, ns_id)   # D2: 全局/EMBEDDING → 仅 super_admin
+
+    # namespace 存在性校验 (避免 FK IntegrityError → 500)
+    if ns_id is not None:
+        from app.models.namespace import Namespace
+        ns_exists = await db.scalar(
+            select(Namespace.id).where(Namespace.id == ns_id)
+        )
+        if ns_exists is None:
+            raise HTTPException(400, f"命名空间不存在: {ns_id}")
+
     row = ModelConfig(
         provider=body.provider.strip(),
         base_url=body.base_url.strip(),
@@ -254,10 +330,11 @@ async def add_config(
         proxy_password=body.proxy_password,
         is_active=False,
         is_deleted=False,
+        namespace_id=ns_id,
     )
     db.add(row)
     await db.flush()  # 获取 row.id（自增主键）
-    await _write_audit(db, "create", _user, row=row, after=_safe_config_dict(row))
+    await _write_audit(db, "create", user, row=row, after=_safe_config_dict(row))
     await db.commit()
     await db.refresh(row)
     log.info("[model_config] 新增 id=%d provider=%s type=%s protocol=%s",
@@ -268,11 +345,12 @@ async def add_config(
 @router.put("/update", response_model=ModelConfigOut)
 async def update_config(
     body: ModelConfigUpdate,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """更新模型配置。API Key 若传 **** 则跳过更新（保留原值）."""
     row = await _get_or_404(db, body.id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # 已激活的 Embedding 配置不允许直接修改（会导致已有向量与新查询不兼容）
     if row.model_type == "EMBEDDING" and row.is_active:
@@ -296,6 +374,9 @@ async def update_config(
         row.api_key = body.api_key.strip()
     row.model_name = body.model_name.strip()
     # model_type 不允许修改
+    # namespace_id 不允许修改 (创建时绑定)
+    if body.namespace_id is not None and body.namespace_id != row.namespace_id:
+        raise HTTPException(400, "namespace_id 不允许修改，请删除后重新创建")
     row.temperature = body.temperature
     row.max_tokens = body.max_tokens
     row.max_history_turns = body.max_history_turns
@@ -311,7 +392,7 @@ async def update_config(
     await _write_audit(
         db,
         "update",
-        _user,
+        user,
         row=row,
         before=before_snapshot,
         after=_safe_config_dict(row),
@@ -329,11 +410,12 @@ async def update_config(
 @router.delete("/{config_id}", status_code=204)
 async def delete_config(
     config_id: int,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """逻辑删除模型配置。Chat 可直接删除；active Embedding 禁止删除。"""
     row = await _get_or_404(db, config_id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # 已激活的 Embedding 配置不允许直接删除（ChromaDB 里仍有旧向量）
     if row.model_type == "EMBEDDING" and row.is_active:
@@ -345,24 +427,26 @@ async def delete_config(
 
     was_active = row.is_active
     model_type = row.model_type
+    ns_id = row.namespace_id
     before_snapshot = _safe_config_dict(row)
     row.is_deleted = True
     row.is_active = False
     row.updated_at = local_now()
-    await _write_audit(db, "delete", _user, row=row, before=before_snapshot)
+    await _write_audit(db, "delete", user, row=row, before=before_snapshot)
     await db.commit()
     if was_active:
-        _clear_registry(model_type)
+        _clear_registry(model_type, namespace_id=ns_id)
 
 
 @router.post("/activate/{config_id}", response_model=ModelConfigOut)
 async def activate_config(
     config_id: int,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """激活指定配置。Chat 支持热切换；Embedding 仅允许首次激活（无 active 时）。"""
     row = await _get_or_404(db, config_id)
+    await _assert_config_write(db, user, row.namespace_id)
 
     # Embedding：已有其他 active 配置时禁止切换
     if row.model_type == "EMBEDDING":
@@ -381,10 +465,11 @@ async def activate_config(
                 "Embedding 模型切换需要重建知识库索引，首期不支持直接热切换",
             )
 
-    # 先禁用同类型其他配置
+    # 先禁用同模型类型 + 同 namespace_id 组内其他配置
     others = (await db.execute(
         select(ModelConfig).where(
             ModelConfig.model_type == row.model_type,
+            ModelConfig.namespace_id == row.namespace_id,
             ModelConfig.is_active.is_(True),
             ModelConfig.id != config_id,
             ModelConfig.is_deleted.is_(False),
@@ -393,14 +478,14 @@ async def activate_config(
     for other in others:
         other.is_active = False
         other.updated_at = local_now()
-        await _write_audit(db, "deactivate", _user, row=other)
+        await _write_audit(db, "deactivate", user, row=other)
 
     # flush 先把禁用语句发到 DB，确保唯一索引校验时旧记录已变为 False
     await db.flush()
 
     row.is_active = True
     row.updated_at = local_now()
-    await _write_audit(db, "activate", _user, row=row, after=_safe_config_dict(row))
+    await _write_audit(db, "activate", user, row=row, after=_safe_config_dict(row))
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -418,7 +503,7 @@ async def activate_config(
 @router.post("/test")
 async def test_connection(
     body: ModelConfigTestBody,
-    _user: User = Depends(require_admin_or_above),
+    user: User = Depends(require_admin_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """测试连接（不入库，创建临时实例发送测试请求）.
@@ -432,6 +517,7 @@ async def test_connection(
     if _MASK in api_key and body.id is not None:
         row = await db.get(ModelConfig, body.id)
         if row and not row.is_deleted:
+            await _assert_config_write(db, user, row.namespace_id)   # 防越权借他空间真实 key
             api_key = row.api_key
         else:
             return {"success": False, "message": "配置不存在，无法获取 API Key"}
@@ -468,22 +554,52 @@ async def test_connection(
 
 @router.get("/check-ready", response_model=CheckReadyOut)
 async def check_ready(
-    _user: User = Depends(get_current_user),
+    namespace_id: int | None = None,
+    user: User = Depends(get_current_user),   # 保持任意登录可查就绪 (plain user 需要)
     db: AsyncSession = Depends(get_db),
 ):
-    """检查 model_configs DB 中是否各有一条激活的 Chat / Embedding 配置.
+    """检查 Chat / Embedding 是否就绪。namespace_id 非 None 时检查该 namespace
+    的 Chat 配置 (含全局兜底)；Embedding 始终检查全局。
 
-    只检查 DB，不读取 env / settings；env 有配置但 DB 无 active config 时仍返回 false。
+    只检查 DB, 不读取 env / settings；env 有配置但 DB 无 active config 时仍返回 false。
     """
-    rows = (await db.execute(
-        select(ModelConfig.model_type).where(
+    if namespace_id is not None:
+        await assert_ns_access(db, user, namespace_id)   # G5: 不能探测无权空间
+    # 检查全局 EMBEDDING
+    emb_ok = await db.scalar(
+        select(ModelConfig.id).where(
+            ModelConfig.model_type == "EMBEDDING",
             ModelConfig.is_active.is_(True),
             ModelConfig.is_deleted.is_(False),
         )
-    )).scalars().all()
-    types = set(rows)
-    chat_ok = "CHAT" in types
-    emb_ok = "EMBEDDING" in types
+    )
+    emb_ok = emb_ok is not None
+
+    # 检查 CHAT: namespace 级别 + 全局兜底
+    chat_ok = False
+    if namespace_id is not None:
+        ns_chat = await db.scalar(
+            select(ModelConfig.id).where(
+                ModelConfig.model_type == "CHAT",
+                ModelConfig.namespace_id == namespace_id,
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_deleted.is_(False),
+            )
+        )
+        chat_ok = ns_chat is not None
+
+    if not chat_ok:
+        # 检查全局兜底
+        global_chat = await db.scalar(
+            select(ModelConfig.id).where(
+                ModelConfig.model_type == "CHAT",
+                ModelConfig.namespace_id.is_(None),
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_deleted.is_(False),
+            )
+        )
+        chat_ok = global_chat is not None
+
     return CheckReadyOut(
         chat_model_ready=chat_ok,
         embedding_model_ready=emb_ok,
@@ -572,15 +688,15 @@ async def _do_refresh(row: ModelConfig) -> None:
     from app.engine.model_registry import registry
     cfg = registry._row_to_dict(row)
     if row.model_type == "CHAT":
-        registry.refresh_chat(cfg)
+        registry.refresh_chat(cfg, namespace_id=row.namespace_id)
     else:
         registry.refresh_embedding(cfg)
 
 
-def _clear_registry(model_type: str) -> None:
-    """删除激活配置时清空注册中心（返回 None 状态）."""
+def _clear_registry(model_type: str, namespace_id: int | None = None) -> None:
+    """删除激活配置时清空注册中心对应槽位."""
     from app.engine.model_registry import registry
     if model_type == "CHAT":
-        registry.refresh_chat(None)
+        registry.refresh_chat(None, namespace_id=namespace_id)
     else:
         registry.refresh_embedding(None)

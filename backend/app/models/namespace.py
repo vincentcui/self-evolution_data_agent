@@ -21,6 +21,7 @@ class Namespace(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True)
     slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
+    git_token: Mapped[str] = mapped_column(EncryptedString, default="")
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
