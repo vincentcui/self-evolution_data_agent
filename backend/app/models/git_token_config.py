@@ -1,5 +1,6 @@
 """全局 Git Token 配置中心 — DB 存储的加密 Git 访问令牌"""
 from datetime import datetime
+
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,4 +19,6 @@ class GitTokenConfig(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(default=local_now)
     updated_at: Mapped[datetime | None] = mapped_column(default=None)
-    created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    created_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL")
+    )

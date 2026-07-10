@@ -325,24 +325,18 @@ EXTRACTION_TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "emit_knowledge",
-        "description": "提交一条知识发现 (非 schema 对象)。Use when: SQL SELECT语义化→emit example / 发现路由→emit route_hint / 发现术语→emit terminology / 发现规则→emit rule。Do not use when: 提交数据表/集合 schema (用 emit_schema_object)。Input: entry_type + payload 按类型填对应必填字段。Output: {status: ok|error, message}",
+        "description": "提交一条知识发现 (非 schema 对象)。Use when: SQL SELECT语义化→emit example / 发现术语→emit terminology / 发现规则→emit rule。Do not use when: 提交数据表/集合 schema (用 emit_schema_object)。Input: entry_type + payload 按类型填对应必填字段。Output: {status: ok|error, message}",
         "input_schema": {
             "type": "object",
             "required": ["entry_type", "payload"],
             "properties": {
                 "entry_type": {
                     "type": "string",
-                    "enum": ["route_hint", "terminology", "rule", "example"],
-                    "description": "example=查询模式(SELECT语义化), terminology=术语, route_hint=路由提示, rule=业务规则"
+                    "enum": ["terminology", "rule", "example"],
+                    "description": "example=查询模式(SELECT语义化), terminology=术语, rule=业务规则"
                 },
                 "payload": {
                     "oneOf": [
-                        {"title": "route_hint", "type": "object",
-                         "required": ["mapper_namespace", "canonical_sql"],
-                         "properties": {
-                             "mapper_namespace": {"type": "string"},
-                             "canonical_sql": {"type": "string"},
-                         }},
                         {"title": "terminology", "type": "object",
                          "required": ["term", "primary_collection"],
                          "properties": {

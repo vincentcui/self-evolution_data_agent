@@ -115,10 +115,7 @@ def _map_agent_to_channels(
     for kp in knowledge_proposals:
         et = kp.get("entry_type")
         payload = dict(kp.get("payload") or {})
-        if et == "route_hint":
-            payload.setdefault("type", "select")  # _write_route_hints 按 type 过滤非 select
-            mybatis_entries.append(payload)
-        elif et == "terminology":
+        if et == "terminology":
             payload.setdefault("primary_collection", "")
             # primary_database + db_type 均由下游程序化反查, 不让 agent 猜:
             #   primary_database ← coll_to_db (实际 DB 连接反查表→库)
@@ -635,7 +632,6 @@ async def run_training_pipeline_with_progress(
             ke_db,
             namespace_id=ns_id,
             repo_id=repo_id,
-            mybatis_entries=code_result.mybatis_entries,
             business_terms=code_result.business_terms_candidates,
             business_rules=code_result.business_rules_candidates,
             business_examples=business_examples,

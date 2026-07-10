@@ -47,7 +47,7 @@ const ENTRY_TYPE_META: Record<
   },
   route_hint: {
     label: "路由偏好 (多表关联路径提示)",
-    hint: "为涉及多表/多集合关联的问题，提示推荐的关联路径与成本策略，帮系统在多种连法中选对、选省。",
+    hint: "为涉及多表/多集合关联的问题, 手动录入推荐的关联路径与导航说明 (关联字段/关联类型/嵌套位置/避坑), 供相似问题复用.",
   },
 };
 
@@ -72,10 +72,9 @@ interface ExamplePayloadDraft {
 }
 
 interface RouteHintPayloadDraft {
-  question_pattern: string;
+  question_pattern: string;   // 提交为 content
   collection_path: string[];
-  cost_strategy: string;
-  reason: string;
+  navigation_note: string;
 }
 
 export default function CreateKnowledgeForm({
@@ -98,7 +97,7 @@ export default function CreateKnowledgeForm({
     final_query_plan_text: "", result_summary: "",
   });
   const [rhPayload, setRhPayload] = useState<RouteHintPayloadDraft>({
-    question_pattern: "", collection_path: [], cost_strategy: "default", reason: "",
+    question_pattern: "", collection_path: [], navigation_note: "",
   });
   const [jsonError, setJsonError] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
@@ -113,7 +112,7 @@ export default function CreateKnowledgeForm({
     setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
     setRulePayload({ rule_text: "", applies_to_collections: [], priority: 0 });
     setExPayload({ question_pattern: "", collections_text: "", final_query_plan_text: "", result_summary: "" });
-    setRhPayload({ question_pattern: "", collection_path: [], cost_strategy: "default", reason: "" });
+    setRhPayload({ question_pattern: "", collection_path: [], navigation_note: "" });
     setJsonError("");
   }, [open]);
 
@@ -213,7 +212,10 @@ export default function CreateKnowledgeForm({
         entry_type: "route_hint",
         namespace_id, tier,
         content: rhPayload.question_pattern,
-        payload: { ...rhPayload },
+        payload: {
+          collection_path: rhPayload.collection_path,
+          navigation_note: rhPayload.navigation_note,
+        },
       };
     }
 
@@ -463,38 +465,29 @@ function RouteHintFields({
           placeholder="问题模式, 例: 查 X 关联的 Y"
         />
       </Form.Item>
-      <Form.Item label="集合路径 (按序输入)" required>
-        <Select
+      <Form.Item label="集合路径 (有序, 逗号分隔)" required>
+        <Input
           aria-label="集合路径"
-          mode="tags"
-          value={value.collection_path}
-          onChange={(next: string[]) =>
-            onChange({ ...value, collection_path: next })
+          value={value.collection_path.join(",")}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              collection_path: e.target.value
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
           }
-          tokenSeparators={[",", "，", "→"]}
-          notFoundContent={null}
-          open={false}
-          placeholder="按顺序输入: a → b → c, 或逗号分隔"
+          placeholder="shop.orders, shop.products"
         />
       </Form.Item>
-      <Form.Item label="成本策略">
-        <Select
-          aria-label="成本策略"
-          value={value.cost_strategy}
-          onChange={(v) => onChange({ ...value, cost_strategy: v })}
-          options={[
-            { value: "default", label: "默认" },
-            { value: "low", label: "低开销 (分批 / count_only)" },
-            { value: "high", label: "高开销 (大数据量预警)" },
-          ]}
-        />
-      </Form.Item>
-      <Form.Item label="原因 (可选)">
+      <Form.Item label="导航说明 (关联字段 / 关联类型 / 嵌套位置 / 避坑)">
         <Input.TextArea
-          aria-label="原因"
-          rows={2}
-          value={value.reason}
-          onChange={(e) => onChange({ ...value, reason: e.target.value })}
+          aria-label="导航说明"
+          rows={3}
+          value={value.navigation_note}
+          onChange={(e) => onChange({ ...value, navigation_note: e.target.value })}
+          placeholder="orders.items[].sku ↔ products.sku (nested_array, 非 products.id); 类别在 products.categories[] 需 $unwind"
         />
       </Form.Item>
     </>

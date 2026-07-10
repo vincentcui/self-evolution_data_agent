@@ -479,7 +479,7 @@ async def _ensure_model_configs_table(engine: AsyncEngine) -> None:
 
 
 async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
-    """migration_032 (git-token-hierarchy): git_token_configs 表.
+    """migration_033 (git-token-hierarchy): git_token_configs 表.
 
     全局 Git Token 配置中心, super_admin 通过配置中心页面管理.
     token 由 EncryptedString TypeDecorator 在应用层 Fernet 加密后入库.
@@ -494,7 +494,7 @@ async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
         is_deleted   BOOLEAN       NOT NULL DEFAULT FALSE,
         created_at   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
         updated_at   TIMESTAMP     NULL,
-        created_by   INTEGER       REFERENCES users(id)
+        created_by   INTEGER       REFERENCES users(id) ON DELETE SET NULL
     )
     """
     # 局部唯一索引: 同一时间仅允许一条 is_active=True 且未删除的记录
@@ -509,7 +509,38 @@ async def _ensure_git_token_configs_table(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.execute(text(ddl))
         await conn.execute(text(unique_active))
-    log.info("[schema_migrations] git_token_configs table ensured (migration_032)")
+    log.info("[schema_migrations] git_token_configs table ensured (migration_033)")
+
+
+async def _repair_git_token_configs_created_by_fk(engine: AsyncEngine) -> None:
+    """migration_034 (review-fix): git_token_configs.created_by FK → ON DELETE SET NULL.
+
+    model 层已声明 ondelete='SET NULL' (app/models/git_token_config.py), 但 create_all
+    对已存在表不补 ondelete; 旧库该 FK 仍为 NO ACTION → 删 user 报 IntegrityError.
+    幂等 DROP+ADD CONSTRAINT 对齐 model (同 _migrate_rbac_three_tier 范式).
+    """
+    async with engine.begin() as conn:
+        if not await _table_exists(conn, "git_token_configs"):
+            return
+        fk_rule = await conn.scalar(text(
+            "SELECT rc.delete_rule FROM information_schema.referential_constraints rc "
+            "JOIN information_schema.table_constraints tc "
+            "  ON rc.constraint_name = tc.constraint_name "
+            "WHERE tc.table_name='git_token_configs' AND tc.constraint_type='FOREIGN KEY' "
+            "  AND rc.constraint_name LIKE '%created_by%'"
+        ))
+        if fk_rule is not None and fk_rule != "SET NULL":
+            cname = await conn.scalar(text(
+                "SELECT tc.constraint_name FROM information_schema.table_constraints tc "
+                "WHERE tc.table_name='git_token_configs' AND tc.constraint_type='FOREIGN KEY' "
+                "  AND tc.constraint_name LIKE '%created_by%'"
+            ))
+            await conn.execute(text(f"ALTER TABLE git_token_configs DROP CONSTRAINT {cname}"))
+            await conn.execute(text(
+                "ALTER TABLE git_token_configs ADD CONSTRAINT git_token_configs_created_by_fkey "
+                "FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL"
+            ))
+    log.info("[schema_migrations] git_token_configs.created_by FK repaired (migration_034)")
 
 
 async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
@@ -555,7 +586,7 @@ async def _repair_terminology_conflict_cascade_fk(engine: AsyncEngine) -> None:
 
 
 async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
-    """migration_030 (namespace-model-config): model_configs.namespace_id 列 + 重建唯一索引.
+    """migration_031 (namespace-model-config): model_configs.namespace_id 列 + 重建唯一索引.
 
     为 model_configs 表添加 namespace_id 列 (nullable, FK → namespaces.id CASCADE),
     并将唯一索引从 (model_type) 重建为 (model_type, namespace_id),
@@ -582,7 +613,7 @@ async def _migrate_model_config_namespace_id(engine: AsyncEngine) -> None:
             pg_ver = int((await conn.scalar(text("SHOW server_version_num"))) or 0)
         except Exception:
             pg_ver = 0
-        nulls_not_distinct = "NULLS NOT DISTINCT" if pg_ver >= 150000 else ""
+        nulls_not_distinct = "NULLS NOT DISTINCT" if pg_ver >= 150000 else ""  # noqa: hardcode  # PG15 server_version_num
         await conn.execute(text(
             f"CREATE UNIQUE INDEX IF NOT EXISTS uq_model_configs_one_active_per_type "
             f"ON model_configs (model_type, namespace_id) {nulls_not_distinct} "
@@ -682,13 +713,17 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_datasources_timezone_column(engine)
     # migration_029 (multi-turn-context): model_configs.max_history_turns 列 — 多轮历史注入轮数
     await _ensure_model_config_max_history_turns_column(engine)
-    # migration_030 (namespace-model-config): model_configs.namespace_id + 唯一索引重建
+    # migration_030 (created-at-default-repair): knowledge_entries.created_at DB 侧默认值补漏
+    await _ensure_knowledge_entries_created_at_default(engine)
+    # migration_031 (namespace-model-config): model_configs.namespace_id + 唯一索引重建
     await _migrate_model_config_namespace_id(engine)
-    # migration_031 (git-token-hierarchy): namespaces + git_repos 新增 git_token 列
+    # migration_032 (git-token-hierarchy): namespaces + git_repos 新增 git_token 列
     await _add_missing(engine, "namespaces", _NAMESPACE_GIT_TOKEN_NEW_COLS)
     await _add_missing(engine, "git_repos", _GIT_REPO_GIT_TOKEN_NEW_COLS)
-    # migration_032 (git-token-hierarchy): 全局 Git Token 配置中心表
+    # migration_033 (git-token-hierarchy): 全局 Git Token 配置中心表
     await _ensure_git_token_configs_table(engine)
+    # migration_034 (review-fix): git_token_configs.created_by FK → ON DELETE SET NULL
+    await _repair_git_token_configs_created_by_fk(engine)
 
 
 async def _create_sessions_table(engine: AsyncEngine) -> None:
@@ -1162,3 +1197,19 @@ async def _ensure_model_config_max_history_turns_column(engine: AsyncEngine) -> 
             "max_history_turns INTEGER NOT NULL DEFAULT 5"
         ))
     log.info("[schema_migrations] model_configs.max_history_turns column ensured (migration_029)")
+
+
+async def _ensure_knowledge_entries_created_at_default(engine: AsyncEngine) -> None:
+    """migration_030 (created-at-default-repair): 修复 knowledge_entries.created_at 缺 DB 侧默认值.
+
+    模型声明 server_default=LOCAL_NOW (app/models/base.py), 但长生命周期库该列
+    建表时未带默认 (早于本迁移脚本引入), create_all 对已存在表不会补默认 —
+    导致任何未显式传 created_at 的 INSERT (如 /api/knowledge 手工录入) 报
+    NOT NULL/datetime_type 校验错误。ALTER COLUMN SET DEFAULT 幂等, 存量行不受影响。
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE knowledge_entries ALTER COLUMN created_at "
+            "SET DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')"
+        ))
+    log.info("[schema_migrations] knowledge_entries.created_at default ensured (migration_030)")

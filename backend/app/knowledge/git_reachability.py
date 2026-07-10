@@ -68,7 +68,10 @@ def _check_github_api(url: str, token: str, timeout: int) -> tuple[bool, str]:
 
     if resp.status_code == 404:
         if token:
-            return False, "仓库不存在或无权访问（请检查仓库名是否正确，或 Token 是否对该仓库有权限）"
+            return False, (
+                "仓库不存在或无权访问（请检查仓库名是否正确，"
+                "或 Token 是否对该仓库有权限）"
+            )
         return False, "私有仓库需要配置 Git 访问令牌"
 
     return False, "无法连接 Git 仓库，请检查 URL 和网络"
@@ -96,7 +99,10 @@ def _check_generic_https(url: str, token: str, timeout: int) -> tuple[bool, str]
 
     if resp.status_code == 404:
         if token:
-            return False, "仓库不存在或无权访问（请检查仓库名是否正确，或 Token 是否对该仓库有权限）"
+            return False, (
+                "仓库不存在或无权访问（请检查仓库名是否正确，"
+                "或 Token 是否对该仓库有权限）"
+            )
         return False, "私有仓库需要配置 Git 访问令牌"
 
     if not token and resp.status_code >= 400 and resp.status_code < 500:

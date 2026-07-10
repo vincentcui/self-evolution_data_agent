@@ -46,23 +46,12 @@ from app.engine.sse_manager import (
 from app.engine.tools.registry import (
     CHART_TOOLS,
     EXEC_TOOLS,
-    FIELD_PROBE_TOOLS,
-    PROBE_TOOLS,
     TOOL_SPECS,
     build_system_prompt,
 )
 from app.engine.visualizer import render_chart
 from app.knowledge.trace_extractor import (
-    derive_cost_strategy as _derive_cost_strategy_impl,
-)
-from app.knowledge.trace_extractor import (
     extract_collections as _extract_collections_impl,
-)
-from app.knowledge.trace_extractor import (
-    extract_final_pipeline as _extract_final_pipeline_impl,
-)
-from app.knowledge.trace_extractor import (
-    extract_join_fields as _extract_join_fields_impl,
 )
 from app.knowledge.trace_extractor import (
     extract_join_keys as _extract_join_keys_impl,
@@ -100,10 +89,9 @@ async def _async_extract_after_end_turn(
     """agent end_turn 成功后台 LLM-as-extractor 抽取知识入待审池.
 
     职责拆分 (Stage extractor-protocol Task 2):
-      - 代码侧抽: final_pipeline / collections / field_mappings / cost_strategy /
-        join_fields / chart_type / tool_count (机械字段, 不变性由代码保证)
-      - LLM 侧吐: question_pattern + route_hint_reason (语义改写, 仅此两字段)
-      - 服务端拼装最终 example / route_hint payload
+      - 代码侧抽: collections / rows_count / tool_count / trace_summary
+        (机械字段, 不变性由代码保证)
+      - LLM 侧吐: question_pattern + result_summary (语义改写, 仅此两字段)
 
     防御式: 任何内部异常 log.exception 完整字段 (不省略), 永不传播.
     namespace_id=None (全局) 不沉淀.
@@ -124,10 +112,7 @@ async def _async_extract_after_end_turn(
             return
 
         # ── 代码侧抽取 (机械字段, 一定对) ──
-        final_pipeline = _extract_final_pipeline(result.tool_trace)
         collections    = _extract_collections(result.tool_trace or [])
-        cost_strategy  = _derive_cost_strategy(result.tool_trace or [])
-        join_fields    = _extract_join_fields(final_pipeline)
         rows_count, _  = _extract_rows_chart(result)
         tool_count     = len(result.tool_trace or [])
         trace_summary  = _summarize_tool_trace(result.tool_trace, settings)
@@ -171,22 +156,12 @@ async def _async_extract_after_end_turn(
             "final_query_plan": final_query_plan,
             "result_summary":   llm_output.get("result_summary") or "",
         }
-        route_hint = None
-        rh_reason = llm_output.get("route_hint_reason")
-        if len(collections) >= 2 and isinstance(rh_reason, str) and rh_reason.strip():
-            route_hint = {
-                "collection_path": collections,
-                "join_fields":     join_fields,
-                "cost_strategy":   cost_strategy,
-                "reason":          rh_reason.strip(),
-            }
-
         async with _new_db_session() as db:
             await _write_extract_results(
                 db=db, ns_id=ns_id,
                 trace_id=trace_id,
                 question_pattern=question_pattern,
-                example=example, route_hint=route_hint, evidence=evidence,
+                example=example, evidence=evidence,
             )
             await db.commit()
 
@@ -290,7 +265,6 @@ async def query_stream(
         settings=settings, namespace=ns,
         anchors=anchors,
         critical=bundle.critical,
-        route_hints=bundle.route_hints_for_prompt,
     )
 
     # 多轮上下文: 读同 session 最近 N 轮历史注入 agent_loop messages。
@@ -953,15 +927,6 @@ def _should_extract(result: AgentResult, settings_obj) -> tuple[bool, str]:
     return True, "ok"
 
 
-def _extract_final_pipeline(tool_trace: list[dict]) -> dict | None:
-    """从后向前找最后一次 execute_plan 的 plan dict.
-
-    注: stage 3 之后 execute_batched_aggregate / execute_count_only 已合入
-    execute_query(mode="batched"|"count"), 这里不再处理.
-    """
-    return _extract_final_pipeline_impl(tool_trace)
-
-
 def _summarize_tool_trace(tool_trace: list[dict], settings_obj) -> str:
     """tool_trace → 简短文本摘要 (防 prompt token 爆炸)."""
     lines: list[str] = []
@@ -1017,50 +982,6 @@ def _extract_collections(tool_trace: list[dict]) -> list[str]:
     return _extract_collections_impl(tool_trace)
 
 
-def _extract_field_mappings(tool_trace: list[dict]) -> list[dict]:
-    """从 PROBE_TOOLS (fetch_schema / inspect_values) input 抽真探查过的字段.
-
-    field_mappings 形如 [{"collection": "c_product", "field": "categoryId"}, ...].
-    保序去重, key=(collection, field). schema 探查仅记 collection (field="").
-    """
-    seen: set[tuple[str, str]] = set()
-    out: list[dict] = []
-    for call in tool_trace or []:
-        name = call.get("name", "")
-        if name not in PROBE_TOOLS:
-            continue
-        inp = call.get("input") or {}
-        target = inp.get("target")
-        if not isinstance(target, str) or not target:
-            continue
-        if name in FIELD_PROBE_TOOLS:
-            field = inp.get("field") or ""
-            key = (target, str(field))
-        else:
-            key = (target, "")
-        if key not in seen:
-            seen.add(key)
-            out.append({"collection": key[0], "field": key[1]})
-    return out
-
-
-def _derive_cost_strategy(tool_trace: list[dict]) -> str:
-    """规则 (适配 stage 3 execute_query mode):
-    - 任一 execute_query 用 mode="batched"  → batched_count_only
-    - 否则任一 execute_query 用 mode="count" → count_only_first
-    - 否则                                    → default
-    """
-    return _derive_cost_strategy_impl(tool_trace)
-
-
-def _extract_join_fields(final_pipeline: dict | None) -> list[dict]:
-    """从 execute_plan.steps 中 $lookup 阶段抽 join 字段.
-
-    返回 [{"a": "上游集合.字段", "b": "下游集合.字段"}, ...]. 无 $lookup 返 [].
-    """
-    return _extract_join_fields_impl(final_pipeline)
-
-
 def _extract_join_keys(final_query_plan: dict | None) -> list[dict]:
     """从归一化 query_plan 中抽取 join 键对.
 
@@ -1076,9 +997,6 @@ def _validate_llm_output_minimal(out: dict) -> None:
     qp = out.get("question_pattern")
     if not isinstance(qp, str) or not qp.strip():
         raise ValueError(f"question_pattern 缺失或非字符串: {qp!r}")
-    rh = out.get("route_hint_reason")
-    if rh is not None and not isinstance(rh, str):
-        raise ValueError(f"route_hint_reason 非 None 也非 str: {rh!r}")
 
 
 async def _write_extract_results(
@@ -1086,10 +1004,9 @@ async def _write_extract_results(
     trace_id: str,
     question_pattern: str,
     example: dict,
-    route_hint: dict | None,
     evidence: dict,
 ) -> None:
-    """example 必产 + route_hint 可选."""
+    """example 必产."""
     from app.models import KnowledgeEntry
 
     example_ke = KnowledgeEntry(
@@ -1105,18 +1022,3 @@ async def _write_extract_results(
         "[async_extract] example proposed trace=%s id=%s pattern=%r",
         trace_id, example_ke.id, question_pattern[:80],
     )
-
-    if route_hint is not None:
-        rh_ke = KnowledgeEntry(
-            namespace_id=ns_id, entry_type="route_hint",
-            content=question_pattern, tier="normal", status="proposed",
-            source=settings.agent_learn_source,
-            payload=json.dumps(route_hint, ensure_ascii=False),
-            evidence_json=json.dumps(evidence, ensure_ascii=False),
-        )
-        db.add(rh_ke)
-        await db.flush()
-        log.info(
-            "[async_extract] route_hint proposed trace=%s id=%s pattern=%r",
-            trace_id, rh_ke.id, question_pattern[:80],
-        )

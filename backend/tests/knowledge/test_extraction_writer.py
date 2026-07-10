@@ -4,7 +4,7 @@ Validates:
 - JPA entities produce table_description + field_description candidates
 - Enum classes produce enum_values candidates
 - Relationships produce relationship candidates
-- mybatis_entries produce route_hint KE; business_examples (sql2nl) produce example KE (D3)
+- business_examples (sql2nl) produce example KE (D3); route_hint 自动生产路径已删 (C10/D6)
 - business_rules produce rule KE
 - Concurrent writes to same target do not raise UniqueViolationError
 """
@@ -324,7 +324,7 @@ async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
     total = await extract_and_write_knowledge(
         db_session,
         namespace_id=ns_id, repo_id=repo_id,
-        mybatis_entries=[], business_terms=[],
+        business_terms=[],
         business_rules=business_rules,
     )
     await db_session.commit()
@@ -365,7 +365,7 @@ async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded
     total = await extract_and_write_knowledge(
         db_session,
         namespace_id=ns_id, repo_id=repo_id,
-        mybatis_entries=[], business_terms=[], business_rules=[],
+        business_terms=[], business_rules=[],
         business_examples=business_examples,
     )
     await db_session.commit()
@@ -398,7 +398,7 @@ async def test_extract_and_write_knowledge_skips_empty_example(db_session, seede
     total = await extract_and_write_knowledge(
         db_session,
         namespace_id=ns_id, repo_id=repo_id,
-        mybatis_entries=[], business_terms=[], business_rules=[],
+        business_terms=[], business_rules=[],
         business_examples=[{"tables": ["orders"], "question": "x"}],  # 无 sql_pattern
     )
     await db_session.commit()

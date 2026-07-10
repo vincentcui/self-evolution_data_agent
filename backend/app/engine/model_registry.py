@@ -129,8 +129,8 @@ class ModelRegistry:
     def chat_config(self) -> dict[str, Any] | None:
         """[DEPRECATED] 全局 Chat 配置 (向后兼容)。新代码必须使用 resolve_chat_config."""
         warnings.warn(
-            "registry.chat_config is deprecated; use registry.resolve_chat_config(namespace_id) instead. "
-            "See dev-process/05-namespace-model-config/00-design.md §4.3",
+            "registry.chat_config is deprecated; "
+            "use registry.resolve_chat_config(namespace_id) instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -141,7 +141,9 @@ class ModelRegistry:
         """当前激活的 Embedding 配置."""
         return self._embedding_config
 
-    def get_chat_client(self, cfg: dict[str, Any] | None = None, namespace_id: int | None = None) -> Any:
+    def get_chat_client(
+        self, cfg: dict[str, Any] | None = None, namespace_id: int | None = None,
+    ) -> Any:
         """返回指定 namespace 的 Chat 客户端 (OpenAI 或 Anthropic). 无激活配置时抛 RuntimeError.
 
         cfg 只读一次 (快照), 贯穿传递到 _get_chat_client — 保证此次请求
@@ -262,7 +264,8 @@ class ModelRegistry:
 
             ready = self.is_ready()
             log.info(
-                "[model_registry] 启动加载完成 chat_ready=%s embedding_ready=%s active_count=%d chat_ns_count=%d",
+                "[model_registry] 启动加载完成 chat_ready=%s embedding_ready=%s "
+                "active_count=%d chat_ns_count=%d",
                 ready["chat_ready"], ready["embedding_ready"], len(rows),
                 len(self._chat_configs),
             )

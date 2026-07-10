@@ -1,9 +1,12 @@
 # ============================================================================
 # Phase 7 — _async_extract_after_end_turn 触发条件满足时的 happy path
 # ----------------------------------------------------------------------------
-# Stage extractor-protocol Task 2 升级: LLM 仅返 question_pattern + route_hint_reason.
-# 机械字段 (final_pipeline / collections / field_mappings / chart_type / tool_count /
-# join_fields / cost_strategy) 由代码侧抽取保真.
+# Stage extractor-protocol Task 2 升级: LLM 仅返 question_pattern + result_summary.
+# 机械字段 (final_query_plan / collections / field_mappings / chart_type / tool_count)
+# 由代码侧抽取保真.
+#
+# C4 (2026-07-08): route_hint 自动抽取已从此路径删除 — route_hint 收敛为纯人工录入,
+# _async_extract_after_end_turn 现只产 example (仅一类知识沉淀).
 # ============================================================================
 """Phase 7: end_turn + tool_count >= min + 有 rows → 触发 LLM 抽取."""
 import json
@@ -27,9 +30,10 @@ def _make_fake_result(tool_calls: list[dict], stop_reason: str = "end_turn"):
 
 
 @pytest.mark.asyncio
-async def test_multi_collection_success_creates_example_and_route_hint(
+async def test_multi_collection_success_creates_example_only(
     async_session, real_chromadb, seeded_ns_with_mongo_ds,
 ):
+    """C4: route_hint 已从此路径删除 — end_turn 抽取现只产 example."""
     from app.api import query as query_module
 
     ns_id, _repo_id = seeded_ns_with_mongo_ds
@@ -59,7 +63,7 @@ async def test_multi_collection_success_creates_example_and_route_hint(
     # 新协议: LLM 只返两字段
     fake_llm_output = json.dumps({
         "question_pattern": "某商品的订单数量",
-        "route_hint_reason": "商品→订单两层关联",
+        "result_summary": "商品→订单两层关联统计",
     }, ensure_ascii=False)
 
     def _fake_chat_completion(messages):
@@ -89,8 +93,7 @@ async def test_multi_collection_success_creates_example_and_route_hint(
         )).scalars().all()
 
     types = {e.entry_type for e in entries}
-    assert "example" in types
-    assert "route_hint" in types
+    assert types == {"example"}
     example_ke = next(e for e in entries if e.entry_type == "example")
     assert example_ke.status == "proposed"
     assert example_ke.content == "某商品的订单数量"
@@ -102,11 +105,4 @@ async def test_multi_collection_success_creates_example_and_route_hint(
     # final_query_plan 含真实 $lookup, 不再是空壳
     lookup_from = payload["final_query_plan"]["steps"][0]["pipeline"][0]["$lookup"]["from"]
     assert lookup_from == "c_category_group"
-    # 旧字段 chart_type / tool_count / field_mappings 已移除 (移至 evidence)
-
-    rh_ke = next(e for e in entries if e.entry_type == "route_hint")
-    rh_payload = json.loads(rh_ke.payload)
-    assert rh_payload["reason"] == "商品→订单两层关联"
-    assert rh_payload["join_fields"] == [{"a": "c_product.categoryId", "b": "c_category_group._id"}]
-    assert rh_payload["cost_strategy"] == "default"
-    assert rh_payload["collection_path"] == ["c_product", "c_category_group"]
+    assert payload["result_summary"] == "商品→订单两层关联统计"

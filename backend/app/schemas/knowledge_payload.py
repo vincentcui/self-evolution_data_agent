@@ -114,15 +114,16 @@ class RulePayload(BaseModel):
 
 
 class RouteHintPayload(BaseModel):
-    """决策路径偏好. agent loop 学到的多层关联策略."""
+    """跨集合导航知识 — deliberate 录入 (手动 API / agent save_knowledge), 无自动抽取.
+
+    spec 2026-07-08. question_pattern 不在 payload — 它是向量检索键,
+    唯一真相源是 KnowledgeEntry.content.
+    navigation_note 是人 deliberate 写的完整字段路径散文 (关联字段/关联类型/嵌套位置/避坑).
+    """
     model_config = ConfigDict(extra="forbid")
 
-    question_pattern: str
-    collection_path: list[str]
-    join_fields: list[dict] = []
-    avoid_path: list[str] = []
-    cost_strategy: str = "default"
-    reason: str = ""
+    collection_path: list[str] = []
+    navigation_note: str = ""
 
     @field_validator("collection_path")
     @classmethod

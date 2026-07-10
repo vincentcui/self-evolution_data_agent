@@ -38,7 +38,7 @@ def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
       丢失知识本身.
 
     历史 bug (2026-05-29): 早期实现对所有 entry_type 都跑 _walk, 导致
-    route_hint.reason (373 字完整避坑链路) 被 IS_RECALL_PAYLOAD_MAX_STR_LEN=120
+    route_hint.navigation_note (373 字完整避坑链路) 被 IS_RECALL_PAYLOAD_MAX_STR_LEN=120
     截断, 召回后 LLM 看到 "...<+273 chars>" 无法决策, 反而比无 KE 时跑得更差.
     """
     if not isinstance(payload, dict):

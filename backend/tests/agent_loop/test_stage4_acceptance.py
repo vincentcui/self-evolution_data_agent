@@ -101,7 +101,11 @@ async def test_e2e_agent_picks_lookup_knowledge_for_terminology_query(
 async def test_save_knowledge_via_agent_writes_proposed_with_agent_learn_source(
     db_session,
 ):
-    """agent_learn_source 标记被消费 — direct tool invoke (no LLM 跳过 skipif)."""
+    """agent_learn_source 标记被消费 — direct tool invoke (no LLM 跳过 skipif).
+
+    entry_type 用 rule (非 route_hint) — C9 后 agent 侧 route_hint 一律拒 (manual-only),
+    此测试验证的是通用写入路径, 与 entry_type 语义无关.
+    """
     ns = Namespace(slug="t13_save", name="t13_save")
     db_session.add(ns)
     await db_session.flush()
@@ -109,13 +113,9 @@ async def test_save_knowledge_via_agent_writes_proposed_with_agent_learn_source(
     out = await save_knowledge(
         db=db_session, namespace_id=ns.id, ns_slug=ns.slug,
         sse_emit=AsyncMock(),
-        entry_type="route_hint",
+        entry_type="rule",
         content="商品→订单 走 categoryId 链",
-        payload={
-            "question_pattern": "某商品下的订单",
-            "collection_path": ["c_category", "c_product"],
-            "reason": "商品→订单 走 categoryId 链",
-        },
+        payload={"rule_text": "查询某商品下的订单时走 categoryId 关联链"},
         evidence={"trace_id": "e2e-test", "verified": True},
         tier="normal",
     )

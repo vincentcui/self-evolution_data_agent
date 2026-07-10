@@ -139,10 +139,8 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
     entry_type: "route_hint",
     content: "某商品的订单数量",
     payload: {
-      collection_path: ["c_product", "c_category_group"],
-      join_fields: [],
-      cost_strategy: "default",
-      reason: "测试理由",
+      collection_path: ["shop.orders", "shop.products"],
+      navigation_note: "orders.items[].sku ↔ products.sku",
     },
   } as unknown as KnowledgeEntry;
 
@@ -156,6 +154,6 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
   it("route_hint 类型挂 RouteHintEditPanel", () => {
     render(<EditCanonicalForm entry={routeHintEntry} />);
     expect(screen.getByText(/集合路径/)).toBeInTheDocument();
-    expect(screen.getByText(/路径理由/)).toBeInTheDocument();
+    expect(screen.getByText(/导航说明/)).toBeInTheDocument();
   });
 });

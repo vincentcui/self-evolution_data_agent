@@ -61,7 +61,6 @@ async def test_chromadb_error_returns_empty_vectors(
         bundle = await load_all_knowledge(db, ns_id, ns_slug, "查询")
     assert isinstance(bundle, KnowledgeBundle)
     assert bundle.vector_hits == []
-    assert bundle.route_hints_for_prompt == []
 
 
 @pytest.mark.asyncio
@@ -84,4 +83,3 @@ async def test_overall_timeout_returns_empty_bundle(
     assert isinstance(bundle, KnowledgeBundle)
     assert bundle.critical == []
     assert bundle.vector_hits == []
-    assert bundle.route_hints_for_prompt == []

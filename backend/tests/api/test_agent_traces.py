@@ -326,20 +326,18 @@ async def test_refine_writes_related_entry_ids_per_amem(fn_session, fn_admin_cli
 
 
 @pytest.mark.asyncio
-async def test_refine_route_hint_passes_schema_gate(fn_session, fn_admin_client):
-    """Phase 1+2: trace_refiner 提案合法 route_hint payload → 通过闸门入库, 字段不变形.
-
-    验证 allowlist 过滤 + trace_extractor 补机械字段 + schema gate 三层链路.
+async def test_refine_route_hint_proposal_rejected_manual_only(fn_session, fn_admin_client):
+    """C4/C9: trace_refiner 已不再产 route_hint 提案 (4 类宪章); 即便 LLM mock 硬塞
+    route_hint 提案, refine 收口的 save_knowledge 也一律拒 (manual-only guard),
+    不入库, 静默跳过 (不 500).
     """
     from app.knowledge.trace_refiner import ProposedKE
-    from app.models.knowledge_entry import KnowledgeEntry
     from app.models.namespace import Namespace
 
-    ns = Namespace(name="t-gate-pass", slug="t-gate-pass", description="")
+    ns = Namespace(name="t-gate-reject", slug="t-gate-reject", description="")
     fn_session.add(ns)
     await fn_session.flush()
 
-    # trace_json 含真实 tool_trace: fetch_schema + execute_query(mode=count)
     trace_json = {
         "tool_trace": [
             {"name": "fetch_schema", "input": {"target": "c_orders"}, "output": {}},
@@ -349,7 +347,7 @@ async def test_refine_route_hint_passes_schema_gate(fn_session, fn_admin_client)
         ]
     }
     tr = AgentTrace(
-        trace_id="refine-gate-pass-1",
+        trace_id="refine-gate-reject-1",
         namespace_id=ns.id,
         user_query="订单数",
         status="completed",
@@ -358,43 +356,27 @@ async def test_refine_route_hint_passes_schema_gate(fn_session, fn_admin_client)
     fn_session.add(tr)
     await fn_session.commit()
 
-    # LLM 仅产语义字段 (Phase 2 prompt 禁止产机械字段)
+    # 模拟 LLM 异常硬塞 route_hint (违反当前 prompt 4 类白名单) — 验证 save_knowledge
+    # manual-only guard 兜底, 而非依赖 LLM 老实.
     fake_results = [ProposedKE(
         entry_type="route_hint",
         content="订单统计路由",
-        payload={
-            "question_pattern": "订单数量统计",
-            "reason": "单集合统计",
-        },
-        evidence={"trace_ids": ["refine-gate-pass-1"]},
-        source_trace_id="refine-gate-pass-1",
+        payload={"question_pattern": "订单数量统计", "reason": "单集合统计"},
+        evidence={"trace_ids": ["refine-gate-reject-1"]},
+        source_trace_id="refine-gate-reject-1",
     )]
 
     with patch("app.knowledge.trace_refiner.refine_traces", return_value=fake_results):
         resp = await fn_admin_client.post(
             "/api/agent-traces/refine",
-            json={"trace_ids": ["refine-gate-pass-1"]},
+            json={"trace_ids": ["refine-gate-reject-1"]},
         )
 
     assert resp.status_code == 200
     out = resp.json()
+    # proposed_count 统计 LLM 产出数 (1), 但 proposed_ke_ids 应为空 — guard 拒绝入库
     assert out["proposed_count"] == 1
-    new_id = out["proposed_ke_ids"][0]
-
-    ke = (await fn_session.execute(
-        select(KnowledgeEntry).where(KnowledgeEntry.id == new_id)
-    )).scalar_one()
-    payload = _json.loads(ke.payload)
-
-    # 机械字段被 trace_extractor 补全
-    assert payload["collection_path"] == ["c_orders"]
-    assert payload["cost_strategy"] == "count_only_first"
-    # 语义字段 LLM 产
-    assert payload["question_pattern"] == "订单数量统计"
-    assert payload["reason"] == "单集合统计"
-    # 无 LLM 自由发挥 extra 字段 (闸门拒)
-    assert "cross_database_strategy" not in payload
-    assert "route" not in payload
+    assert out["proposed_ke_ids"] == []
 
 
 @pytest.mark.asyncio

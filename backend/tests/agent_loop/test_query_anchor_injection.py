@@ -1,12 +1,13 @@
 """Phase 4 Task 4.5: query.py 接通 load_all_knowledge → system_prompt anchors 注入.
 
-集成验证: bundle 三段 (critical / terminology / route_hint) 经 build_system_prompt
+集成验证: bundle 两段 (critical / terminology) 经 build_system_prompt
 按 KnowledgeBundle.to_prompt_sections() 渲染规则正确进入 prompt, 等价 query.py
 两个调用方 (_execute_via_agent_loop / query_stream) 的真实链路.
+route_hint 已随 C5/C1 从 system prompt 摘除, 改为纯人工录入 + agent 主动 lookup_knowledge 召回.
 
 不直接调 FastAPI 端点 — 端点路径覆盖在 test_query_api_agent.py;
 本文件锁住"bundle → prompt 字符串"这一关键一跳, 防止未来任何调用方
-忘传 anchors / critical / route_hints 时静默丢失上下文.
+忘传 anchors / critical 时静默丢失上下文.
 """
 from __future__ import annotations
 
@@ -18,10 +19,7 @@ import pytest_asyncio
 
 from app.config import settings
 from app.engine.tools.registry import build_system_prompt
-from app.knowledge.knowledge_loader import (
-    RouteHintCandidate,
-    load_all_knowledge,
-)
+from app.knowledge.knowledge_loader import load_all_knowledge
 from app.knowledge.knowledge_retriever import upsert_knowledge_entry
 from app.models.knowledge_entry import KnowledgeEntry
 from app.models.namespace import Namespace
@@ -104,7 +102,6 @@ async def test_anchors_render_in_system_prompt_after_load(seeded_ns_full, db_ses
         settings=settings, namespace=ns,
         anchors=anchors,
         critical=bundle.critical,
-        route_hints=bundle.route_hints_for_prompt,
     )
 
     # critical 段 (SQL 直加载始终命中, 不依赖向量召回)
@@ -126,7 +123,7 @@ async def test_anchors_render_in_system_prompt_after_load(seeded_ns_full, db_ses
 
 @pytest.mark.asyncio
 async def test_critical_renders_in_system_prompt(db_session, chroma_isolated):
-    """只有 critical KE 时 → critical_section 渲染, anchors / route_hints 不出现."""
+    """只有 critical KE 时 → critical_section 渲染, anchors 不出现."""
     ns = Namespace(name="crit_only_ns", slug="crit_only_ns", description="phase4-crit-only")
     db_session.add(ns)
     await db_session.commit()
@@ -147,18 +144,17 @@ async def test_critical_renders_in_system_prompt(db_session, chroma_isolated):
         settings=settings, namespace=ns,
         anchors=[],
         critical=bundle.critical,
-        route_hints=bundle.route_hints_for_prompt,
     )
 
     assert "## 关键规则 (critical)" in prompt
     assert "禁止全表扫描" in prompt
-    # 无 terminology / route_hint 时, 对应 section 标题不应出现
+    # 无 terminology 时, 对应 section 标题不应出现; route_hint 已摘除, 恒不出现
     assert "## 业务术语锚点 (terminology)" not in prompt
     assert "## 路由提示 (route_hint)" not in prompt
 
 
 # ════════════════════════════════════════════
-#  Test 3 — 空 bundle: 三段标题全不出现 (兼容老调用方)
+#  Test 3 — 空 bundle: 两段标题全不出现 (兼容老调用方)
 # ════════════════════════════════════════════
 
 def test_empty_bundle_no_section_markers():
@@ -168,9 +164,8 @@ def test_empty_bundle_no_section_markers():
         settings=settings, namespace=fake_ns,
         anchors=[],
         critical=[],
-        route_hints=[],
     )
-    # 三 section 标题在空时不出现
+    # section 标题在空时不出现
     assert "## 关键规则 (critical)" not in prompt
     assert "## 业务术语锚点 (terminology)" not in prompt
     assert "## 路由提示 (route_hint)" not in prompt
@@ -179,21 +174,16 @@ def test_empty_bundle_no_section_markers():
 
 
 # ════════════════════════════════════════════
-#  Test 4 — route_hint 已从 system prompt 摘除 (spec 2026-07-07)
-#  route_hint entry 仍在向量集合可被 lookup_knowledge 召回
+#  Test 4 — route_hint 已从 system prompt 摘除 (spec 2026-07-07/07-08)
+#  route_hint entry 仍在向量集合可被 lookup_knowledge 召回, 不再存在 route_hints 参数
 # ════════════════════════════════════════════
 
 def test_route_hint_not_injected_even_when_present():
-    """route_hint 从 system prompt 摘除 — 传入 route_hints 也不渲染."""
+    """route_hint 从 system prompt 摘除 — build_system_prompt 无 route_hints 参数, 恒不渲染."""
     fake_ns = Namespace(name="dummy2", slug="dummy2", description="")
-    rh = RouteHintCandidate(
-        question_pattern="订单关联用户", collection_path=["orders", "users"],
-        join_fields=[{"a": "orders.user_id", "b": "users.id"}], reason="step5 items→products",
-    )
     prompt = build_system_prompt(
         settings=settings, namespace=fake_ns,
         anchors=[], critical=[],
-        route_hints=[rh],
     )
     assert "## 路由提示 (route_hint)" not in prompt
     assert "orders → users" not in prompt

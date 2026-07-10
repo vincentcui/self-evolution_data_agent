@@ -96,14 +96,11 @@ def test_rule_payload():
 
 def test_route_hint_payload():
     p = RouteHintPayload(
-        question_pattern="商品→订单→条目",
-        collection_path=["c_category", "c_product", "c_sku"],
-        join_fields=[{"from": "c_category._id", "to": "c_product.categoryId"}],
-        cost_strategy="batched_count_only",
-        reason="多层关联用分批",
+        collection_path=["categories", "products", "skus"],
+        navigation_note="category._id ↔ product.categoryId, 类别在 product.categories[] 数组需 $unwind",
     )
-    assert p.cost_strategy == "batched_count_only"
-    assert len(p.collection_path) == 3
+    assert p.collection_path == ["categories", "products", "skus"]
+    assert p.navigation_note.startswith("category._id")
 
 
 def test_parse_payload_dispatch():

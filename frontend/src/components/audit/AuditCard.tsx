@@ -134,7 +134,7 @@ export default function AuditCard({
   // 摘要文字
   const summary: string = (() => {
     if (entry.entry_type === "example") return (p.result_summary as string) ?? "";
-    if (entry.entry_type === "route_hint") return (p.reason as string) ?? "";
+    if (entry.entry_type === "route_hint") return (p.navigation_note as string) ?? "";
     return entry.description ?? "";
   })();
 

@@ -215,11 +215,8 @@ async def refine_traces_endpoint(
 
     # ── Phase 2: allowlist 过滤 LLM payload + trace_extractor 补机械字段 ──
     from app.knowledge.trace_extractor import (
-        derive_cost_strategy,
         extract_collections,
         extract_db_context,
-        extract_final_pipeline,
-        extract_join_fields,
         extract_join_keys,
         normalize_query_plan,
     )
@@ -229,7 +226,6 @@ async def refine_traces_endpoint(
         "terminology": {"term", "primary_collection", "synonyms",
                         "primary_field", "source_collections"},
         "instance_alias": {"alias", "canonical_name", "target_id", "id_field"},
-        "route_hint": {"question_pattern", "reason", "avoid_path"},
         "rule": {"rule_text", "rule_kind", "applies_to_collections",
                  "priority", "evidence"},
         "example": {"question_pattern", "result_summary",
@@ -286,14 +282,6 @@ async def refine_traces_endpoint(
             joins = extract_join_keys(qplan)
             if joins:
                 p.payload["join_keys"] = joins
-        elif p.entry_type == "route_hint":
-            if collections:
-                p.payload["collection_path"] = collections
-            p.payload["cost_strategy"] = derive_cost_strategy(tool_trace)
-            final_pipeline = extract_final_pipeline(tool_trace)
-            joins = extract_join_fields(final_pipeline)
-            if joins:
-                p.payload["join_fields"] = joins
         elif p.entry_type == "rule":
             if collections:
                 p.payload.setdefault("applies_to_collections", collections)

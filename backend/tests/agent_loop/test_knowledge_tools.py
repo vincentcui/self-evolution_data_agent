@@ -63,7 +63,11 @@ async def test_lookup_knowledge_filters_by_entry_type(db_session, chroma_isolate
 
 @pytest.mark.asyncio
 async def test_save_knowledge_writes_proposed_with_agent_learn_source(db_session):
-    """save_knowledge 写入必须 status=proposed, source=agent_learn."""
+    """save_knowledge 写入必须 status=proposed, source=agent_learn.
+
+    entry_type 用 rule (非 route_hint) — C9 后 agent 侧 route_hint 一律拒 (manual-only),
+    此测试验证的是通用写入路径, 与 entry_type 语义无关.
+    """
     ns = Namespace(slug="t3b_ns", name="t3b")
     db_session.add(ns)
     await db_session.flush()
@@ -71,13 +75,9 @@ async def test_save_knowledge_writes_proposed_with_agent_learn_source(db_session
     out = await save_knowledge(
         db=db_session, namespace_id=ns.id, ns_slug=ns.slug,
         sse_emit=AsyncMock(),
-        entry_type="route_hint",
+        entry_type="rule",
         content="商品→订单→条目 走 categoryId.productId 链",
-        payload={
-            "question_pattern": "商品关联订单条目",
-            "collection_path": ["c_category", "c_product", "c_sku"],
-            "cost_strategy": "default",
-        },
+        payload={"rule_text": "查询商品关联订单条目时优先走 categoryId 索引"},
         evidence={"trace_id": "trace-42", "success": True},
         tier="normal",
     )
@@ -88,7 +88,7 @@ async def test_save_knowledge_writes_proposed_with_agent_learn_source(db_session
     )).scalar_one()
     assert ke.source == "agent_learn"
     assert ke.status == "proposed"
-    assert ke.entry_type == "route_hint"
+    assert ke.entry_type == "rule"
 
 
 @pytest.mark.asyncio

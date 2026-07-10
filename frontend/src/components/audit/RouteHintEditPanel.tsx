@@ -1,23 +1,16 @@
 /* ════════════════════════════════════════════════════════════════════════════
- *  RouteHintEditPanel — route_hint 类型 KE 的结构化编辑面板
+ *  RouteHintEditPanel — route_hint 类型 KE 的结构化编辑面板 (手动录入, spec 2026-07-08)
  *  ────────────────────────────────────────────────────────────────────────
- *  机械字段 (collection_path / join_fields / cost_strategy) 来自 trace, 只读;
- *  仅 reason (≤30 字, 路径选择理由) 允许审核者编辑.
- * ══════════════════════════════════════════════════════════════════════════ */
+ *  route_hint 无自动抽取, deliberate 录入: 所有字段可编. question_pattern 不在 payload (唯一真相源
+ *  是 entry.content, 由 EditCanonicalForm 承载). payload = {collection_path, navigation_note}.
+ * ════════════════════════════════════════════════════════════════════════════ */
 
 import React from "react";
-import { Form, Input, Tag, Typography } from "antd";
-
-const { Text } = Typography;
-
-// 路径理由长度上限 — UX 约束, 后端不强校验, 防止审核者写出长篇说明把字段当 description 用
-const REASON_MAX_LEN = 30;
+import { Form, Input } from "antd";
 
 export interface RouteHintPayload {
   collection_path: string[];
-  join_fields: { a: string; b: string }[];
-  cost_strategy: string;
-  reason: string;
+  navigation_note: string;
 }
 
 interface Props {
@@ -31,40 +24,29 @@ export default function RouteHintEditPanel({ value, onChange }: Props) {
 
   return (
     <>
-      <Form.Item label="集合路径 (只读, 来自执行记录)">
-        <div>
-          {value.collection_path.map((c, i, arr) => (
-            <span key={c}>
-              <Tag color="cyan">{c}</Tag>
-              {i < arr.length - 1 && <Text type="secondary"> → </Text>}
-            </span>
-          ))}
-        </div>
-      </Form.Item>
-
-      <Form.Item label="连接字段 (只读, 来自执行记录)">
-        <div>
-          {value.join_fields.length === 0 ? (
-            <Tag>无</Tag>
-          ) : (
-            value.join_fields.map((j, i) => (
-              <Tag key={`${j.a}:${j.b}:${i}`}>{j.a} ↔ {j.b}</Tag>
-            ))
-          )}
-        </div>
-      </Form.Item>
-
-      <Form.Item label="成本策略 (只读, 来自执行记录)">
-        <Tag>{value.cost_strategy}</Tag>
-      </Form.Item>
-
-      <Form.Item label={`路径理由 (reason, ≤${REASON_MAX_LEN} 字)`}>
+      <Form.Item label="集合路径 (有序, 逗号分隔)">
         <Input
-          aria-label="原因"
-          value={value.reason}
-          onChange={(e) => update({ reason: e.target.value })}
-          maxLength={REASON_MAX_LEN}
-          showCount
+          aria-label="集合路径"
+          value={value.collection_path.join(",")}
+          onChange={(e) =>
+            update({
+              collection_path: e.target.value
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+          placeholder="shop.orders, shop.products"
+        />
+      </Form.Item>
+
+      <Form.Item label="导航说明 (关联字段 / 关联类型 / 嵌套位置 / 避坑)">
+        <Input.TextArea
+          aria-label="导航说明"
+          value={value.navigation_note}
+          onChange={(e) => update({ navigation_note: e.target.value })}
+          autoSize={{ minRows: 2, maxRows: 6 }}
+          placeholder="orders.items[].sku ↔ products.sku (nested_array, 非 products.id); 类别在 products.categories[] 需 $unwind"
         />
       </Form.Item>
     </>

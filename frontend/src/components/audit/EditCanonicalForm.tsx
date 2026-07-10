@@ -83,14 +83,12 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     } as ExamplePayload;
   });
 
-  // ── route_hint 状态: 路径/连接/策略来自 trace, reason 可编辑 ──
+  // ── route_hint 状态: 路径/导航说明来自 payload, 均可编辑 ──
   const [routeHintPayload, setRouteHintPayload] = useState<RouteHintPayload>(() => {
-    const p = (entry.payload ?? {}) as Partial<RouteHintPayload>;
+    const p = (entry.payload || {}) as Record<string, unknown>;
     return {
-      collection_path: Array.isArray(p.collection_path) ? p.collection_path : [],
-      join_fields:     Array.isArray(p.join_fields) ? p.join_fields : [],
-      cost_strategy:   p.cost_strategy ?? "default",
-      reason:          p.reason ?? "",
+      collection_path: Array.isArray(p.collection_path) ? (p.collection_path as string[]) : [],
+      navigation_note: typeof p.navigation_note === "string" ? p.navigation_note : "",
     };
   });
 

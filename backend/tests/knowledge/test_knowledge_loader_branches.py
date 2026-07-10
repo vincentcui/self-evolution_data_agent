@@ -1,11 +1,12 @@
 """knowledge_loader.py 错误处理分支 + 边界条件覆盖.
 
 覆盖目标 (coverage report missing lines):
-- KnowledgeBundle.to_prompt_sections / _render_critical / _render_route_hints (空分支)
+- KnowledgeBundle.to_prompt_sections / _render_critical (空分支)
 - batch_load_terminology (正常 / JSON 解析失败 / 缺字段)
-- _batch_load_route_hints (JSON 解析失败 / entry 不存在)
-- _load_inner rh_k=0 分支
 - load_all_knowledge timeout / exception 降级
+
+route_hint 相关分支 (_render_route_hints / _batch_load_route_hints / rh_k=0) 已随
+C5 死代码清理删除 — route_hint 已收敛为纯人工录入, 不再经 bundle 加载.
 """
 from __future__ import annotations
 
@@ -17,7 +18,6 @@ import pytest
 
 from app.knowledge.knowledge_loader import (
     KnowledgeBundle,
-    _batch_load_route_hints,
     _empty_bundle,
     batch_load_terminology,
     load_all_knowledge,
@@ -35,7 +35,6 @@ def test_empty_bundle_renders_empty_sections():
     sections = b.to_prompt_sections()
     assert sections["critical_section"] == ""
     assert sections["anchors_section"] == ""
-    assert sections["route_hints_section"] == ""
 
 
 def test_bundle_renders_critical_section():
@@ -43,7 +42,6 @@ def test_bundle_renders_critical_section():
     b = KnowledgeBundle(
         critical=["规则 A", "规则 B"],
         vector_hits=[],
-        route_hints_for_prompt=[],
     )
     sections = b.to_prompt_sections()
     assert "## 关键规则 (critical)" in sections["critical_section"]
@@ -138,42 +136,6 @@ async def test_batch_load_terminology_missing_field(db, caplog):
         result = await batch_load_terminology(db, [ke.id])
     assert result == []
     assert "missing field" in caplog.text
-
-
-# ════════════════════════════════════════════
-#  _batch_load_route_hints
-# ════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_batch_load_route_hints_json_error(db, caplog):
-    """route_hint payload 非法 JSON → 跳过."""
-    from app.models import Namespace
-    ns = Namespace(name="t", slug="rh-json-err")
-    db.add(ns)
-    await db.commit()
-
-    ke = KnowledgeEntry(
-        namespace_id=ns.id, entry_type="route_hint",
-        content="x", tier="normal", status="canonical",
-        source="manual",
-        payload="broken-json",
-        evidence_json="{}",
-    )
-    db.add(ke)
-    await db.commit()
-
-    with caplog.at_level("WARNING"):
-        result = await _batch_load_route_hints(db, [ke.id])
-    assert result == []
-    assert "payload not JSON" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_batch_load_route_hints_missing_entry(db):
-    """entry_id 不存在 → 跳过 (不报错)."""
-    result = await _batch_load_route_hints(db, [99999])
-    assert result == []
 
 
 # ════════════════════════════════════════════

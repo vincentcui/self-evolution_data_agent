@@ -94,7 +94,9 @@ def _sanitize_tool_use_id(raw_id: str) -> str:
 # 不传 cfg 时从 registry 取 (向后兼容, 仅旧调用路径用).
 
 
-def _get_openai_client(cfg: dict[str, Any] | None = None, namespace_id: int | None = None) -> OpenAI:
+def _get_openai_client(
+    cfg: dict[str, Any] | None = None, namespace_id: int | None = None,
+) -> OpenAI:
     """返回 OpenAI 兼容客户端 (从 registry 激活配置构造, 热切换自动重建)."""
     # import 必须无条件: 否则 cfg 非 None 时跳过分支, registry 未绑定 → UnboundLocalError
     from app.engine.model_registry import registry
@@ -112,7 +114,9 @@ def _get_openai_client(cfg: dict[str, Any] | None = None, namespace_id: int | No
     return client  # type: ignore[return-value]
 
 
-def _get_claude_client(cfg: dict[str, Any] | None = None, namespace_id: int | None = None) -> anthropic.Anthropic:
+def _get_claude_client(
+    cfg: dict[str, Any] | None = None, namespace_id: int | None = None,
+) -> anthropic.Anthropic:
     """返回 Anthropic 客户端 (从 registry 激活配置构造, 热切换自动重建)."""
     # import 必须无条件: 否则 cfg 非 None 时跳过分支, registry 未绑定 → UnboundLocalError
     from app.engine.model_registry import registry

@@ -115,13 +115,10 @@ class TestRelationshipMapping:
 
 
 class TestRouteHintMapping:
-    def test_route_hint_has_writer_keys(self):
+    def test_route_hint_proposal_ignored(self):
+        """C10/D6: route_hint 分支已删, 即使收到该 entry_type 也不再路由到 mybatis_entries."""
         cr, _ = _map_agent_to_channels(_MOCK_AGENT_OBJECTS, _MOCK_KNOWLEDGE_PROPOSALS, _COLL_TO_DB)
-        assert len(cr.mybatis_entries) == 1
-        rh = cr.mybatis_entries[0]
-        assert rh["mapper_namespace"] == "com.example.OrderMapper"
-        assert rh["canonical_sql"] == "SELECT * FROM orders WHERE status = ?"
-        assert rh["type"] == "select"  # trainer 补默认 → writer gate 不静默跳过
+        assert cr.mybatis_entries == []
 
 
 class TestTerminologyMapping:

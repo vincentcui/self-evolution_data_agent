@@ -99,13 +99,6 @@ TOOL_TARGET_FIELD: dict[str, str] = {
     "list_tables":       "",
 }
 
-# "真探查"工具: 表明 LLM 主动获取 collection 元信息或字段值,
-# field_mappings 应只取真探查证据 (execute_query/estimate_cost 是"用结果", 不算).
-PROBE_TOOLS: frozenset[str] = frozenset({"fetch_schema", "inspect_values"})
-
-# 字段值探查工具 (有 field 入参, 用于 _extract_field_mappings 区分 schema vs 字段探查).
-FIELD_PROBE_TOOLS: frozenset[str] = frozenset({"inspect_values"})
-
 
 # ════════════════════════════════════════════
 #  TOOL_SPECS — Anthropic tool schema
@@ -113,7 +106,7 @@ FIELD_PROBE_TOOLS: frozenset[str] = frozenset({"inspect_values"})
 # ════════════════════════════════════════════
 
 _LOOKUP_ENTRY_TYPES = ["terminology", "instance_alias", "example", "rule", "route_hint"]
-_SAVE_ENTRY_TYPES = ["terminology", "instance_alias", "example", "rule", "route_hint"]
+_SAVE_ENTRY_TYPES = ["terminology", "instance_alias", "example", "rule"]
 
 
 TOOL_SPECS: list[dict] = [
@@ -121,13 +114,13 @@ TOOL_SPECS: list[dict] = [
     {
         "name": "lookup_knowledge",
         "description": (
-            "检索知识库的历史成功模式与业务术语路由. "
-            "Use when: 多步关联查询前找历史成功的查询模板; "
-            "召回的知识提到你尚不掌握库/表路由的集合或术语时, "
-            "用该术语作 query 再查一次 (types=[\"terminology\"]) 拿它的库/表路由; "
-            "问题里的业务名词未在锚点出现时查术语. "
+            "检索知识库的可复用查询模式、业务术语与导航知识. "
+            "Use when: 多步关联查询前找可复用查询模板; "
+            "问题里的业务名词你不确定对应哪个库/表/字段时, "
+            "查术语 (types=[\"terminology\"]) 拿它的库/表路由. "
             "Do not use when: fetch_schema 已拿到足够字段, "
-            "或前一次同 query 召回为空且判断知识库确实无相关条目. "
+            "或前一次同 query 召回为空且判断知识库确实无相关条目; "
+            "召回为空属正常, 直接基于 fetch_schema 继续. "
             "types 按需选: "
             "terminology(业务术语→库/表路由) / instance_alias(口语别名→具体记录ID) / "
             "example(问题-查询成功对, 含可执行 final_query_plan) / "
@@ -145,11 +138,15 @@ TOOL_SPECS: list[dict] = [
             "collection:表名/集合名, operation:sql|aggregate|filter, "
             "query:{sql:SQL串 或 pipeline:[聚合阶段]}}]}, "
             "result_summary?:结果描述}; "
-            "route_hint {question_pattern:问题模式, "
-            "collection_path:[有序集合路径], reason:路径理由}; "
+            "route_hint {collection_path:[有序集合路径], "
+            "navigation_note:导航说明(关联字段/关联类型/嵌套位置/避坑)}; "
             "rule {rule_text:规则描述, "
             "rule_kind:business_constraint|filter_default|join_pattern, "
             "priority:优先级(默认0)}. "
+            "部分条目另含 references"
+            "(条目文本提及的业务术语自动解析出的库/表路由, "
+            "直接用, 免去对提及术语二次查 terminology): "
+            "[{term:业务术语, target:所属表/集合, database:所属库, db_type:数据库类型}]. "
             "输入示例: {\"query\": \"订单关联用户\", \"types\": [\"example\"], \"k\": 5}"
         ),
         "input_schema": {
@@ -171,7 +168,7 @@ TOOL_SPECS: list[dict] = [
         "description": (
             "把本轮会话学到的知识写入知识库待审池. "
             "Use when: clarify 获得用户确认后沉淀可复用知识. "
-            "Do not use when: 信息仅对当前查询有效, 或锚点已覆盖. "
+            "Do not use when: 信息仅对当前查询有效, 或该业务名词的库/表路由已在已提供给你的术语中. "
             "payload 按 entry_type 不同:\n"
             "- terminology: {term, primary_collection, primary_database, "
             "db_type: mysql|mongodb|oracle, synonyms?:[], source_collections?:[]}\n"
@@ -186,7 +183,6 @@ TOOL_SPECS: list[dict] = [
             "query:{sql:SQL串 或 pipeline:[Mongo聚合阶段]}}]}, "
             "result_summary?:一句话结果形态}\n"
             "- rule: {rule_text, applies_to_collections?:[]}\n"
-            "- route_hint: {question_pattern, collection_path:[], reason?}\n"
             "输入示例: {\"entry_type\":\"example\", \"content\":\"按状态分组统计订单数\", "
             "\"payload\":{question_pattern:.., collections:[..], join_keys:[..], final_query_plan:{..}, result_summary:..}, "
             "\"evidence\":{\"trace_ids\":[\"t1\"],\"reasoning\":\"从本次查询 trace 提取\"}, "
@@ -580,7 +576,6 @@ def build_system_prompt(
     namespace,
     anchors: list | None = None,
     critical: list | None = None,
-    route_hints: list | None = None,
 ) -> str:
     """注入 config 阈值 + 知识段渲染 system prompt."""
     _ = namespace
@@ -601,7 +596,7 @@ def build_system_prompt(
             )
         anchors_section = "\n".join(lines)
 
-    # ── Stage 2 抓手 C: Self-RAG reflection — 走模板变量, 与 critical/anchors/route_hints
+    # ── Stage 2 抓手 C: Self-RAG reflection — 走模板变量, 与 critical/anchors
     #    同模式, 避免再被拼接到末尾时与 SYSTEM_PROMPT_TEMPLATE 内的工作流编号 (例如 8.) 撞号.
     reflection_section = ""
     if settings.agent_reflection_enabled:

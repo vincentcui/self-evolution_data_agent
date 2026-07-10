@@ -1,6 +1,6 @@
 """Stage 2 抓手 E — agent_traces 批量提炼: LLM 看多 trace → 提案 KE list.
 
-5 类宪章 entry_type (terminology / instance_alias / example / rule / route_hint).
+4 类宪章 entry_type (terminology / instance_alias / example / rule).
 输出 list[ProposedKE], 调用方 (refine endpoint) 走 save_knowledge 入待审池.
 
 **LLM 投喂三段结构**: trace_summary (N 步骨架) + known_facts (已知禁区) +
@@ -22,7 +22,7 @@ from app.knowledge.trace_compression import summarize_trace_for_llm
 log = logging.getLogger(__name__)
 
 ALLOWED_TYPES: frozenset[str] = frozenset({
-    "terminology", "instance_alias", "example", "rule", "route_hint",
+    "terminology", "instance_alias", "example", "rule",
 })
 
 
@@ -52,11 +52,11 @@ _PROMPT = """\
    不再产对应的 KE 提案:
    - known_schemas: fetch_schema 拿到的 collection → 字段列表
    - schema_known_enum_fields: schema 已标注 enum_values 的字段 (形如
-     'c_X.fieldName'). 这些字段的枚举映射已在 schema 层, 不要产 rule 复述.
+     'col_X.fieldName'). 这些字段的枚举映射已在 schema 层, 不要产 rule 复述.
    - recalled_kes: lookup_knowledge 已召回的 KE (entry_id + 摘要).
    - system_prompt_critical_rules: agent 主 system prompt 已注入的硬规则.
 3. inflection_points — agent 试错转折点 (target_switch / pipeline_complexity_jump /
-   retry_after_empty). **这是提炼 route_hint / join_pattern rule 的主要种子**.
+   retry_after_empty). **这是提炼 join_pattern rule 的主要种子**.
 </input_structure>
 
 <entry_types>
@@ -68,10 +68,6 @@ _PROMPT = """\
 - rule — 业务约束 / 关联模式 / 隐式过滤. 重点两子类:
   (a) filter_default: agent 在 $match 加了某字段但用户原句没要求 — 隐式约定
   (b) join_pattern: 集合间用什么字段关联 (例: A.x 关联 B.y, 而非 B.id)
-- route_hint — 跨集合导航. **一条 route_hint 应携带解决该类问题的完整导航信息**:
-  穿透链 (用户口语提到 collection_A, 数据实际在 collection_B 嵌套数组) +
-  关联字段 (集合间用哪个 key 关联) + 嵌套位置 (字段在第几层) +
-  避坑指南 (哪些路径试过返空). 不要把同一类问题的导航信息拆成多条 KE.
 </entry_types>
 
 <output_format>
@@ -110,17 +106,13 @@ rule:
   - rule_text (str, 一句话规则描述, 含字段路径)
   - rule_kind (Literal: "business_constraint" | "filter_default" | "join_pattern")
   - priority (int, 默认 0)
-
-route_hint:
-  - question_pattern (str, 何种问题适用此路由)
-  - reason (str, ≤160 字, 引用具体 step 说明为何走此路径)
 </payload_schema_per_type>
 
 <constraints>
 1. evidence.reasoning 必须**引用 trace_summary 中具体 step 序号 + 字段或 pipeline
-   片段**, 例: "step 13 在 c_X 上用 id 关联返空, step 16 改 docId 才得 12 行".
+   片段**, 例: "step 13 在 col_X 上用 id 关联返空, step 16 改 docId 才得 12 行".
 2. **inflection_points 是核心素材**: 这些转折点反映 agent 试错学到的知识,
-   是产 route_hint / join_pattern rule 的优先来源.
+   是产 join_pattern rule 的优先来源.
 3. **按召回单元聚合**: 召回名额有限, 多条细碎 KE 会互相挤占召回位. 多个
    inflection_points 服务同一类用户问题时, 聚合产**一条富信息 KE** (含完整
    路径 + 关联字段 + 嵌套位置 + 避坑指南). 自检: 想象未来用户问该
@@ -134,16 +126,6 @@ route_hint:
 </constraints>
 
 <examples>
-合法 route_hint (一条富信息 KE 含路径+关联+嵌套+避坑, 通用电商域):
-{"entry_type": "route_hint",
- "content": "订单维度统计商品类别需经 orders→items.sku→products 路径, 类别字段在 products.categories[] 数组内",
- "payload": {
-   "question_pattern": "统计订单中各商品类别数量/占比",
-   "reason": "trace t1: (1) 路径穿透 — step2 在 orders 上 $group by category 返 0 行 (orders 无 category), step5 走 orders.items → products 才有数据; (2) 关联字段 — orders.items[].sku ↔ products.sku, 非 products.id; (3) 嵌套位置 — 类别在 products.categories[] 数组, 需 $unwind; (4) 避坑 — step3 用 products.id 关联返空, 改 sku 才得 90 行"},
- "evidence": {"trace_ids": ["t1"],
-   "reasoning": "trace t1 inflection_points 含 target_switch orders→products + retry_after_empty step3→step5 + pipeline_complexity_jump step5 stages 5→8"},
- "source_trace_id": "t1"}
-
 合法 rule (join_pattern, 独立基础规则):
 {"entry_type": "rule",
  "content": "users 与 orders 用 users.id ↔ orders.user_id 关联, 不用 orders.id",
@@ -161,16 +143,12 @@ route_hint:
              "collections": ["shop.orders"],
              "join_keys": [],
              "final_query_plan": {"steps": [{"db_type":"mongodb","database":"shop","collection":"orders","operation":"aggregate","query":{"pipeline":[{"$group":{"_id":"$status","count":{"$sum":1}}}]}}]},
-             "result_summary": "在 orders 上按 status 字段 $group + $sum:1"},
+             "result_summary": "在 orders 上按 status 字段分组统计数量"},
  "evidence": {"trace_ids": ["t3"],
    "reasoning": "trace t3 step 1 一次性在 orders 上 $group by status 即得结果, pipeline 简单可复用"},
  "source_trace_id": "t3"}
-</examples>
-
-<escape_valve>
-如果 N 条 trace 都是一次性具体 ID 查询、或所有可提炼内容已在 known_facts 中,
-返回 {"proposed": []}. 宁可空也不要凑.
-</escape_valve>"""
+</examples>\
+"""
 
 
 @observe(name="trace_refiner.refine", as_type="chain")

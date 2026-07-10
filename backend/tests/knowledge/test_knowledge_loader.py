@@ -197,12 +197,8 @@ async def seeded_full_bundle(
 
         # route_hint (vectorized)
         rh_payload = {
-            "question_pattern": "客户订单",
             "collection_path": ["customer", "orders"],
-            "join_fields": [{"from": "customer.id", "to": "orders.customer_id"}],
-            "avoid_path": [],
-            "cost_strategy": "default",
-            "reason": "客户驱动订单查询",
+            "navigation_note": "customer.id ↔ orders.customer_id",
         }
         rh_ke = KnowledgeEntry(
             namespace_id=ns.id,
@@ -237,14 +233,13 @@ async def seeded_full_bundle(
 
 @pytest.mark.asyncio
 async def test_basic_load_returns_bundle(async_session, seeded_ns):
-    """空 ns: load 返 KnowledgeBundle 3 个空字段, 不抛."""
+    """空 ns: load 返 KnowledgeBundle 2 个空字段, 不抛."""
     ns_id, ns_slug = seeded_ns
     async with async_session() as db:
         bundle = await load_all_knowledge(db, ns_id, ns_slug, "查询客户")
     assert isinstance(bundle, KnowledgeBundle)
     assert bundle.critical == []
     assert bundle.vector_hits == []
-    assert bundle.route_hints_for_prompt == []
 
 
 @pytest.mark.asyncio
@@ -274,20 +269,20 @@ async def test_terminology_full_inject_when_k_zero(
 
 
 @pytest.mark.asyncio
-async def test_to_prompt_sections_renders_3_blocks(
+async def test_to_prompt_sections_renders_2_blocks(
     async_session, seeded_full_bundle,
 ):
-    """to_prompt_sections() 返 3 key dict (critical_section / anchors_section / route_hints_section)."""
+    """to_prompt_sections() 返 2 key dict (critical_section / anchors_section).
+
+    route_hint 已随 C5/C1 从 system prompt 摘除, 不再有 route_hints_section.
+    """
     ns_id, ns_slug = seeded_full_bundle
     async with async_session() as db:
         bundle = await load_all_knowledge(db, ns_id, ns_slug, "客户订单")
     sections = bundle.to_prompt_sections()
-    assert set(sections.keys()) == {
-        "critical_section", "anchors_section", "route_hints_section",
-    }
+    assert set(sections.keys()) == {"critical_section", "anchors_section"}
     assert "critical-rule" in sections["critical_section"]
-    # anchors / route_hints 至少各有渲染体 (内容由 LLM 召回决定)
+    # anchors 至少有渲染体 (内容由 LLM 召回决定)
     assert isinstance(sections["anchors_section"], str)
-    assert isinstance(sections["route_hints_section"], str)
 
 

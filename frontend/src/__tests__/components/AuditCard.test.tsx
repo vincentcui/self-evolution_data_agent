@@ -188,10 +188,8 @@ describe("AuditCard — entry_type type-specific blocks", () => {
   } as unknown as KnowledgeEntry;
 
   const routeHintPayload = {
-    collection_path: ["c_product", "c_category_group"],
-    join_fields: [{ a: "c_product.categoryId", b: "c_category_group._id" }],
-    cost_strategy: "default",
-    reason: "商品→订单两层关联",
+    collection_path: ["shop.orders", "shop.products"],
+    navigation_note: "orders.items[].sku ↔ products.sku",
   };
   const routeHintEntry: KnowledgeEntry = {
     ...baseEntry,
@@ -211,11 +209,11 @@ describe("AuditCard — entry_type type-specific blocks", () => {
     expect(screen.getByText("c_category_group")).toBeInTheDocument();
   });
 
-  it("route_hint 类型渲染 collection_path 路径 + reason 摘要", () => {
+  it("route_hint 类型渲染 collection_path 路径 + navigation_note 摘要", () => {
     render(<AuditCard entry={routeHintEntry} />);
-    expect(screen.getByText("c_product")).toBeInTheDocument();
-    expect(screen.getByText("c_category_group")).toBeInTheDocument();
-    expect(screen.getByText("商品→订单两层关联")).toBeInTheDocument();
+    expect(screen.getByText("shop.orders")).toBeInTheDocument();
+    expect(screen.getByText("shop.products")).toBeInTheDocument();
+    expect(screen.getByText("orders.items[].sku ↔ products.sku")).toBeInTheDocument();
   });
 
   it("entry_type 渲染类型标签 pill (示例查询)", () => {

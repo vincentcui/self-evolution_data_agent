@@ -1,8 +1,8 @@
 """Phase 4 Task 4.1: agent_loop 主链路单一知识加载入口.
 
 设计目标:
-- 单次调用 → 一次性加载 critical (SQL) + 向量召回 (route_hint / 其他),
-  统一返回 KnowledgeBundle (含 critical / vector_hits / route_hints_for_prompt 3 维度).
+- 单次调用 → 一次性加载 critical (SQL) + 向量召回 (其他),
+  统一返回 KnowledgeBundle (含 critical / vector_hits 2 维度).
 - terminology 锚点已独立走 AC 自动机精确匹配 (terminology_automaton.py), 不再经向量检索.
 - agent_loop 主链路只关心"宏观知识包", 不必感知 critical 是 SQL / vector 是 ChromaDB
   的实现差异. Phase 4 Task 4.3 起所有调用方收敛到此入口.
@@ -13,8 +13,6 @@
       └─ asyncio.wait_for(_load_inner, timeout=settings.knowledge_loader_timeout_secs)
            ├─ task1: _load_layer1_knowledge (SQL critical)
            └─ task2: retrieve_layer3 (ChromaDB, asyncio.to_thread 包同步)
-              ↓
-           分层批查 SQLite payload → RouteHintCandidate
               ↓
            KnowledgeBundle (含 to_prompt_sections() 渲染入口)
 """
@@ -44,7 +42,8 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class TerminologyAnchor:
-    """terminology payload 结构化 view (agent_loop prompt 直注入)."""
+    """terminology payload 结构化 view (agent_loop prompt 直注入 + references 投影)."""
+    entry_id: int
     term: str
     target: str              # 表名/集合名 (原 primary_collection)
     database: str            # 数据库名 (原 primary_database)
@@ -63,36 +62,23 @@ class TerminologyAnchor:
 
 
 @dataclass
-class RouteHintCandidate:
-    """route_hint payload 结构化 view (agent_loop prompt 直注入)."""
-    question_pattern: str
-    collection_path: list[str]
-    join_fields: list[dict] = field(default_factory=list)
-    cost_strategy: str = "default"
-    reason: str = ""
-
-
-@dataclass
 class KnowledgeBundle:
     """agent_loop 主链路单次调用的知识快照.
 
-    三个字段语义:
+    两个字段语义:
       - critical:               critical tier 直加载文本 (SQL, 无 embedding)
       - vector_hits:            retrieve_layer3 原始召回 (含 entry_id 供回查)
-      - route_hints_for_prompt: vector_hits 中 route_hint 类的结构化 view (k cap)
 
     注: terminology 锚点已独立走 AC 自动机 (terminology_automaton.py), 不再经此 bundle.
     """
     critical: list[str]
     vector_hits: list[KnowledgeHit]
-    route_hints_for_prompt: list[RouteHintCandidate]
 
     def to_prompt_sections(self) -> dict[str, str]:
         """渲染 prompt section. route_hint 已摘除 — 方法类知识由 LLM 主动 lookup_knowledge 召回."""
         return {
             "critical_section": self._render_critical(),
             "anchors_section": "",  # terminology 走 AC 自动机, 由调用方注入
-            "route_hints_section": "",  # route_hint 不再注入 (spec 2026-07-07)
         }
 
     # ── 渲染辅助 ──
@@ -110,7 +96,6 @@ class KnowledgeBundle:
 def _empty_bundle() -> KnowledgeBundle:
     return KnowledgeBundle(
         critical=[], vector_hits=[],
-        route_hints_for_prompt=[],
     )
 
 
@@ -156,6 +141,7 @@ async def batch_load_terminology(
             continue
         try:
             out.append(TerminologyAnchor(
+                entry_id=eid,
                 term=p["term"],
                 target=p.get("target") or p.get("primary_collection", ""),
                 database=p.get("database") or p.get("primary_database", ""),
@@ -165,39 +151,6 @@ async def batch_load_terminology(
             ))
         except KeyError as exc:
             log.warning("[loader] terminology ke=%d missing field %s, skip", eid, exc)
-    return out
-
-
-async def _batch_load_route_hints(
-    db: AsyncSession, entry_ids: list[int],
-) -> list[RouteHintCandidate]:
-    """按 entry_ids 顺序批量取 payload → RouteHintCandidate (保留召回顺序)."""
-    if not entry_ids:
-        return []
-    stmt = select(KnowledgeEntry.id, KnowledgeEntry.payload).where(
-        KnowledgeEntry.id.in_(entry_ids)
-    )
-    res = await db.execute(stmt)
-    by_id: dict[int, dict] = {}
-    for row_id, payload_str in res.all():
-        try:
-            by_id[row_id] = json.loads(payload_str or "{}")
-        except json.JSONDecodeError:
-            log.warning("[loader] route_hint ke=%d payload not JSON, skip", row_id)
-            continue
-
-    out: list[RouteHintCandidate] = []
-    for eid in entry_ids:
-        p = by_id.get(eid)
-        if not p:
-            continue
-        out.append(RouteHintCandidate(
-            question_pattern=str(p.get("question_pattern", "")),
-            collection_path=list(p.get("collection_path") or []),
-            join_fields=list(p.get("join_fields") or []),
-            cost_strategy=str(p.get("cost_strategy") or "default"),
-            reason=str(p.get("reason") or ""),
-        ))
     return out
 
 
@@ -212,13 +165,9 @@ async def _load_inner(
     ))
     critical, vector_hits = await asyncio.gather(critical_task, vector_task)
 
-    # route_hint 不再预注入 system prompt — 改由 LLM 按需 lookup_knowledge 召回 (spec 2026-07-07)
-    route_hints: list[RouteHintCandidate] = []
-
     bundle = KnowledgeBundle(
         critical=list(critical),
         vector_hits=list(vector_hits),
-        route_hints_for_prompt=route_hints,
     )
     record_span_io(
         name="load_all_knowledge",
@@ -226,12 +175,10 @@ async def _load_inner(
             "ns_id": ns_id,
             "ns_slug": ns_slug,
             "question": question[:200],
-            "entry_types": ["route_hint"],
         },
         output={
             "critical_count": len(bundle.critical),
-            "route_hint_count": len(bundle.route_hints_for_prompt),
-            "route_hint_hit_ids": [],
+            "vector_hit_count": len(bundle.vector_hits),
         },
     )
     return bundle

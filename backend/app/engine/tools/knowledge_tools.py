@@ -17,10 +17,12 @@ from langfuse import observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.engine.embedding import get_embedding_function
 from app.knowledge.intake import VALID_ENTRY_TYPES
-from app.knowledge.knowledge_loader import load_all_knowledge
+from app.knowledge.knowledge_loader import batch_load_terminology, load_all_knowledge
 from app.knowledge.knowledge_retriever import KnowledgeHit, _retrieve_layer3
 from app.knowledge.recall_payload_compactor import compact_payload_for_recall
+from app.knowledge.terminology_automaton import match_terminology
 from app.models import KnowledgeEntry
 
 from ._mongo_helpers import record_span_io as _record_span_io
@@ -31,6 +33,26 @@ log = logging.getLogger(__name__)
 # ════════════════════════════════════════════
 #  读路径 — agent 看 content 决策检索结果是否相关
 # ════════════════════════════════════════════
+
+def _needs_references(entry_type: str, payload: dict) -> bool:
+    """payload 缺结构化路由 → 需要 references 投影 (spec 2026-07-08 D2)."""
+    if entry_type in ("rule", "route_hint"):
+        return True
+    if entry_type == "example" and not payload.get("final_query_plan"):
+        return True
+    return False
+
+
+def _prose_for_scan(entry_type: str, content: str, payload: dict) -> str:
+    """该条目待扫术语的 prose (content + 类型特定散文字段)."""
+    parts = [content or ""]
+    if entry_type == "rule":
+        parts.append(payload.get("rule_text", ""))
+    elif entry_type == "route_hint":
+        parts.append(payload.get("navigation_note", ""))
+    elif entry_type == "example":
+        parts.append(payload.get("result_summary", ""))
+    return "\n".join(p for p in parts if p)
 
 @observe(name="tool.lookup_knowledge")
 async def lookup_knowledge(
@@ -44,8 +66,6 @@ async def lookup_knowledge(
 
     性能: embedding 预计算一次, 多 type 并发检索 (asyncio.gather + to_thread).
     """
-    from app.engine.embedding import get_embedding_function
-
     ns = ns_slug if ns_slug else "__global__"
     cap = k if k is not None else settings.knowledge_retrieve_default_k
 
@@ -133,6 +153,35 @@ async def lookup_knowledge(
         }
         for h in hits
     ]
+
+    # ── references 读时投影 (spec 2026-07-08 C1) ──
+    # terminology 表为唯一真相源; 对缺结构化路由的条目扫 prose 过 AC 自动机,
+    # 命中术语 → batch_load_terminology 解析 → 挂 top-level references. 复用锚点链路, 无新缓存.
+    needing = [
+        (i, it) for i, it in enumerate(result)
+        if _needs_references(it["entry_type"], it["payload"])
+    ]
+    if needing:
+        per_ke_term_ids: dict[int, list[int]] = {}
+        all_term_ids: list[int] = []
+        for idx, it in needing:
+            prose = _prose_for_scan(it["entry_type"], it["content"], it["payload"])
+            matched = match_terminology(ns_slug, prose) if prose else []
+            per_ke_term_ids[idx] = matched
+            all_term_ids.extend(matched)
+        if all_term_ids:
+            unique_ids = list(dict.fromkeys(all_term_ids))  # 保序去重
+            anchors = await batch_load_terminology(db, unique_ids)
+            id2anchor = {a.entry_id: a for a in anchors}
+            for idx, term_ids in per_ke_term_ids.items():
+                refs = [
+                    {"term": a.term, "target": a.target,
+                     "database": a.database, "db_type": a.db_type}
+                    for a in (id2anchor.get(tid) for tid in term_ids) if a is not None
+                ]
+                if refs:
+                    result[idx]["references"] = refs
+
     _record_span_io(
         input={"ns_slug": ns_slug, "query": query, "types": types, "k": k},
         output={"hit_count": len(result)},
@@ -181,6 +230,14 @@ async def save_knowledge(
         raise ValueError(
             f"entry_type {entry_type!r} 不在 6 类宪章 {sorted(VALID_ENTRY_TYPES)}"
         )
+
+    # ── route_hint 收敛为纯人工录入 (spec 2026-07-08 C9): agent 不能生产 ──
+    # 读写不对称是刻意的 — agent 可 lookup 召回 route_hint, 但不能 save.
+    # 显式 guard (非仅删 _SAVE_ENTRY_TYPES enum): VALID_ENTRY_TYPES 仍含 route_hint
+    # (人工 create 需要), 手搓 entry_type 会通过上面的 6 类校验, 必须硬拒.
+    if entry_type == "route_hint":
+        log.warning("agent save_knowledge route_hint rejected (manual-only) ns=%s", ns_slug)
+        return {"success": False, "reason": "route_hint_manual_only"}
 
     # ── Phase 1c: terminology 走统一闸门 ──
     if entry_type == "terminology":
@@ -267,11 +324,11 @@ async def save_knowledge(
         }})
         return {"entry_id": ke.id, "status": "proposed"}
 
-    # ── rule / route_hint / example 走 parse_payload 闸门 (Phase 1) ──
+    # ── rule / example 走 parse_payload 闸门 (Phase 1) ──
     # 闸门只校验不重写 payload — 防 Pydantic 默认值 (cost_strategy='default'/
     # rule_kind='business_constraint') 在 LLM 漏字段时被静默注入,
     # 掩盖 Phase 2 trace_extractor code 抽路径的真实值.
-    if entry_type in {"rule", "route_hint", "example"}:
+    if entry_type in {"rule", "example"}:
         from pydantic import ValidationError
         from app.schemas.knowledge_payload import parse_payload
         try:
@@ -302,7 +359,7 @@ async def save_knowledge(
     log.info("agent save_knowledge ns=%s type=%s id=%s", ns_slug, entry_type, ke.id)
 
     # ── Stage 2 抓手 D: A-MEM 入库即演化 ──
-    if settings.amem_enabled and entry_type in {"rule", "route_hint", "example"}:
+    if settings.amem_enabled and entry_type in {"rule", "example"}:
         try:
             from datetime import datetime as _dt
 

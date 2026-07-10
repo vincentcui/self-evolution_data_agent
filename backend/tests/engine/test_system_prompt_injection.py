@@ -22,13 +22,13 @@ class _MockNs:
 
 def test_renders_2_sections_when_full():
     anchors = [TerminologyAnchor(
-        term="商品", target="c_category",
+        entry_id=1, term="商品", target="c_category",
         database="db_q", db_type="mongodb",
         synonyms=["货品"], source_collections=["c_category"],
     )]
     prompt = build_system_prompt(
         settings=_MockSettings(), namespace=_MockNs(),
-        anchors=anchors, critical=["默认 latestVersion=true"], route_hints=[],
+        anchors=anchors, critical=["默认 latestVersion=true"],
     )
     # KnowledgeBundle 渲染的 section header — base prompt 不含
     assert "## 关键规则 (critical)" in prompt
@@ -42,9 +42,9 @@ def test_renders_2_sections_when_full():
 def test_omits_empty_sections():
     prompt = build_system_prompt(
         settings=_MockSettings(), namespace=_MockNs(),
-        anchors=[], critical=[], route_hints=[],
+        anchors=[], critical=[],
     )
-    # 三个 section header 在空 bundle 时一律不渲染
+    # section header 在空 bundle 时一律不渲染; route_hint 已摘除, 恒不出现
     assert "## 关键规则 (critical)" not in prompt
     assert "## 业务术语锚点 (terminology)" not in prompt
     assert "## 路由提示 (route_hint)" not in prompt
@@ -57,14 +57,14 @@ def test_cost_limits_filled():
     )
     prompt = build_system_prompt(
         settings=settings, namespace=_MockNs(),
-        anchors=[], critical=[], route_hints=[],
+        anchors=[], critical=[],
     )
     assert "500,000" in prompt
     assert "10,000,000" in prompt
 
 
 def test_backward_compat_no_kwargs():
-    """旧调用方仅传 settings/namespace, 不传 anchors/critical/route_hints, 应等价于全空."""
+    """旧调用方仅传 settings/namespace, 不传 anchors/critical, 应等价于全空."""
     prompt = build_system_prompt(settings=_MockSettings(), namespace=_MockNs())
     assert "## 关键规则 (critical)" not in prompt
     assert "## 业务术语锚点 (terminology)" not in prompt

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re as _re
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -372,6 +371,7 @@ _RELATION_TYPE_NORMALIZE: dict[str, str] = {
     "foreign_key": "many_to_one", "fk": "many_to_one", "": "many_to_one",
 }
 
+
 async def _write_relationship_candidate(
     db: AsyncSession, namespace_id: int, repo_id: int, *,
     from_target: str, from_field: str,
@@ -438,7 +438,6 @@ async def extract_and_write_knowledge(
     *,
     namespace_id: int,
     repo_id: int,
-    mybatis_entries: list[dict],
     business_terms: list[dict],
     business_rules: list[dict],
     business_examples: list[dict] | None = None,
@@ -448,7 +447,6 @@ async def extract_and_write_knowledge(
     """Write KnowledgeEntry(status=proposed) for knowledge-channel extractions.
 
     Creates KE entries for:
-    - route_hint (aggregated per mapper namespace → table set)
     - rule (from business_rules)
     - terminology (from business_terms, via upsert_terminology_with_validation)
     - example (from business_examples — sql2nl 查询模式, D3 恢复; agentic 管线核心产出)
@@ -456,9 +454,6 @@ async def extract_and_write_knowledge(
     Returns total KE entries created.
     """
     total = 0
-
-    # ── mybatis_entries → route_hint KE (namespace aggregation) ──
-    total += await _write_route_hints(db, namespace_id, repo_id, mybatis_entries)
 
     # ── business_rules → rule KE ──
     for rule in business_rules:
@@ -596,63 +591,5 @@ async def _write_terminology_ke(
     except Exception as e:
         log.warning("[%s] terminology upsert failed: %s", repo_name, e)
         return False
-
-
-# ════════════════════════════════════════════════════════════════
-#  route_hint aggregation (mapper namespace → table set)
-# ════════════════════════════════════════════════════════════════
-
-
-async def _write_route_hints(
-    db: AsyncSession, namespace_id: int, repo_id: int,
-    mybatis_entries: list[dict],
-) -> int:
-    """Aggregate mybatis entries by mapper_namespace → one route_hint KE per namespace.
-
-    Each route_hint contains the sorted set of all tables referenced across
-    the namespace's methods (extracted from SQL via FROM/JOIN patterns).
-    """
-    import re
-
-    by_ns: dict[str, set[str]] = {}
-    for entry in mybatis_entries:
-        ns = entry.get("mapper_namespace")
-        if entry.get("type", "").lower() != "select":
-            continue
-        sql = entry.get("canonical_sql") or entry.get("sql") or ""
-        if not ns or not sql:
-            continue
-        tables = set(re.findall(r"\b(?:FROM|JOIN)\s+([\w_]+)", sql, re.I))
-        by_ns.setdefault(ns, set()).update(tables)
-
-    count = 0
-    for mapper_ns, tables in by_ns.items():
-        if not tables:
-            continue
-        ke = KnowledgeEntry(
-            namespace_id=namespace_id,
-            entry_type="route_hint",
-            status="proposed",
-            tier="normal",
-            content=f"{mapper_ns} 涉及表: {', '.join(sorted(tables))}",
-            payload=json.dumps({
-                "topic_summary": f"{mapper_ns} 涉及表",
-                "target_collections": sorted(tables),
-                "source_mapper": mapper_ns,
-                "extraction_source": "mybatis_extract",
-                "source_repo_id": repo_id,
-            }, ensure_ascii=False),
-            source="code_extract",
-            repo_id=repo_id,
-        )
-        db.add(ke)
-        count += 1
-
-    if count:
-        await db.flush()
-    return count
-
-
-
 
 

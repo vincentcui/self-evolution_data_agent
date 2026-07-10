@@ -110,7 +110,8 @@ async def update_namespace(
         ns.name = body.name
     if body.description is not None:
         ns.description = body.description
-    if body.git_token is not None:
+    if body.git_token is not None and "****" not in body.git_token:
+        # **** = 前端掩码回传, 跳过保留原值 (同 git_token_config/model_config update 模式)
         ns.git_token = body.git_token
     await db.commit()
     await db.refresh(ns)
