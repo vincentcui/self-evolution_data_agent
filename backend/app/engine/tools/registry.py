@@ -27,6 +27,7 @@ from app.engine.tools.plan_tools import (
     present_result_tool,
 )
 from app.knowledge.prompt_loader import load_prompt
+from app.models.base import local_now
 
 _PRESENT_RESULT_DESC = load_prompt("present_result").body
 _HUMANIZE_HINT = load_prompt("humanize_query_gen").body
@@ -478,8 +479,21 @@ TOOL_SPECS: list[dict] = [
 SYSTEM_PROMPT_TEMPLATE = """你是数据分析助手 (NL2Query). 给定用户的中文问题, \
 一步步把它翻成可执行的数据查询并返回结果.
 
+当前日期: {current_date}
+
 [业务术语锚点] 的 `[db_type]` 前缀决定走哪个驱动; \
 所有数据访问类工具都按锚点给出的 (db_type, database, target) 三件套执行.
+
+# 知识路径权威性 (前置约束)
+
+通过 [业务术语锚点]、关键规则 (critical)、或 lookup_knowledge 召回获得的查询路径知识 \
+(rule / example / route_hint) 是约束, 不是参考:
+
+- 召回路径描述的关联 (join_keys)、必经字段、过滤默认值 (如软删除标记、状态前置条件) \
+必须落入最终 query.
+- 禁止以"路径复杂 / 字段更简单 / 查询更短"为由绕过召回路径 — 这是投机取巧, 不是优化.
+- 若判断召回路径本身有误 (字段已删 / 关联已变), 必须 clarify_with_user 向用户确认, \
+不得擅自改路.
 
 # 目录探索 (知识不足时的自主探索)
 
@@ -531,8 +545,7 @@ db_profile 里的能力限制 (unsupported_ops / unsupported_stage_variants / sy
 - db_type 从锚点 `[...]` 读, 不要猜
 - query 字段形态由 db_type 决定: \
 MySQL 用 {{sql: "SELECT ... LIMIT n"}}, \
-Oracle 用 {{sql: "SELECT ..."}} (Oracle SQL 方言, 不支持 LIMIT; \
-行数保护用 FETCH FIRST n ROWS ONLY 或不写, 执行层自动包装), \
+Oracle 用 {{sql: "SELECT ... FETCH FIRST n ROWS ONLY"}}, \
 MongoDB 用 {{pipeline: [...]}} 或 {{filter: {{...}}}}
 - 结果中的 DBRef 字段呈现为 {{$ref: 目标集合名, $id_str: 目标记录ID字符串}}; \
 需关联时取 $id_str 当普通字符串匹配目标集合的关联字段.
@@ -577,8 +590,14 @@ def build_system_prompt(
     anchors: list | None = None,
     critical: list | None = None,
 ) -> str:
-    """注入 config 阈值 + 知识段渲染 system prompt."""
+    """注入 config 阈值 + 知识段 + 当前日期渲染 system prompt."""
     _ = namespace
+    # ── 当前日期 (走 local_now() 单一入口 = IS_APP_TIMEZONE 配置) ──
+    #    照搬 Claude Code "Today's date" — 用户问题中相对时间 (最近一年/截止目前/
+    #    上季度) 据此换算, 不回退训练知识截止时间. 时区走项目真相源 (base.py:16
+    #    禁止 datetime.now(tz) 裸调, 唯一入口 local_now()), 不硬编码偏移.
+    current_date = local_now().strftime("%Y-%m-%d")
+
     critical_section = ""
     if critical:
         lines = ["## 关键规则 (critical)"]
@@ -621,6 +640,7 @@ def build_system_prompt(
         )
 
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        current_date=current_date,
         single_layer_limit=settings.query_cost_single_layer_limit,
         total_limit=settings.query_cost_total_limit,
         humanize_hint=_HUMANIZE_HINT,
