@@ -111,25 +111,25 @@ def test_compact_clarify_reads_user_answer():
 
 
 def test_compact_execute_query_truncated_captures_output_error():
-    """execute_query 截断返 {error, message, result_ref} 无 rows/count —
+    """execute_query 返 {error, message, result_ref} 无 rows/count —
     error 在 output 内非顶层, compact 须捕获 message 进 rec['error'],
     否则前端返回值列显 '—' (真实事故 trace 3ff15f81)."""
     rec = compact_tool_call(3, {"name": "execute_query",
-        "input": {"mode": "single", "target": "orders", "db_type": "mysql", "database": "shop", "query": {}},
-        "output": {"error": "result_truncated_use_plan",
-                   "message": "查询已返回约 1000 行, 超过单次上限 1000 行, 结果已被截断.",
-                   "suggestion": "...", "result_ref": "tc_3"}})
+        "input": {"target": "orders", "db_type": "mysql", "database": "shop", "query": {}},
+        "output": {"error": "datasource_not_found",
+                   "message": "namespace 1 下没有 mysql+shop 的数据源",
+                   "suggestion": "调 lookup_knowledge 看锚点是否过期", "result_ref": "tc_3"}})
     assert rec["tool"] == "execute_query"
     assert "rows_returned" not in rec  # 无 rows
     assert "count_returned" not in rec
-    assert rec["error"].startswith("查询已返回约 1000 行")  # 取 output.message (可读) 非 error code
-    assert "result_truncated_use_plan" not in rec["error"]
+    assert rec["error"].startswith("namespace 1")  # 取 output.message (可读) 非 error code
+    assert "datasource_not_found" not in rec["error"]
 
 
 def test_compact_success_output_no_error_not_misflagged():
     """成功 output (无 error 键) 不应被误判为 error — message 仅在 output.error 存在时才取."""
     rec = compact_tool_call(0, {"name": "execute_query",
-        "input": {"mode": "count", "target": "orders"},
+        "input": {"target": "orders"},
         "output": {"count": 7, "result_ref": "tc_0"}})
     assert "error" not in rec
     assert rec["count_returned"] == 7

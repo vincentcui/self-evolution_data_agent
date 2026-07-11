@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 
 import aiomysql
 import sqlparse
@@ -16,10 +15,9 @@ from app.engine.drivers._exceptions import (
     QueryTimeoutError,
     UnsafeQueryError,
 )
+from app.engine.drivers._sql_base import BaseSqlDriver
 from app.engine.drivers.base import (
     CostEstimate,
-    ExecuteMode,
-    ExecuteResult,
     FieldDef,
     ProbeResult,
     SchemaSnapshot,
@@ -62,7 +60,16 @@ def _extract_outer_limit_value(m: re.Match) -> int:
     return int(m.group(2)) if m.group(2) is not None else int(m.group(1))
 
 
-class MySQLDriver:
+def _strip_outer_limit(sql: str) -> str:
+    """模块级: 剥离末尾外层 LIMIT/LIMIT a,b/OFFSET (planner 末步行保护).
+
+    先经 _normalize_for_limit 剥注释, 杜绝 `... LIMIT n -- c` 尾注释让 $ 锚定失配。
+    仅尾部一处, 不动子查询内 LIMIT。供 MySQLDriver 方言钩子引用。
+    """
+    return _OUTER_LIMIT_RE.sub("", _normalize_for_limit(sql)).rstrip()
+
+
+class MySQLDriver(BaseSqlDriver):
     """aiomysql 连接池驱动, 实现 DataSourceDriver 协议."""
 
     db_type: str = "mysql"
@@ -268,28 +275,31 @@ class MySQLDriver:
                     raw_explain={"rows": rows},
                 )
 
-    # ── execute_query ────────────────────────────────────
+    # ── 方言钩子 (BaseSqlDriver 契约) ─────────────────────
+    @staticmethod
+    def _normalize(sql: str) -> str:
+        return _normalize_for_limit(sql)
 
-    async def execute_query(
-        self,
-        ds: DataSource,
-        target: str,
-        query: dict,
-        mode: ExecuteMode = "single",
-        batch_size: int = 1000,  # noqa: hardcode
-    ) -> ExecuteResult:
-        log.info("[mysql_driver] execute_query ds=%d target=%s mode=%s", ds.id, target, mode)
-        sql = query.get("sql")
-        if not sql:
-            raise PayloadShapeMismatchError(
-                "execute_query 需要 query.sql",
-                suggestion="payload 必须包含 'sql' key",
-            )
-        self._enforce_select_only(sql)
-        sql = self._wrap_by_mode(sql, mode, batch_size)
+    @staticmethod
+    def _has_outer_limit(sql: str) -> bool:
+        return _OUTER_LIMIT_RE.search(_normalize_for_limit(sql)) is not None
 
+    @staticmethod
+    def _outer_limit_value(sql: str) -> int | None:
+        m = _OUTER_LIMIT_RE.search(_normalize_for_limit(sql))
+        return _extract_outer_limit_value(m) if m else None
+
+    @staticmethod
+    def _strip_outer_limit_impl(sql: str) -> str:
+        return _strip_outer_limit(sql)  # 既有 staticmethod, 内含 _normalize_for_limit
+
+    @staticmethod
+    def _inject_limit(sql: str, n: int) -> str:
+        return f"{sql} LIMIT {n}"  # sql 已由 _apply_cap 规范化/剥离
+
+    async def _exec(self, ds, sql: str) -> list[dict]:
+        """aiomysql 执行 + 超时 (原 execute_query 的 DB 访问段)."""
         pool = await self._get_pool(ds)
-        t0 = time.perf_counter()
         try:
             async with pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -303,26 +313,8 @@ class MySQLDriver:
                 f"SQL 执行超时 ({settings.mysql_query_timeout_secs}s): {sql[:100]}",
                 suggestion="优化查询或增加 IS_MYSQL_QUERY_TIMEOUT_SECS",
             ) from exc
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-        truncated = False
-        if mode == "single" and len(rows) >= settings.query_row_limit:
-            truncated = True
-        elif mode == "render" and len(rows) >= settings.render_row_limit:
-            truncated = True  # 疑似截断 (executor 补 count 纠正/确证)
-
-        log.info(
-            "[mysql_driver] execute_query done ds=%d rows=%d elapsed_ms=%d",
-            ds.id,
-            len(rows),
-            elapsed_ms,
-        )
-        return ExecuteResult(
-            rows=rows,
-            row_count=len(rows),
-            truncated=truncated,
-            elapsed_ms=elapsed_ms,
-        )
+        log.info("[mysql_driver] _exec done rows=%d", len(rows))
+        return list(rows)
 
     # ── health_check ─────────────────────────────────────
 
@@ -515,56 +507,6 @@ class MySQLDriver:
                 "SQL 包含禁止的 DML/DDL 关键字",
                 suggestion="仅允许 SELECT 查询",
             )
-
-    def strip_outer_row_limit(self, sql: str) -> str:
-        """公开行数保护剥离方法，供 plan_executor render/count 路径调用."""
-        return self._strip_outer_limit(sql)
-
-    @staticmethod
-    def _strip_outer_limit(sql: str) -> str:
-        """剥离末尾外层 LIMIT/LIMIT a,b/OFFSET (planner 末步行保护).
-
-        先经 _normalize_for_limit 剥注释, 杜绝 `... LIMIT n -- c` 尾注释让 $ 锚定失配
-        (render/count 现网同盲点, 本次一并硬化)。仅尾部一处, 不动子查询内 LIMIT。
-        """
-        return _OUTER_LIMIT_RE.sub("", _normalize_for_limit(sql)).rstrip()
-
-    @staticmethod
-    def _apply_row_limit(sql: str, cap: int) -> str:
-        """保护型行数 cap 三态: 无 LIMIT 注入; >cap 剥离+注入; ≤cap 保留原值.
-
-        只对"会拉爆"与"没保护"干预, 不触碰"已在安全区且主动选择"的小 LIMIT
-        (尊重 LLM 小样本/probe 意图)。single/batched/probe 共用。
-        先 _normalize_for_limit 剥注释, 杜绝尾注释击穿 (spec-review Claim 3)。
-        """
-        base = _normalize_for_limit(sql)                     # 剥注释, 防尾注释击穿
-        m = _OUTER_LIMIT_RE.search(base)
-        if m is None:
-            return f"{base} LIMIT {cap}"                    # 无 LIMIT → 注入
-        if _extract_outer_limit_value(m) > cap:
-            return f"{MySQLDriver._strip_outer_limit(base)} LIMIT {cap}"  # >cap → cap
-        return base                                          # ≤cap → 保留原值
-
-    @staticmethod
-    def _wrap_by_mode(sql: str, mode: ExecuteMode, batch_size: int) -> str:
-        """按 mode 包装 SQL. 两类契约:
-
-        保护型 (single/batched/probe): _apply_row_limit 三态, 尊重 LLM 小 LIMIT.
-        权威型 (render/count): 无条件 strip 外层行保护后注入权威语义
-          — render 注 render_row_limit (渲染源唯一所有者); count 包 COUNT 返标量总数.
-        """
-        if mode == "probe":
-            return MySQLDriver._apply_row_limit(sql, settings.probe_row_limit)
-        elif mode == "batched":
-            return MySQLDriver._apply_row_limit(sql, batch_size)
-        elif mode == "count":
-            base = MySQLDriver._strip_outer_limit(sql)
-            return f"SELECT COUNT(*) AS cnt FROM ({base}) AS _sub"
-        elif mode == "render":
-            base = MySQLDriver._strip_outer_limit(sql)
-            return f"{base} LIMIT {settings.render_row_limit}"
-        else:  # single
-            return MySQLDriver._apply_row_limit(sql, settings.query_row_limit)
 
 
 def _fk_rows_to_relationships(

@@ -1,34 +1,20 @@
-"""Stage 5 — mode='render' override 末步 LIMIT 用 render_row_limit, 撞限置疑似. 双引擎."""
+"""行保护剥离 helper — 外层 LIMIT 剥离 (SQL) / 尾部行 stage 剥离 (mongo).
+
+execute-query-cap-contract (2026-07-11): render mode 已删, 末步 LIMIT 由 planner
+自表达 (≤ceiling 尊重), 不再有 `_wrap_by_mode(..., "render", ...)` 特权覆盖.
+本文件保留 strip helper 测 — 它们供 plan_executor 补 count 时剥外层行保护用
+(count_wrap 前先 strip, 否则子查询被 planner LIMIT 封顶).
+"""
 from __future__ import annotations
 
-from app.config import settings
 from app.engine.drivers.mongo import _strip_tail_row_stages
 from app.engine.drivers.mysql import MySQLDriver
 
 
-def test_mysql_wrap_render_injects_when_no_limit():
-    sql = MySQLDriver._wrap_by_mode("SELECT a FROM t", "render", 1000)
-    assert f"LIMIT {settings.render_row_limit}" in sql
-
-
-def test_mysql_wrap_render_overrides_existing_planner_limit():
-    """critical: planner 末步必带 LIMIT; render 必须剥离并 override 为 render_row_limit."""
-    sql = MySQLDriver._wrap_by_mode("SELECT a FROM t LIMIT 1000", "render", 1000)
-    assert f"LIMIT {settings.render_row_limit}" in sql
-    assert "LIMIT 1000" not in sql              # planner 的 1000 已被剥离
-    assert sql.upper().count("LIMIT") == 1      # 外层 LIMIT 唯一
-
-
-def test_mysql_wrap_render_overrides_limit_offset_form():
-    sql = MySQLDriver._wrap_by_mode("SELECT a FROM t LIMIT 100, 1000", "render", 1000)
-    assert f"LIMIT {settings.render_row_limit}" in sql
-    assert "100, 1000" not in sql
-
-
 def test_mysql_strip_outer_limit_leaves_subquery_limit():
-    # 子查询内 LIMIT 不应被剥离, 仅剥外层
+    # 子查询内 LIMIT 不应被剥离, 仅剥外层 (strip_outer_row_limit 是 SqlDataSourceDriver 协议方法)
     sql = "SELECT * FROM (SELECT a FROM t LIMIT 5) _s LIMIT 1000"
-    stripped = MySQLDriver._strip_outer_limit(sql)
+    stripped = MySQLDriver().strip_outer_row_limit(sql)
     assert stripped.endswith("_s")
     assert "LIMIT 5" in stripped
 

@@ -143,6 +143,10 @@ def _mock_ds():
     ds = MagicMock()
     ds.id = 1
     ds.database = "db1"
+    # db_profile_json 必须是真值 (None/JSON 串) — 否则 _resolve_step_caps 的
+    # json.loads(ds.db_profile_json or "{}") 收到 MagicMock 抛 TypeError.
+    # None → "{}" → caps 解析 fail-safe 返 None (pre-validation 不阻断执行).
+    ds.db_profile_json = None
     return ds
 
 

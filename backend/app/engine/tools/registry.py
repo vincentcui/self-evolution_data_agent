@@ -1,6 +1,6 @@
-"""Tool registry + system prompt template — 10 多态工具 (Stage 3 升级).
+"""Tool registry + system prompt template — 12 多态工具 (Stage 3 升级).
 
-10 个 agent tool 的统一注册表 (name → callable) 和 LLM 输入 schema 描述.
+12 个 agent tool 的统一注册表 (name → callable) 和 LLM 输入 schema 描述.
 
 设计约束:
 - input_schema 只暴露 LLM-visible 字段, 不含 runtime context (db / namespace_id /
@@ -235,7 +235,8 @@ TOOL_SPECS: list[dict] = [
             "探目标字段的 distinct 值分布 (默认 top 10). "
             "Use when: 需要判断字段形态(枚举/ID格式/数值区间). "
             "Do not use when: fetch_schema 已列明枚举. "
-            "返回 {values: [...]} 的 top-N 频次列表."
+            "返回 {values: [{value, cnt}]} 按频次降序 top-N "
+            "(value=字段值, cnt=出现次数)."
         ),
         "input_schema": {
             "type": "object",
@@ -269,11 +270,7 @@ TOOL_SPECS: list[dict] = [
                 "target": {"type": "string"},
                 "query": {
                     "type": "object",
-                    "description": (
-                        "查询载荷. MySQL/Oracle: {sql:'SELECT...'}. "
-                        "Oracle 用 Oracle SQL 方言, 不支持 LIMIT. "
-                        "MongoDB: {pipeline:[...]} 或 {filter:{...}}"
-                    ),
+                    "description": "查询载荷, 形态按 db_type 见「数据源协议」段.",
                 },
             },
             "required": ["db_type", "database", "target", "query"],
@@ -282,15 +279,15 @@ TOOL_SPECS: list[dict] = [
     {
         "name": "execute_query",
         "description": (
-            "执行查询, 按 mode 控制粒度. "
+            "执行查询, 返回数据行. 行数控制由你在 query 内按 db_type 表达 "
+            "(语法见「数据源协议」段); 只要总数写计数查询, 勿拉全量再数. "
             "Use when: 已拿到 schema 和过滤条件, 准备实际取数. "
             "Do not use when: 跨 db_type 或跨 database (用 generate_query_plan). "
-            "mode: count=只求总数, 驱动包装返标量 (勿自行聚合); "
-            "probe=小样本探查; single=完整结果; batched=分批. "
-            "query 形态: MySQL/Oracle 用 {sql:'...'} (Oracle 用 Oracle SQL 方言, 不写 LIMIT), "
-            "MongoDB 用 {pipeline:[...]}. "
-            "返回 {rows, row_count, truncated, elapsed_ms, result_ref}. "
-            "result_ref 是本次执行的稳定句柄, 后续 present_result.ref 直接复制它的值."
+            "返回 {rows, row_count, truncated, elapsed_ms, result_ref}: "
+            "rows/row_count 为返回行 (可能部分); "
+            "truncated=true 表示行数保护咬住, 可能还有更多行, 不可当完整结果呈现 "
+            "(要完整则收窄 WHERE/聚合/走 generate_query_plan, 部分可接受带'仅前 N 行'说明); "
+            "result_ref 是稳定句柄, present_result.ref 直接复制它的值."
         ),
         "input_schema": {
             "type": "object",
@@ -305,12 +302,6 @@ TOOL_SPECS: list[dict] = [
                         "MongoDB: {pipeline:[...]} 或 {filter:{...}}"
                     ),
                 },
-                "mode": {
-                    "type": "string",
-                    "enum": ["single", "probe", "count", "batched"],
-                    "default": "single",
-                },
-                "batch_size": {"type": "integer", "default": 1000},
             },
             "required": ["db_type", "database", "target", "query"],
         },
@@ -432,8 +423,10 @@ TOOL_SPECS: list[dict] = [
             "串行执行 multi-step Plan, 返最终行+列名+步骤 trace. "
             "Use when: generate_query_plan 已产出合法 plan. "
             "Do not use when: plan 尚未成形. "
-            "返回 {rows, columns, last_step_idx, truncated, total_row_count, result_ref}. "
-            "result_ref 是本次执行的稳定句柄, 后续 present_result.ref 直接复制它的值."
+            "返回 {rows, columns, last_step_idx, truncated, total_row_count, result_ref}: "
+            "truncated=true 表示末步结果可能部分 (行数保护咬住); "
+            "total_row_count 为补 count 后的精确总数 (未截断则=行数); "
+            "result_ref 是稳定句柄, present_result.ref 直接复制它的值."
         ),
         "input_schema": {
             "type": "object",
@@ -519,21 +512,17 @@ types 按需选择: instance_alias(别名→记录ID) / example(历史成功对)
 不传 types 则全类型混合检索.
 3. **确认 schema**: 不熟悉字段名时调 fetch_schema. \
 字段值不明调 inspect_values.
-4. **验证候选规模**: 模糊指代 → execute_query(mode="probe") 小样本验证. \
+4. **验证候选规模**: 模糊指代 → execute_query 取小样本验证 (如 10 行). \
 0 命中或异常多 → 自决重试/改字段/clarify_with_user.
 5. **歧义澄清**: 多候选无法自决 → clarify_with_user. \
 用户回答后 save_knowledge 沉淀.
 6. **代价评估**: 大表查询前先 estimate_cost. \
-只要行数用 execute_query(mode="count") — 照常写取数 query, 驱动包装返总数. \
-单步聚合若结果会超行上限 → 不要用更窄条件分多次 single 拼接, \
+只要行数用 execute_query 取计数 — 勿拉全量. \
+单步聚合若结果会超行上限 → 不要用更窄条件分多次 execute_query 拼接, \
 改走 generate_query_plan → execute_plan (产出单一完整结果集).
-7. **执行**: 单源单步 → execute_query(mode="single"); \
+7. **执行**: 单源单步 → execute_query; \
 多步或跨源 → generate_query_plan → execute_plan. \
-拿到最终结果后调 present_result(ref=该次执行的 tool_call_id, chart_spec={{...}}) 收尾 — \
-不要把数据行复制进入参, 渲染器会用 ref 取服务端完整结果. \
-chart_spec.chart_type 选型: card=单值/指标卡; line=随时间或有序维度的趋势; \
-pie=少数分类占比; bar=分类对比; table=多维或无法用上述表达. \
-对比多个对象 (如多地区/多类别) 时用 series_by 指定分组列, 渲染出多条系列.
+拿到最终结果后调 present_result 收尾 (chart_spec 列角色与 chart_type 选型见 present_result 工具描述).
 8. **能力兼容**: 构造 aggregate pipeline 前, 比对 fetch_schema / estimate_cost 返回的 \
 db_profile 里的能力限制 (unsupported_ops / unsupported_stage_variants / syntax_constraints). \
 命中任一项时按 equivalent_hints 改用等效写法; 无 hint 时改用不命中该限制的等价表达.
@@ -553,10 +542,10 @@ MongoDB 用 {{pipeline: [...]}} 或 {{filter: {{...}}}}
 # 代价控制铁律
 
 - 关联超 2 层: 先 estimate_cost 看每层规模.
-- 任一层估算 > {single_layer_limit:,} 行 → execute_query(mode="batched") 分批.
+- 任一层估算 > {single_layer_limit:,} 行 → execute_query 分批取数 或 generate_query_plan.
 - 三层连乘估算 > {total_limit:,} 行 → clarify_with_user 询问分组策略.
-- 用户只问 "个数/占比" → execute_query(mode="count"), 照常写取数 query 驱动返标量总数; \
-要每组明细数量走 mode="single" 自行分组.
+- 用户只问 "个数/占比" → execute_query 取计数 — 勿拉全量; \
+要每组明细数量走 execute_query 自行分组.
 
 # 错误消费与循环规避
 

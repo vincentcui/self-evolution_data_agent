@@ -166,35 +166,39 @@ def test_present_result_normalizes_illegal_chart_type_to_table():
 # ════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_execute_plan_overrides_planner_limit_and_counts_true_total(monkeypatch):
-    """critical: 末步 SQL 带 planner LIMIT 1000, render_row_limit=3.
-    render 跑剥离 planner LIMIT 的查询 → 取 render_row_limit 行; count 跑剥离 LIMIT
-    的查询 → 真实总数 5; truncated = 5>3 = True."""
+async def test_execute_plan_counts_true_total_when_truncated(monkeypatch):
+    """critical: 末步 SQL 疑似截断 (truncated=True) → 剥离 planner LIMIT 后 count_wrap
+    拿精确总数 5; truncated = 5 > hard_ceiling(3) = True.
+
+    execute-query-cap-contract (2026-07-11): mode 已删, plan_executor 末步靠 is_final
+    + driver.count_wrap 自拼 COUNT, 不再走 mode="render"/"count" 特权.
+    """
     from app.config import settings
     from app.engine.plan_executor import execute_plan
     from app.engine.plan_models import PlanStep, QueryPlan
 
-    monkeypatch.setattr(settings, "render_row_limit", 3)
-    captured: list[tuple[str, str]] = []
+    monkeypatch.setattr(settings, "hard_ceiling", 3)
+    captured: list[str] = []
 
     class FakeDriver:
         def strip_outer_row_limit(self, sql: str) -> str:
             """SqlDataSourceDriver 协议方法 — 剥离末尾 LIMIT (复用 MySQLDriver 实现)."""
             from app.engine.drivers.mysql import MySQLDriver
-            return MySQLDriver._strip_outer_limit(sql)
+            return MySQLDriver().strip_outer_row_limit(sql)
 
-        async def execute_query(self, ds, target, query, mode="single", batch_size=1000):
+        def count_wrap(self, sql: str) -> str:
+            from app.engine.drivers.mysql import MySQLDriver
+            return MySQLDriver().count_wrap(sql)
+
+        async def execute_query(self, ds, target, query):
             sql = (query or {}).get("sql", "")
-            captured.append((mode, sql))
-            if mode == "render":
-                # 注: render 的 LIMIT 剥离发生在真 driver 的 _wrap_by_mode 内 (此处被 fake
-                # 替换故收到原 SQL); 真 driver 行为由 test_render_mode.py 覆盖.
-                return {"rows": [{"d": i} for i in range(settings.render_row_limit)],
-                        "row_count": settings.render_row_limit, "truncated": True}
-            if mode == "count":
+            captured.append(sql)
+            if "COUNT(*)" in sql:
+                # count_wrap 产出: 断言 planner LIMIT 已剥离
                 assert "LIMIT 1000" not in sql, "count 必须跑剥离 LIMIT 的查询"
                 return {"rows": [{"cnt": 5}], "row_count": 1, "truncated": False}
-            return {"rows": [], "row_count": 0, "truncated": False}
+            # 数据查询: 疑似截断 (返 3 行满载)
+            return {"rows": [{"d": i} for i in range(3)], "row_count": 3, "truncated": True}
 
     async def fake_resolve_ds(*a, **k):
         return object()
@@ -214,30 +218,34 @@ async def test_execute_plan_overrides_planner_limit_and_counts_true_total(monkey
 
     assert result.final_truncated is True
     assert result.final_total_row_count == 5     # count 真实总数, 非 ≤1000
-    assert len(result.final) == settings.render_row_limit  # render override 到 3
-    assert any(m == "count" for m, _ in captured), "疑似截断必须补 count"
+    assert len(result.final) == 3                # 数据查询返回的行原样
+    assert any("COUNT(*)" in s for s in captured), "疑似截断必须补 count"
 
 
 @pytest.mark.asyncio
-async def test_execute_plan_exact_limit_not_truncated(monkeypatch):
-    """总数恰好 == limit: len>=limit 疑似, count 算出 total==limit → 纠正 truncated=False."""
+async def test_execute_plan_exact_ceiling_not_truncated(monkeypatch):
+    """总数恰好 == ceiling: 数据查询 truncated 疑似, count 算出 total==ceiling →
+    total > ceiling 为 False → 纠正 truncated=False (假阳性纠正)."""
     from app.config import settings
     from app.engine.plan_executor import execute_plan
     from app.engine.plan_models import PlanStep, QueryPlan
 
-    monkeypatch.setattr(settings, "render_row_limit", 5)
+    monkeypatch.setattr(settings, "hard_ceiling", 5)
 
     class FakeDriver:
         def strip_outer_row_limit(self, sql: str) -> str:
             from app.engine.drivers.mysql import MySQLDriver
-            return MySQLDriver._strip_outer_limit(sql)
+            return MySQLDriver().strip_outer_row_limit(sql)
 
-        async def execute_query(self, ds, target, query, mode="single", batch_size=1000):
-            if mode == "render":
-                return {"rows": [{"d": i} for i in range(5)], "row_count": 5, "truncated": True}
-            if mode == "count":
+        def count_wrap(self, sql: str) -> str:
+            from app.engine.drivers.mysql import MySQLDriver
+            return MySQLDriver().count_wrap(sql)
+
+        async def execute_query(self, ds, target, query):
+            sql = (query or {}).get("sql", "")
+            if "COUNT(*)" in sql:
                 return {"rows": [{"cnt": 5}], "row_count": 1, "truncated": False}
-            return {"rows": [], "row_count": 0, "truncated": False}
+            return {"rows": [{"d": i} for i in range(5)], "row_count": 5, "truncated": True}
 
     async def fake_resolve_ds(*a, **k):
         return object()
@@ -255,5 +263,5 @@ async def test_execute_plan_exact_limit_not_truncated(monkeypatch):
         )
         result = await execute_plan(plan, slug="ns", ns_id=1, sse_emit=None)
 
-    assert result.final_truncated is False   # count 纠正假阳性
+    assert result.final_truncated is False   # count 纠正假阳性 (5 > 5 = False)
     assert result.final_total_row_count == 5

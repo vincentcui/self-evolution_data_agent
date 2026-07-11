@@ -44,9 +44,6 @@ class CostEstimate(TypedDict):
     raw_explain: dict
 
 
-ExecuteMode = Literal["single", "probe", "count", "batched", "render"]
-
-
 class ExecuteResult(TypedDict):
     rows: list[dict]
     row_count: int
@@ -65,6 +62,10 @@ class SqlDataSourceDriver(Protocol):
 
     def strip_outer_row_limit(self, sql: str) -> str:
         """剥离最外层行数保护 (MySQL LIMIT / Oracle ROWNUM wrapper), 供 executor render/count 用."""
+        ...
+
+    def count_wrap(self, sql: str) -> str:
+        """系统补 count 用: 包 COUNT 返标量 (plan_executor render 截断补数调用)."""
         ...
 
 
@@ -111,8 +112,6 @@ class DataSourceDriver(Protocol):
         ds: DataSource,
         target: str,
         query: dict,
-        mode: ExecuteMode = "single",
-        batch_size: int = 1000,  # noqa: hardcode
     ) -> ExecuteResult:
         ...
 

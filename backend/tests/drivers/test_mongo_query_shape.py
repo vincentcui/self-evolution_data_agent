@@ -202,29 +202,24 @@ class TestClassifyQueryShape:
 
 class TestCountHardGate:
     @pytest.mark.asyncio
-    async def test_pipeline_and_filter_counts_agree_and_differ_from_total(self):
-        """Pipeline-shape count == filter-shape count == K, and != whole-collection T.
+    async def test_count_pipeline_returns_match_count_not_total(self):
+        """LLM 自写 $count pipeline 返 K (匹配数), 而非 T (全集).
 
-        Fails on the old code (count branch read only `filter`, so the pipeline
-        form returned T). Durable, ds-independent proof of BUG 1.
+        execute-query-cap-contract (2026-07-11): mode="count" 已删, 计数由 LLM 在
+        pipeline 末尾自写 {"$count":"count"} 表达 (驱动 _is_count_pipeline 识别, 不再追加).
+        原 BUG 1 (count 分支只读 filter, pipeline 形态返 T) 结构上已不可能复发 —
+        计数就是普通 aggregate, $match 天然生效. 本测固化: $match+$count 返 K≠T.
         """
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         ds = make_ds()
 
-        pipeline_res = await driver.execute_query(
-            ds, "c", {"pipeline": [{"$match": MATCH}]}, mode="count"
+        count_res = await driver.execute_query(
+            ds, "c", {"pipeline": [{"$match": MATCH}, {"$count": "count"}]}
         )
-        filter_res = await driver.execute_query(
-            ds, "c", {"filter": MATCH}, mode="count"
-        )
-
-        pipeline_count = pipeline_res["rows"][0]["count"]
-        filter_count = filter_res["rows"][0]["count"]
+        pipeline_count = count_res["rows"][0]["count"]
 
         assert pipeline_count == K
-        assert filter_count == K
-        assert pipeline_count == filter_count
         assert pipeline_count != T  # the load-bearing inequality (was 14783==14783)
 
 
@@ -233,55 +228,59 @@ class TestCountHardGate:
 # ──────────────────────────────────────────────────────────
 
 class TestCountBehavior:
+    """LLM 自写 $count pipeline — 驱动 _is_count_pipeline 识别 (不加 $limit, 不再追加 $count)."""
+
     @pytest.mark.asyncio
-    async def test_filter_path_uses_count_documents_unchanged(self):
+    async def test_count_pipeline_not_capped(self):
+        """$count pipeline 命中计数分支: 返 1 行标量, 不加 $limit, truncated=False."""
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"filter": MATCH}, mode="count"
+            make_ds(), "c", {"pipeline": [{"$match": MATCH}, {"$count": "count"}]}
         )
         assert res["rows"] == [{"count": K}]
         assert res["row_count"] == 1
         assert res["truncated"] is False
-        # filter path must not touch aggregate
-        assert coll.aggregate_pipelines == []
+        # count pipeline 原样执行, 末尾无 $limit 追加
+        assert coll.aggregate_pipelines[-1][-1] == {"$count": "count"}
 
     @pytest.mark.asyncio
-    async def test_zero_match_pipeline_returns_count_zero(self):
+    async def test_zero_match_count_returns_empty(self):
+        # $count 对空匹配返 [] (FakeCollection $count 语义: 无匹配 → 空)
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"pipeline": [{"$match": {"category": "nope"}}]},
-            mode="count",
+            make_ds(), "c",
+            {"pipeline": [{"$match": {"category": "nope"}}, {"$count": "count"}]},
         )
-        assert res["rows"] == [{"count": 0}]
+        assert res["rows"] == []
 
     @pytest.mark.asyncio
     async def test_caller_pipeline_not_mutated(self):
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
-        caller_pipeline = [{"$match": MATCH}]
+        caller_pipeline = [{"$match": MATCH}, {"$count": "count"}]
         await driver.execute_query(
-            make_ds(), "c", {"pipeline": caller_pipeline}, mode="count"
+            make_ds(), "c", {"pipeline": caller_pipeline}
         )
-        # the appended {"$count": "count"} must stay local
-        assert caller_pipeline == [{"$match": MATCH}]
+        # 驱动不得原地修改 caller 的 pipeline
+        assert caller_pipeline == [{"$match": MATCH}, {"$count": "count"}]
 
     @pytest.mark.asyncio
     async def test_count_output_field_named_count(self):
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"pipeline": [{"$match": MATCH}]}, mode="count"
+            make_ds(), "c", {"pipeline": [{"$match": MATCH}, {"$count": "count"}]}
         )
         assert list(res["rows"][0].keys()) == ["count"]
 
     @pytest.mark.asyncio
-    async def test_empty_pipeline_counts_whole_collection(self):
+    async def test_empty_match_count_whole_collection(self):
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"pipeline": []}, mode="count"
+            make_ds(), "c", {"pipeline": [{"$count": "count"}]}
         )
         assert res["rows"] == [{"count": T}]
 
@@ -296,10 +295,10 @@ class TestDataReadShape:
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"pipeline": [{"$match": MATCH}]}, mode="single"
+            make_ds(), "c", {"pipeline": [{"$match": MATCH}]}
         )
         assert res["row_count"] == K
-        # exactly one aggregate, with a trailing $limit appended
+        # exactly one aggregate, with a trailing $limit appended (default_limit)
         assert len(coll.aggregate_pipelines) == 1
         assert coll.aggregate_pipelines[0][-1] == {"$limit": 1000}
         # find() not used on the aggregate path
@@ -310,7 +309,7 @@ class TestDataReadShape:
         coll = FakeCollection(SEED_DOCS)
         driver = driver_with(coll)
         res = await driver.execute_query(
-            make_ds(), "c", {"filter": MATCH}, mode="single"
+            make_ds(), "c", {"filter": MATCH}
         )
         assert res["row_count"] == K
         assert coll.find_filters == [MATCH]
@@ -324,7 +323,7 @@ class TestDataReadShape:
         driver = driver_with(coll)
         caller_pipeline = [{"$match": MATCH}]
         await driver.execute_query(
-            make_ds(), "c", {"pipeline": caller_pipeline}, mode="single"
+            make_ds(), "c", {"pipeline": caller_pipeline}
         )
         assert caller_pipeline == [{"$match": MATCH}]
 
@@ -398,7 +397,7 @@ class TestExtendedJsonDecode:
                 {"$sort": {"courseCount": -1}},
             ]
         }
-        await driver.execute_query(make_ds(), "c", query, mode="single")
+        await driver.execute_query(make_ds(), "c", query)
         captured = coll.aggregate_pipelines[-1]
         match = captured[0]["$match"]
         gte = match["createTime"]["$gte"]
@@ -421,20 +420,22 @@ class TestExtendedJsonDecode:
             {"$match": {"category": "phone"}},
             {"$group": {"_id": "$category", "n": {"$sum": 1}}},
         ]}
-        await driver.execute_query(make_ds(), "c", query, mode="single")
+        await driver.execute_query(make_ds(), "c", query)
         captured = coll.aggregate_pipelines[-1]
         assert captured[0] == {"$match": {"category": "phone"}}
         assert captured[1] == {"$group": {"_id": "$category", "n": {"$sum": 1}}}
 
     @pytest.mark.asyncio
-    async def test_count_mode_decodes_dollar_date(self):
-        """count 路径同样共享入口解码 (trace 6de74455 第 3/4 次调用即 count)."""
+    async def test_count_pipeline_decodes_dollar_date(self):
+        """count 路径 (LLM 自写 $count) 同样共享入口解码 (trace 6de74455 第 3/4 次调用即 count)."""
         coll = FakeCollection([])
         driver = driver_with(coll)
-        query = {"pipeline": [{"$match": {"createTime": {
-            "$gte": {"$date": "2026-06-01T00:00:00.000Z"}}}}]}
-        await driver.execute_query(make_ds(), "c", query, mode="count")
-        # count 路径追加 {"$count":"count"} 后送 aggregate; 取首个 $match
+        query = {"pipeline": [
+            {"$match": {"createTime": {"$gte": {"$date": "2026-06-01T00:00:00.000Z"}}}},
+            {"$count": "count"},
+        ]}
+        await driver.execute_query(make_ds(), "c", query)
+        # $count pipeline 原样送 aggregate (不追加 $limit); 取首个 $match
         captured = coll.aggregate_pipelines[-1]
         gte = captured[0]["$match"]["createTime"]["$gte"]
         assert isinstance(gte, datetime)

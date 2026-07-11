@@ -7,7 +7,7 @@ PlanGenerator — LLM 生成跨引擎查询执行计划 (Plan A)
 跨引擎 (Plan A):
 - collections[].db_type 决定每个 step 走 mysql 还是 mongodb
 - mysql step: operation="sql", query={"sql": "SELECT ..."}
-- mongodb step: operation ∈ {find, aggregate, count_documents}, 用 pipeline/query
+- mongodb step: operation ∈ {find, aggregate}, 用 pipeline/query (计数走 pipeline 末尾 $count stage)
 
 核心约束:
 - 跨库/跨引擎 → multi_step, 一步一库
@@ -62,14 +62,14 @@ Goal: 产出一个合法 Plan — 每步绑定一个 (db_type, database, collect
 
 <step_shape>
 按 step 的 db_type 选查询形态:
-- db_type="mongodb": operation ∈ {aggregate, find, count_documents}; 用 "pipeline" (aggregate) 或 "query" (find/count). 末尾加 $limit.
+- db_type="mongodb": operation ∈ {aggregate, find}; 用 "pipeline" (aggregate, 计数用末尾 $count stage) 或 "query" (find). 末尾加 $limit.
 - db_type="mysql": operation="sql"; 用 "query": {"sql": "SELECT ... LIMIT n"}. 只允许 SELECT.
 - db_type="oracle": operation="sql"; 用 "query": {"sql": "SELECT ..."}.
   使用 Oracle SQL 方言. 只允许 SELECT.
   Oracle 不支持 MySQL 的 LIMIT 语法. 如需行数限制,
   用 FETCH FIRST n ROWS ONLY 或 WHERE ROWNUM <= n.
-  执行层会自动包装行数保护, 不强制要求 SQL 内写 ROWNUM;
-  若 LLM 写了则执行层会在 render/count 路径剥离并覆盖.
+  在 SQL 内写真实意图行数 (FETCH FIRST n ROWS ONLY 或 WHERE ROWNUM <= n);
+  执行层尊重你写的行数 (≤ 硬顶保留, 超过压到硬顶, 忘写注入默认), 不再剥离覆盖.
 每步在 "exports" 声明要传给后续步骤的字段名.
 </step_shape>
 
@@ -139,7 +139,7 @@ Goal: 产出一个合法 Plan — 每步绑定一个 (db_type, database, collect
       "database": "sales_svc",
       "collection": "ORDERS",
       "operation": "sql",
-      "query": {"sql": "SELECT ORDER_DATE, SUM(AMOUNT) AS total FROM ORDERS"},
+      "query": {"sql": "SELECT ORDER_DATE, SUM(AMOUNT) AS total FROM ORDERS FETCH FIRST 1000 ROWS ONLY"},
       "exports": ["ORDER_DATE", "total"]
     }
   ],
@@ -171,9 +171,9 @@ Goal: 产出一个合法 Plan — 每步绑定一个 (db_type, database, collect
 
 【规则】
 1. 跨 database 或跨 db_type 必须 multi_step (一步一库); 同 mongodb 库可 single_aggregate + $lookup
-2. 每步必须有行数保护: mongodb 末尾 $limit,
+2. 每步写真实意图行数保护: mongodb 末尾 $limit,
    mysql 的 SQL 带 LIMIT n,
-   oracle 的 SQL 带 FETCH FIRST n ROWS ONLY 或交执行层包装
+   oracle 的 SQL 带 FETCH FIRST n ROWS ONLY (执行层不再自动包装, 写你真正要的行数)
 3. 变量引用 "{{step<N>.<varName>}}" 的 varName 必须在 step N 的 exports 中
 4. 前一步结果传给下一步: mongodb 用 $group+$push 或 $project 导出字段;
    mysql 用 SELECT 列名导出, 都在 exports 声明
@@ -194,7 +194,7 @@ Goal: 产出一个合法 Plan — 每步绑定一个 (db_type, database, collect
 # ══════════════════════════════════════════════════════════════════════════════
 
 _VALID_OPS_BY_DBTYPE: dict[str, set[str]] = {
-    "mongodb": {"find", "aggregate", "count_documents"},
+    "mongodb": {"find", "aggregate"},   # count_documents 删: 计数走 pipeline 末尾 $count stage
     "mysql": {"sql"},
     "oracle": {"sql"},
 }

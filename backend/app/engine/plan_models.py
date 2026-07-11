@@ -38,7 +38,7 @@ class PlanStep:
     step_idx: int                                          # 1-based
     database: str
     collection: str                                        # MongoDB: 集合名; MySQL: 表名
-    operation: str                                         # find/aggregate/count_documents/sql
+    operation: str                                         # mongodb: find/aggregate; mysql/oracle: sql
     pipeline: list = field(default_factory=list)           # aggregate 用
     query: dict = field(default_factory=dict)              # find 用 / sql 用 {"sql": "..."}
     projection: dict = field(default_factory=dict)

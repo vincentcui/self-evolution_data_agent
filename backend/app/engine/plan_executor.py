@@ -23,7 +23,6 @@ from typing import Any
 from langfuse import observe
 
 from app.config import settings
-from app.engine.drivers.base import ExecuteMode
 from app.engine.plan_models import GENERIC_RESTRICTION_HINT, QueryPlan
 from app.tracing import get_client as _lf_client
 
@@ -404,15 +403,9 @@ class PlanExecutionResult:
 
 async def _execute_sql_step(
     step, slug: str, ns_id: int, prev_vars: dict[int, dict[str, Any]],
-    *, mode: ExecuteMode = "single",
+    *, is_final: bool = False,
 ) -> tuple[list[dict], bool, int]:
-    """SQL 型 step 执行 (MySQL / Oracle 共用): 通过 driver 层执行 SQL.
-
-    返回 (rows, truncated, total_row_count). 末步 mode='render' 时疑似截断补 count.
-    step.query 应为 {"sql": "SELECT ..."} 形态.
-    render 补 count 路径通过 driver.strip_outer_row_limit() 剥离行数保护,
-    不直接引用 MySQLDriver 或 OracleDriver 具体类.
-    """
+    """SQL 型 step 执行. 返回 (rows, truncated, total). is_final 末步疑似截断补 count."""
     from app.db.metadata import async_session
     from app.engine.drivers import get_driver
     from app.engine.tools._resolve_ds import resolve_ds
@@ -450,23 +443,23 @@ async def _execute_sql_step(
     except VariableResolutionError as e:
         raise PlanExecutionError(step.step_idx, e) from e
 
-    result = await driver.execute_query(ds, step.collection, resolved_query, mode=mode)
+    result = await driver.execute_query(ds, step.collection, resolved_query)
     rows = list(result.get("rows", []))
     truncated = bool(result.get("truncated"))
     total = len(rows)
-    if mode == "render" and truncated:
-        # 疑似截断: 剥离最外层行保护后补 count, 拿精确总数 (不被 planner 末步保护封顶).
-        # 通过 SqlDataSourceDriver 协议方法调用, 不引用具体 driver 类.
-        count_sql = driver.strip_outer_row_limit(resolved_query["sql"])  # type: ignore[attr-defined]
+    if is_final and truncated:
+        # 末步疑似截断: 剥离外层行保护后包 COUNT 拿精确总数 (不被 planner 末步保护封顶).
+        count_base = driver.strip_outer_row_limit(resolved_query["sql"])  # type: ignore[attr-defined]
+        count_sql = driver.count_wrap(count_base)  # type: ignore[attr-defined]
         try:
             cres = await driver.execute_query(
-                ds, step.collection, {**resolved_query, "sql": count_sql}, mode="count",
+                ds, step.collection, {**resolved_query, "sql": count_sql},
             )
             crows = cres.get("rows") or []
             first = crows[0] if crows and isinstance(crows[0], dict) else {}
             total = int(first.get("cnt", first.get("count", 0)) or 0)
-            truncated = total > settings.render_row_limit
-        except Exception:  # noqa: BLE001 — count 失败保守降级: 仍如实告知截断, 总数缺省
+            truncated = total > settings.hard_ceiling
+        except Exception:  # noqa: BLE001 — count 失败保守降级
             total = 0
             truncated = True
     return rows, truncated, total
@@ -474,11 +467,11 @@ async def _execute_sql_step(
 
 async def _execute_mongo_step(
     step, slug: str, ns_id: int, prev_vars: dict[int, dict[str, Any]],
-    *, mode: ExecuteMode = "single",
+    *, is_final: bool = False,
 ) -> tuple[list[dict], bool, int]:
     """MongoDB step 执行: 通过 MongoDriver 执行.
 
-    返回 (rows, truncated, total_row_count). 末步 mode='render' 时疑似截断补 count.
+    返回 (rows, truncated, total_row_count). is_final 末步疑似截断补 $count 拿精确总数.
     将 PlanStep 的 operation/pipeline/query/projection/sort 转为
     MongoDriver.execute_query() 期望的 query dict 格式.
     """
@@ -521,33 +514,33 @@ async def _execute_mongo_step(
                 sort_dict = resolved_sort
             pipeline.append({"$sort": sort_dict})
         query_payload = {"pipeline": pipeline} if pipeline else {"filter": resolved_query}
-    elif step.operation == "count_documents":
-        query_payload = {"filter": resolved_query}
     else:
         raise PlanExecutionError(
             step.step_idx,
             RuntimeError(f"不支持的 MongoDB operation: {step.operation}"),
         )
 
-    mode_for_data = "count" if step.operation == "count_documents" else mode
-    result = await driver.execute_query(ds, step.collection, query_payload, mode=mode_for_data)
+    result = await driver.execute_query(ds, step.collection, query_payload)
     rows = list(result.get("rows", []))
     truncated = bool(result.get("truncated"))
     total = len(rows)
-    if mode == "render" and mode_for_data == "render" and truncated:
-        # 疑似截断: 对【executor 侧剥离尾部 $limit/$skip/$sample 的同一查询】补 count.
-        # driver count 模式按既有不变量刻意不剥离 $limit, 故剥离责任必须在 executor.
+    if is_final and truncated:
+        # 末步疑似截断: 剥尾 $limit/$skip/$sample 后追加 $count 拿精确总数.
         count_payload = dict(query_payload)
         pl = count_payload.get("pipeline")
         if isinstance(pl, list):
-            count_payload["pipeline"] = _strip_tail_row_stages(pl)
+            count_payload["pipeline"] = _strip_tail_row_stages(pl) + [{"$count": "count"}]
+        else:
+            # filter 形态 → 转 $match + $count pipeline
+            count_payload = {"pipeline": [{"$match": count_payload.get("filter", {})}]}
+            count_payload["pipeline"].append({"$count": "count"})
         try:
-            cres = await driver.execute_query(ds, step.collection, count_payload, mode="count")
+            cres = await driver.execute_query(ds, step.collection, count_payload)
             crows = cres.get("rows") or []
             first = crows[0] if crows and isinstance(crows[0], dict) else {}
             total = int(first.get("count", first.get("cnt", 0)) or 0)
-            truncated = total > settings.render_row_limit
-        except Exception:  # noqa: BLE001 — count 失败保守降级: 仍如实告知截断
+            truncated = total > settings.hard_ceiling
+        except Exception:  # noqa: BLE001
             total = 0
             truncated = True
     return rows, truncated, total
@@ -598,7 +591,7 @@ async def execute_plan(
     result = PlanExecutionResult()
     prev_vars: dict[int, dict[str, Any]] = {}
     lf = _lf_client()
-    # 末步 = 渲染源, 走 mode="render" 用 IS_RENDER_ROW_LIMIT; 中间脚手架步仍 single.
+    # 末步 = 渲染源 (is_final), 补 count; 中间步非 final.
     _last_idx = max((s.step_idx for s in plan.steps), default=0)
     _step_truncated: dict[int, bool] = {}
     _step_total: dict[int, int] = {}
@@ -661,14 +654,15 @@ async def execute_plan(
         try:
             from app.engine.db_types import DOCUMENT_DB_TYPES, SQL_DB_TYPES as _SQL_TYPES
             from app.engine.drivers._exceptions import UnsupportedDataSourceTypeError
-            step_mode: ExecuteMode = "render" if step.step_idx == _last_idx else "single"
+            # 末步 = 渲染源 (is_final); 中间步非 final. mode 已删.
+            is_final = step.step_idx == _last_idx
             if step.db_type in _SQL_TYPES:
                 docs, _trunc, _total = await _execute_sql_step(
-                    step, slug, ns_id, prev_vars, mode=step_mode,
+                    step, slug, ns_id, prev_vars, is_final=is_final,
                 )
             elif step.db_type in DOCUMENT_DB_TYPES:
                 docs, _trunc, _total = await _execute_mongo_step(
-                    step, slug, ns_id, prev_vars, mode=step_mode,
+                    step, slug, ns_id, prev_vars, is_final=is_final,
                 )
             else:
                 raise UnsupportedDataSourceTypeError(

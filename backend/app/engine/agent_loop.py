@@ -360,11 +360,6 @@ async def run_agent_loop(
                     cat = classify_tool(tc.name)
                 except KeyError:
                     cat = "exploratory"
-                # C1: execute_query 按 mode 动态分桶 — probe/count 是探数据形态/规模,
-                # 不产最终结果, 归 exploratory; single/batched 产最终结果, 归 decisive.
-                if tc.name == "execute_query":
-                    mode = (tc.input or {}).get("mode", "single")
-                    cat = "exploratory" if mode in ("probe", "count") else "decisive"
                 if cat == "exploratory":
                     next_explore += 1
                 elif cat == "decisive":
@@ -1034,7 +1029,7 @@ def _stringify(value: object) -> str:
 #  回喂 LLM 的 tool 结果字符预算 (上下文溢出护栏)
 # ════════════════════════════════════════════
 # 单一收口点: 所有 tool (mongo/mysql/plan/schema/knowledge/未来引擎) 的结果都经
-# 此处回喂 LLM. 行数上限 (query_row_limit) 只约束 row count, 不约束 payload 体积 ——
+# 此处回喂 LLM. 行数上限 (default_limit) 只约束 row count, 不约束 payload 体积 ——
 # 如 $group 把 8406 条文本收进单行数组, row_count=1 却 >1M tokens, 直接撑爆上下文.
 # 此护栏在回喂前按字符预算 dict-aware 收缩, 绝不修改入参 output (tool_trace 保持完整).
 

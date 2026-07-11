@@ -187,7 +187,7 @@ async def execute_plan_tool(
     }
     if out["truncated"]:
         out["suggestion"] = (
-            f"结果共 {out['total_row_count']} 行, 超渲染上限 {settings.render_row_limit} 行已截断; "
+            f"结果共 {out['total_row_count']} 行, 超渲染上限 {settings.hard_ceiling} 行已截断; "
             "若用于图表请改用更粗聚合粒度 (如按日→按月) 或缩小范围后重试, 不要分多次查询拼接."
         )
     record_span_io(

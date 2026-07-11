@@ -23,32 +23,10 @@ from typing import Any
 from langfuse import observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.engine.drivers import get_driver
 from app.engine.drivers._exceptions import DriverError
 from app.engine.tools._db_profile_projector import _project_schema_caps
 from app.engine.tools._resolve_ds import resolve_ds
-from app.knowledge.prompt_loader import load_prompt
-
-_FORCED_PLAN_GUIDANCE = load_prompt("forced_plan_guidance")
-
-
-def _maybe_force_plan(result: dict, *, mode: str) -> dict:
-    """single 模式结果撞行上限(truncated)时, 转 status=error 引导走 plan.
-
-    probe/count/batched 不拦 (本就是小样本/计数/分批). 未截断原样透传 (零回归).
-    """
-    if mode != "single" or not result.get("truncated"):
-        return result
-    estimated = result.get("row_count", 0)
-    guidance = _FORCED_PLAN_GUIDANCE.render(
-        estimated=estimated, row_limit=settings.query_row_limit,
-    )
-    return {
-        "error": "result_truncated_use_plan",
-        "message": guidance.split("\n", 1)[0],
-        "suggestion": guidance,
-    }
 
 log = logging.getLogger(__name__)
 
@@ -253,17 +231,14 @@ async def execute_query(
     database: str,
     target: str,
     query: dict,
-    mode: str = "single",
-    batch_size: int = 1000,  # noqa: hardcode
 ) -> dict:
-    """执行查询, 按 mode 控制粒度 (single/probe/count/batched)."""
+    """执行查询. 行数控制由 LLM 在 query 内表达 (LIMIT/FETCH/$limit), 要总数写计数查询."""
     ds = await resolve_ds(db, namespace_id, db_type, database)
     if ds is None:
         return _ds_not_found_error(namespace_id, db_type, database)
-
     try:
         driver = get_driver(db_type)
-        result = await driver.execute_query(ds, target, query, mode=mode, batch_size=batch_size)  # type: ignore[arg-type]
-        return _maybe_force_plan(dict(result), mode=mode)
+        result = await driver.execute_query(ds, target, query)
+        return dict(result)
     except DriverError as e:
         return _error_from_driver(e)

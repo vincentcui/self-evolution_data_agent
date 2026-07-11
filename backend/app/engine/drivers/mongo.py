@@ -17,7 +17,6 @@ from app.engine.drivers._exceptions import (
 )
 from app.engine.drivers.base import (
     CostEstimate,
-    ExecuteMode,
     ExecuteResult,
     FieldDef,
     ProbeResult,
@@ -143,8 +142,8 @@ _TAIL_ROW_STAGES = ("$limit", "$skip", "$sample")
 def _strip_tail_row_stages(pipeline: list[dict]) -> list[dict]:
     """剥离 pipeline 尾部连续的行截断 stage ($limit/$skip/$sample).
 
-    render mode + render-count 共用: planner 末步带 $limit 保护中间步, 渲染源/计数
-    必须先剥离它再注入 render_row_limit / $count, 否则结果被 planner LIMIT 封顶.
+    plan_executor 末步补 count 共用: planner 末步带 $limit 保护中间步, 计数前
+    必须先剥离它再追加 $count, 否则结果被 planner LIMIT 封顶.
     仅剥尾部连续行 stage, 不动 pipeline 中间的 stage.
     """
     out = list(pipeline)
@@ -335,6 +334,32 @@ class MongoDriver:
             raw_explain=explain_result,
         )
 
+    # ── 2-number cap 辅助 ────────────────────────────────
+    @staticmethod
+    def _is_count_pipeline(pipeline: list) -> bool:
+        """pipeline 末尾是 {$count: ...} → 计数查询 (LLM 自写, 驱动不再追加 $count)."""
+        return bool(pipeline) and isinstance(pipeline[-1], dict) and "$count" in pipeline[-1]
+
+    def _apply_mongo_limit(self, pipeline: list) -> tuple[list, int]:
+        """$limit 三态 (对齐 SQL _apply_cap): 无→追加 default; >ceiling→替换; ≤→保留.
+
+        不剥 $skip/$sample (LLM 意图). 末尾 $limit 检测, 不动中间 $limit.
+        """
+        p = list(pipeline)
+        limit_idx = None
+        for i in range(len(p) - 1, -1, -1):
+            if isinstance(p[i], dict) and "$limit" in p[i]:
+                limit_idx = i
+                break
+        if limit_idx is None:
+            p.append({"$limit": settings.default_limit})
+            return p, settings.default_limit
+        val = p[limit_idx]["$limit"]
+        if val > settings.hard_ceiling:
+            p[limit_idx] = {"$limit": settings.hard_ceiling}
+            return p, settings.hard_ceiling
+        return p, val
+
     # ── execute_query ────────────────────────────────────
 
     async def execute_query(
@@ -342,10 +367,8 @@ class MongoDriver:
         ds: DataSource,
         target: str,
         query: dict,
-        mode: ExecuteMode = "single",
-        batch_size: int = 1000,  # noqa: hardcode
     ) -> ExecuteResult:
-        log.info("[mongo_driver] execute_query ds=%d target=%s mode=%s", ds.id, target, mode)
+        log.info("[mongo_driver] execute_query ds=%d target=%s", ds.id, target)
 
         # payload 校验
         if "sql" in query:
@@ -368,70 +391,33 @@ class MongoDriver:
 
         t0 = time.perf_counter()
 
-        # count 模式
-        if mode == "count":
-            # 形态判定走共享 classifier (与数据读取 / estimate_cost 同源, 不再漂移)。
-            # 契约 (R5): count pipeline 必须仅含过滤型 stage ($match 等); 驱动追加
-            # {"$count":"count"}, 不剥离末尾 $limit/$skip/$sample —— 行截断 stage 会
-            # 让 $count 统计被截断的集合, 这是调用方错误, 应暴露而非静默掩盖。
-            shape, payload = _classify_query_shape(query)
-            if shape == "aggregate":
-                # 经 aggregate + $count 计数。标准 MongoDB & DocumentDB 兼容, 无 flavor
-                # 分支。0 匹配文档 → aggregate 产 0 行 → count 0。
-                count_pipeline = list(payload)  # 不修改调用方 pipeline
-                count_pipeline.append({"$count": "count"})
-                count = 0
-                async for doc in coll.aggregate(count_pipeline):
-                    count = int(doc.get("count", 0))
-                    break
-            else:
-                count = await coll.count_documents(payload)
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            log.info(
-                "[mongo_driver] execute_query done ds=%d count=%d elapsed_ms=%d",
-                ds.id,
-                count,
-                elapsed_ms,
-            )
-            return ExecuteResult(
-                rows=[{"count": count}],
-                row_count=1,
-                truncated=False,
-                elapsed_ms=elapsed_ms,
-            )
-
-        # 确定 limit
-        if mode == "probe":
-            limit = settings.probe_row_limit
-        elif mode == "batched":
-            limit = batch_size
-        elif mode == "render":
-            limit = settings.render_row_limit
-        else:
-            limit = settings.query_row_limit
-
+        # count 模式已删 — LLM 自写 $count (aggregate) 或系统补 count 自拼.
         shape, payload = _classify_query_shape(query)
         if shape == "aggregate":
-            # aggregate 模式 — 追加 $limit
-            pipeline = list(payload)  # 不修改原始
-            if mode == "render":
-                # 剥离 planner 末步 $limit/$skip/$sample → override 为 render_row_limit
-                pipeline = _strip_tail_row_stages(pipeline)
-            pipeline.append({"$limit": limit})
-            rows: list[dict] = []
-            async for doc in coll.aggregate(pipeline):
-                # 规整 BSON (DBRef → {$ref,$id_str} / 嵌套 ObjectId → str / ...)
-                rows.append(_normalize_doc(doc))
+            pipeline = list(payload)
+            if self._is_count_pipeline(pipeline):
+                # 计数: 执行原样 (返 1 行), 不加 cap, 不截断
+                rows: list[dict] = []
+                async for doc in coll.aggregate(pipeline):
+                    rows.append(_normalize_doc(doc))
+                applied = 1
+                truncated = False
+            else:
+                pipeline, applied = self._apply_mongo_limit(pipeline)
+                rows = []
+                async for doc in coll.aggregate(pipeline):
+                    rows.append(_normalize_doc(doc))
+                truncated = len(rows) >= applied
         else:
-            # find 模式
-            cursor = coll.find(payload).limit(limit)
+            # find 模式: filter 无 $limit 概念, 用 default_limit cap
+            applied = settings.default_limit
+            cursor = coll.find(payload).limit(applied)
             rows = []
             async for doc in cursor:
                 rows.append(_normalize_doc(doc))
+            truncated = len(rows) >= applied
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        truncated = len(rows) >= limit
-
         log.info(
             "[mongo_driver] execute_query done ds=%d rows=%d elapsed_ms=%d",
             ds.id,

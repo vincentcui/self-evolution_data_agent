@@ -43,14 +43,13 @@ class Settings(BaseSettings):
     git_reachability_timeout_secs: int = 10
     """Git 仓库可达性校验 (git ls-remote) 超时秒数. env: IS_GIT_REACHABILITY_TIMEOUT_SECS"""
 
-    # ── 查询 ──
-    query_row_limit: int = 1000  # noqa: hardcode
-    render_row_limit: int = 20000  # noqa: hardcode
-    """渲染源 (plan 末步 mode=render) 专用行上限; 与保护 LLM 上下文的 query_row_limit 分离.
-    字节数学: 20000 行聚合数据 ≈2MB, 请求级作用域 (tool_trace 随请求结束 GC)."""
-    probe_row_limit: int = 10  # noqa: hardcode
-    """probe mode (小样本探查) 行上限; 三驱动 (mysql/oracle/mongo) 共用单一真相源,
-    取代原各 driver probe 分支散落的 hardcode 10. 默认 10 保持原语义."""
+    # ── 2-number cap (execute_query 删 mode 后唯一行数保护) ──
+    # default_limit: LLM 忘写 LIMIT 时注入的保守值 (≈ 旧 query_row_limit).
+    # hard_ceiling:  绝对硬墙, 任何 LIMIT 不得超过 (≈ 旧 render_row_limit).
+    # 三态: 无 LIMIT→注入 default / LIMIT>ceiling→压到 ceiling / LIMIT≤ceiling→保留.
+    default_limit: int = 1000  # noqa: hardcode
+    hard_ceiling: int = 20000  # noqa: hardcode
+
     agent_tool_result_max_chars: int = 500_000  # noqa: hardcode
     """回喂 LLM 的单条 tool 结果字符预算; 超出则 dict-aware 收缩 + 截断 (tool_trace 不受影响)"""
 
@@ -494,13 +493,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_error_class_invariants(self) -> "Settings":
-        """启动期强制 Error_Class → Forced_Clarify 的两条数值不变量。
+        """启动期强制数值不变量校验。
 
-        1. threshold <= dead_loop_window (先手不变量): 否则 dead_loop 在更早迭代抢先终止,
+        1. default_limit <= hard_ceiling (2-number cap 不变量): 违反则三态逻辑崩溃。
+        2. threshold <= dead_loop_window (先手不变量): 否则 dead_loop 在更早迭代抢先终止,
            Forced_Clarify 永不触达。
-        2. threshold <= window_size (可达性不变量): ErrorClassWindow.count(c) 上界即 window_size,
+        3. threshold <= window_size (可达性不变量): ErrorClassWindow.count(c) 上界即 window_size,
            threshold 超过它则计数永远到不了阈值, Forced_Clarify 被静默禁用。
         """
+        if self.default_limit > self.hard_ceiling:
+            raise ValueError(
+                f"default_limit ({self.default_limit}) 必须 <= hard_ceiling ({self.hard_ceiling})"
+            )
         if self.agent_loop_error_class_threshold > self.agent_loop_dead_loop_window:
             raise ValueError(
                 "IS_AGENT_LOOP_ERROR_CLASS_THRESHOLD "

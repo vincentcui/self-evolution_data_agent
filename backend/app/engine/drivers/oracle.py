@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -35,10 +34,9 @@ from app.engine.drivers._exceptions import (
     QueryTimeoutError,
     UnsafeQueryError,
 )
+from app.engine.drivers._sql_base import BaseSqlDriver
 from app.engine.drivers.base import (
     CostEstimate,
-    ExecuteMode,
-    ExecuteResult,
     FieldDef,
     ProbeResult,
     SchemaSnapshot,
@@ -145,16 +143,6 @@ def _extract_outer_rownum_value(sql: str) -> int | None:
     return None
 
 
-def _apply_rownum_limit(sql: str, cap: int) -> str:
-    """Oracle 保护型三态: 无保护注入 cap; >cap 剥离+重包 cap; ≤cap 保留原值."""
-    val = _extract_outer_rownum_value(sql)
-    if val is None:
-        return _rownum_wrap(sql, cap)             # 无保护 → 注入
-    if val > cap:
-        return _rownum_wrap(sql, cap)             # >cap → strip+重包 (_rownum_wrap 内含 strip)
-    return _normalize_sql(sql)                    # ≤cap → 保留原值
-
-
 def _cursor_to_dicts(cursor: Any, rows: list) -> list[dict]:
     """将 oracledb tuple rows 转换为 list[dict]，列名小写。"""
     if not cursor.description:
@@ -183,7 +171,7 @@ def _oracle_fk_rows_to_relationships(
 
 # ── OracleDriver ──────────────────────────────────────────────
 
-class OracleDriver:
+class OracleDriver(BaseSqlDriver):
     """Oracle 驱动，自动适配 Thin / Thick mode。"""
 
     db_type: str = "oracle"
@@ -497,29 +485,9 @@ class OracleDriver:
 
     # ── execute_query ─────────────────────────────────────────
 
-    async def execute_query(
-        self,
-        ds: DataSource,
-        target: str,
-        query: dict,
-        mode: ExecuteMode = "single",
-        batch_size: int = 1000,  # noqa: hardcode
-    ) -> ExecuteResult:
-        """Thick/Thin 统一走 executor + sync pool, 消除双份实现。"""
-        log.info(
-            "[oracle_driver] execute_query ds=%s target=%s mode=%s thick=%s",
-            ds.id, target, mode, _is_thick(),
-        )
-        sql = query.get("sql")
-        if not sql:
-            raise PayloadShapeMismatchError(
-                "execute_query 需要 query.sql",
-                suggestion="payload 必须包含 'sql' key",
-            )
-        self._enforce_select_only(sql)
-        sql = self._wrap_by_mode(sql, mode, batch_size)
-
-        t0 = time.perf_counter()
+    async def _exec(self, ds, sql: str) -> list[dict]:
+        """oracledb 执行 (BaseSqlDriver 契约 — Thick/Thin 统一走 executor + sync pool)."""
+        log.info("[oracle_driver] _exec ds=%s thick=%s", ds.id, _is_thick())
         try:
             rows = await asyncio.wait_for(
                 self._run_in_executor(self._execute_query_sync, ds, sql),
@@ -530,22 +498,8 @@ class OracleDriver:
                 f"SQL 执行超时 ({settings.oracle_query_timeout_secs}s): {sql[:100]}",
                 suggestion="优化查询或增加 IS_ORACLE_QUERY_TIMEOUT_SECS",
             ) from exc
-
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        truncated = (
-            (mode == "single" and len(rows) >= settings.query_row_limit)
-            or (mode == "render" and len(rows) >= settings.render_row_limit)
-        )
-        log.info(
-            "[oracle_driver] execute_query done ds=%s rows=%d elapsed_ms=%d",
-            ds.id, len(rows), elapsed_ms,
-        )
-        return ExecuteResult(
-            rows=rows,
-            row_count=len(rows),
-            truncated=truncated,
-            elapsed_ms=elapsed_ms,
-        )
+        log.info("[oracle_driver] _exec done ds=%s rows=%d", ds.id, len(rows))
+        return rows
 
     def _execute_query_sync(self, ds: DataSource, sql: str) -> list[dict]:
         pool = self._get_sync_pool(ds)
@@ -756,13 +710,27 @@ class OracleDriver:
             await self.invalidate_pool(ds_id)
         self._executor.shutdown(wait=False)
 
-    # ── SqlDataSourceDriver 协议 ──────────────────────────────
+    # ── 方言钩子 (BaseSqlDriver 契约) + private helpers ──────
+    @staticmethod
+    def _normalize(sql: str) -> str:
+        return _normalize_sql(sql)
 
-    def strip_outer_row_limit(self, sql: str) -> str:
-        """剥离最外层行数保护，供 executor render/count 路径调用。"""
+    @staticmethod
+    def _has_outer_limit(sql: str) -> bool:
+        return _extract_outer_rownum_value(_normalize_sql(sql)) is not None
+
+    @staticmethod
+    def _outer_limit_value(sql: str) -> int | None:
+        return _extract_outer_rownum_value(_normalize_sql(sql))
+
+    @staticmethod
+    def _strip_outer_limit_impl(sql: str) -> str:
         return _strip_outer_row_limit_impl(sql)
 
-    # ── private helpers ───────────────────────────────────────
+    @staticmethod
+    def _inject_limit(sql: str, n: int) -> str:
+        # _rownum_wrap 内含 strip, 但 _apply_cap 已剥离 → 内层 strip no-op, 安全复用.
+        return _rownum_wrap(sql, n)
 
     @staticmethod
     def _enforce_select_only(sql: str) -> None:
@@ -780,21 +748,3 @@ class OracleDriver:
             )
         if _DML_DDL_KEYWORDS.search(normalized):
             raise UnsafeQueryError("SQL 包含禁止的 DML/DDL 关键字", suggestion="仅允许 SELECT 查询")
-
-    @staticmethod
-    def _wrap_by_mode(sql: str, mode: ExecuteMode, batch_size: int) -> str:
-        """两类契约, 与 MySQL 对称 (Oracle 用 ROWNUM 包装):
-
-        保护型 (single/batched/probe): _apply_rownum_limit 三态.
-        权威型 (render/count): strip 后注入权威语义.
-        """
-        base = _strip_outer_row_limit_impl(sql)
-        if mode == "count":
-            return f"SELECT COUNT(*) AS cnt FROM ({base})"
-        if mode == "render":
-            return _rownum_wrap(base, settings.render_row_limit)
-        if mode == "probe":
-            return _apply_rownum_limit(sql, settings.probe_row_limit)
-        if mode == "batched":
-            return _apply_rownum_limit(sql, batch_size)
-        return _apply_rownum_limit(sql, settings.query_row_limit)  # single

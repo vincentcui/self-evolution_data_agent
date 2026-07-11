@@ -146,7 +146,6 @@ def compact_tool_call(idx: int, call: dict) -> dict:
             ]
 
     elif name == "execute_query":
-        rec["mode"] = inp.get("mode")
         q = inp.get("query") or {}
         if isinstance(q, dict):
             pipeline = q.get("pipeline")
@@ -272,7 +271,7 @@ def compact_tool_call(idx: int, call: dict) -> dict:
         rec["entry_type"] = inp.get("entry_type")
 
     # error 可能在顶层 call.error 或 output.error/output.message (依工具/路径:
-    # 如 execute_query 截断返 {error: result_truncated_use_plan, message:..., result_ref},
+    # 如 execute_query 截断返 {error: ..., message:..., result_ref}
     # 无 rows/count — 仅当 output.error 存在才取, 避免误捕成功 output 的 message).
     if not error and isinstance(out, dict) and out.get("error"):
         error = out.get("message") or out.get("error")
