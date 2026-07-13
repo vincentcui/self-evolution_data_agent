@@ -65,13 +65,29 @@ class TestRenderLine:
         assert opt["series"][0]["data"] == [10, 11]
         assert opt["xAxis"]["data"] == ["2024-01-01", "2024-01-02"]
 
-    def test_line_x_sorted_ascending(self):
+    def test_line_x_preserves_upstream_row_order(self):
+        # 渲染器不越权排序: 保留 SQL/planner 的 ORDER BY 行序, 原样透传.
         rows = [
             {"day": "2024-01-02", "amount": 11},
             {"day": "2024-01-01", "amount": 10},
         ]
         ct, opt = render_chart(rows, {"chart_type": "line", "x": "day", "value": "amount"})
-        assert opt["xAxis"]["data"] == ["2024-01-01", "2024-01-02"]
+        assert opt["xAxis"]["data"] == ["2024-01-02", "2024-01-01"]
+        # x 与 value 对齐: 行序不乱, 值跟着行走.
+        assert opt["series"][0]["data"] == [11, 10]
+
+    def test_bar_humanized_month_not_lexicographic(self):
+        # 回归: humanize 后中文月份轴禁字典序 ("10月"<"1月" 会把 10/11/12 顶到最前).
+        # 上游按 month 码 1..12 有序; humanize 映射 → 中文标签; x 轴须保持 1→12.
+        rows = [{"month": str(m), "spend": m * 100} for m in range(1, 13)]
+        code_label_map = {"month": {str(m): f"{m}月" for m in range(1, 13)}}
+        ct, opt = render_chart(rows, {
+            "chart_type": "bar", "x": "month", "value": "spend",
+            "code_label_map": code_label_map,
+        })
+        assert ct == "bar"
+        assert opt["xAxis"]["data"] == [f"{m}月" for m in range(1, 13)]
+        assert opt["series"][0]["data"] == [m * 100 for m in range(1, 13)]
 
     def test_missing_value_in_pivot_cell_is_none(self):
         # north 缺 2024-01-02 → 该格补 None (ECharts 断线)

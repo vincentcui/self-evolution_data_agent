@@ -14,25 +14,6 @@ import pandas as pd
 #  内部工具函数
 # ════════════════════════════════════════════
 
-_VALUE_KEYWORDS = ("count", "sum", "total", "amount", "数量", "cnt")
-
-
-def _pick_value_column(num_cols: list[str]) -> str:
-    """多数值列时启发式选度量列: 列名含 count/sum/total 等优先, 否则取第一个."""
-    for col in num_cols:
-        lower = col.lower()
-        if any(kw in lower for kw in _VALUE_KEYWORDS):
-            return col
-    return num_cols[0]
-
-
-def _is_time_column(series: pd.Series) -> bool:
-    if pd.api.types.is_datetime64_any_dtype(series):
-        return True
-    name = series.name.lower() if isinstance(series.name, str) else ""
-    return any(kw in name for kw in ("date", "time", "day", "month", "year", "日期", "时间"))
-
-
 def _to_serializable(val):
     """单值 JSON 化: pd.isna / inf / -inf → None, Decimal → float, 其余数值原样.
 
@@ -130,7 +111,7 @@ def _apply_code_label_map(rows: list[dict], code_label_map: dict) -> list[dict]:
 def _render_axis_chart(
     df: pd.DataFrame, x: str, value: str, series_by: str, chart_type: str
 ) -> tuple[str, dict]:
-    """line / bar 共享渲染. x 去重升序; series_by 非空时按其唯一值 pivot 出多条.
+    """line / bar 共享渲染. x 按上游行序去重; series_by 非空时按其唯一值 pivot 出多条.
 
     x 列只字符串化一次 (向量化 ``df[x].astype(str)``), x_data 与 lookup key 同源复用 ——
     标量 ``str(r[x])`` 与向量化 ``astype(str)`` 对 datetime64 列产出不同字符串 (date-only
@@ -140,7 +121,10 @@ def _render_axis_chart(
         return "table", {}
     # 单一字符串化源: x_data 与 lookup key 共用, 杜绝双路径漂移.
     xs = df[x].astype(str)
-    x_data = sorted(xs.unique().tolist())
+    # 保留上游行序 (SQL/planner 的 ORDER BY 意图) — pandas unique 保序去重.
+    # 禁用 sorted(): 对 humanize 后的分类轴 ("1月".."12月") 或数字字符串 ("2"/"10")
+    # 做字典序会摧毁时间序/排名意图 ("10月"<"1月", "10"<"2").
+    x_data = xs.unique().tolist()
     if series_by:
         sb = df[series_by].astype(str)
         series = []

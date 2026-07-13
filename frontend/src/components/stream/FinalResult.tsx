@@ -38,6 +38,7 @@ interface Props {
 }
 
 import { normalizeRows } from "@/utils/normalizeRows";
+import { copyText } from "@/utils/clipboard";
 
 const EXPIRY_OPTIONS = [
   { label: "1天", ms: 86400000 },
@@ -105,8 +106,8 @@ export const FinalResult: React.FC<Props> = ({
       const token = resp.token || resp.share_token;
       const url = `${window.location.origin}/share/${token}`;
       setShareUrl(url);
-      await navigator.clipboard.writeText(url);
-      message.success("分享链接已复制到剪贴板");
+      const ok = await copyText(url);
+      message.success(ok ? "分享链接已复制到剪贴板" : "分享链接已生成，请手动复制");
     } catch (e: any) {
       const msg = e?.response?.data?.detail || "分享失败";
       message.error(msg);
@@ -116,19 +117,16 @@ export const FinalResult: React.FC<Props> = ({
   };
 
   const handleCopyAnswer = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      message.success("回答已复制");
-    } catch {
-      message.error("复制失败，请重试");
-    }
+    const ok = await copyText(content);
+    if (ok) message.success("回答已复制");
+    else message.error("复制失败，请重试");
   };
 
-  const handleCopyShareUrl = () => {
-    if (shareUrl) {
-      navigator.clipboard.writeText(shareUrl);
-      message.success("已复制到剪贴板");
-    }
+  const handleCopyShareUrl = async () => {
+    if (!shareUrl) return;
+    const ok = await copyText(shareUrl);
+    if (ok) message.success("已复制到剪贴板");
+    else message.error("复制失败，请重试");
   };
 
   const handleFeedback = async (rating: "like" | "dislike") => {
