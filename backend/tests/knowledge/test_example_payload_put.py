@@ -33,7 +33,7 @@ async def test_put_example_5field_payload_200(
         created_at=datetime.utcnow(),
         payload=json.dumps({
             "question_pattern": "查询订单",
-            "collections": ["shop.orders"],
+            "collections": [{"database": "shop", "collection": "orders"}],
             "join_keys": [],
             "final_query_plan": None,
             "result_summary": "",
@@ -64,7 +64,7 @@ async def test_put_example_5field_payload_200(
                     "reason": "test contract",
                     "payload": {
                         "question_pattern": "查询订单各状态数量",
-                        "collections": ["shop.orders"],
+                        "collections": [{"database": "shop", "collection": "orders"}],
                         "join_keys": [],
                         "final_query_plan": {
                             "steps": [{
@@ -135,7 +135,7 @@ async def test_put_example_old_payload_compat_200(
                         "question": "查看各订单状态",
                         "target_collection": "orders",
                         "query_json": {"pipeline": []},
-                        "collections": ["shop.orders"],
+                        "collections": [{"database": "shop", "collection": "orders"}],
                         "join_keys": [],
                         "final_query_plan": None,
                         "result_summary": "",

@@ -1,9 +1,9 @@
 import { Button, Empty, Input, message, Modal, Popconfirm, Select, Space, Table, Tag } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { enumApi } from "@/api";
+import { enumApi, getDatabases, getCollections, type NamespaceDatabase } from "@/api";
 import type {
   SchemaCanonicalField,
   SchemaCanonicalObject,
@@ -278,6 +278,7 @@ function SubFieldsTree(props: {
 export function AllFieldsTab(props: {
   sco: Pick<SchemaCanonicalObject, "id" | "fields" | "user_locked" | "description" | "purpose_detail" | "relationships" | "target">;
   namespaceId: number;
+  allScos?: Pick<SchemaCanonicalObject, "target" | "database" | "fields">[];
   onOpenEvidence: (fieldName: string) => void;
   onOpenHistory: (fieldName: string) => void;
   onLockField: (fieldName: string, locked: boolean) => void;
@@ -294,6 +295,30 @@ export function AllFieldsTab(props: {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [editRelationships, setEditRelationships] = useState<SchemaCanonicalRelationship[]>([]);
   const [relationshipsModified, setRelationshipsModified] = useState(false);
+
+  // ── Relationship cascading dropdown state ──
+  const [databases, setDatabases] = useState<NamespaceDatabase[]>([]);
+  const [collectionsByDb, setCollectionsByDb] = useState<Record<string, string[]>>({});
+
+  // scoIndex: "database/target" → SCO (for to_field dropdown)
+  const scoIndex = useMemo(() => {
+    const m: Record<string, Pick<SchemaCanonicalObject, "target" | "database" | "fields">> = {};
+    for (const s of props.allScos ?? []) {
+      m[`${s.database}/${s.target}`] = s;
+      // Also index by target alone for same-db lookups
+      if (!m[s.target]) m[s.target] = s;
+    }
+    return m;
+  }, [props.allScos]);
+
+  // Load databases on mount
+  useEffect(() => {
+    let alive = true;
+    getDatabases(props.namespaceId)
+      .then((r) => { if (alive) setDatabases(r.databases); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [props.namespaceId]);
 
   // Enum binding drawer state
   const [bindDrawer, setBindDrawer] = useState<{ field: SchemaCanonicalField } | null>(null);
@@ -383,7 +408,7 @@ export function AllFieldsTab(props: {
     const newRel: SchemaCanonicalRelationship = {
       from_target: props.sco.target || "",
       from_field: "",
-      to_db_type: "mysql",
+      to_db_type: "",
       to_database: "",
       to_target: "",
       to_field: "",
@@ -738,40 +763,65 @@ export function AllFieldsTab(props: {
             <div>
               {editRelationships.map((rel, i) => (
                 <Space key={i} wrap className="rel-edit-row" style={{ marginBottom: 4, padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
+                  {/* from_target: locked to current SCO (read-only) */}
                   <Input
                     size="small" style={{ width: 120 }}
                     value={rel.from_target}
-                    onChange={(e) => handleRelChange(i, { from_target: e.target.value })}
+                    disabled
                     placeholder="源表"
                   />
-                  <Input
-                    size="small" style={{ width: 100 }}
-                    value={rel.from_field}
-                    onChange={(e) => handleRelChange(i, { from_field: e.target.value })}
+                  {/* from_field: dropdown from current SCO fields[] */}
+                  <Select
+                    size="small" style={{ width: 100 }} showSearch
+                    value={rel.from_field || undefined}
+                    onChange={(v) => handleRelChange(i, { from_field: v })}
+                    options={(props.sco.fields ?? []).map((f) => ({ label: f.name, value: f.name }))}
                     placeholder="源字段"
                   />
+                  {/* to_database: dropdown with showSearch */}
+                  <Select
+                    size="small" style={{ width: 100 }} showSearch
+                    value={rel.to_database || undefined}
+                    onChange={(db) => {
+                      const dt = databases.find((d) => d.database === db)?.db_type ?? "";
+                      handleRelChange(i, { to_database: db, to_db_type: dt, to_target: "", to_field: "" });
+                      // Lazy-load collections for this database
+                      if (!collectionsByDb[db]) {
+                        getCollections(props.namespaceId, db)
+                          .then((r) => setCollectionsByDb((p) => ({ ...p, [db]: r.collections })))
+                          .catch(() => {});
+                      }
+                    }}
+                    options={databases.map((d) => ({ label: d.database, value: d.database }))}
+                    placeholder="目标库"
+                  />
+                  {/* to_db_type: read-only, auto-filled from to_database selection */}
                   <Input
                     size="small" style={{ width: 80 }}
                     value={rel.to_db_type}
-                    onChange={(e) => handleRelChange(i, { to_db_type: e.target.value })}
-                    placeholder="类型库"
+                    disabled
+                    placeholder="类型"
                   />
-                  <Input
-                    size="small" style={{ width: 100 }}
-                    value={rel.to_database}
-                    onChange={(e) => handleRelChange(i, { to_database: e.target.value })}
-                    placeholder="目标库"
-                  />
-                  <Input
-                    size="small" style={{ width: 120 }}
-                    value={rel.to_target}
-                    onChange={(e) => handleRelChange(i, { to_target: e.target.value })}
+                  {/* to_target: cascading from to_database */}
+                  <Select
+                    size="small" style={{ width: 120 }} showSearch
+                    value={rel.to_target || undefined}
+                    disabled={!rel.to_database}
+                    onChange={(v) => handleRelChange(i, { to_target: v, to_field: "" })}
+                    options={(collectionsByDb[rel.to_database] ?? []).map((c) => ({ label: c, value: c }))}
                     placeholder="目标表"
                   />
-                  <Input
-                    size="small" style={{ width: 100 }}
-                    value={rel.to_field}
-                    onChange={(e) => handleRelChange(i, { to_field: e.target.value })}
+                  {/* to_field: dropdown from to_target SCO fields[] */}
+                  <Select
+                    size="small" style={{ width: 100 }} showSearch
+                    value={rel.to_field || undefined}
+                    disabled={!rel.to_target}
+                    onChange={(v) => handleRelChange(i, { to_field: v })}
+                    options={(
+                      scoIndex[`${rel.to_database}/${rel.to_target}`]?.fields
+                        ?? scoIndex[rel.to_target]?.fields
+                        ?? []
+                    ).map((f) => ({ label: f.name, value: f.name }))}
                     placeholder="目标字段"
                   />
                   <Select

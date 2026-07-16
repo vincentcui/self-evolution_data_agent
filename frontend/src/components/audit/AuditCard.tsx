@@ -8,7 +8,7 @@ import { Checkbox, Modal, message } from "antd";
 import {
   approveEntry, deleteKnowledgeWithMode, rejectEntry, restoreEntry,
 } from "@/api";
-import type { KnowledgeEntry } from "@/types";
+import type { CollectionRef, KnowledgeEntry } from "@/types";
 import EditCanonicalForm from "./EditCanonicalForm";
 import AuditLogTimeline from "./AuditLogTimeline";
 import { HypotheticalQueriesPanel, type HypotheticalQueriesPanelRef } from "./HypotheticalQueriesPanel";
@@ -121,12 +121,15 @@ export default function AuditCard({
   const p = (entry.payload ?? {}) as Record<string, unknown>;
 
   // 路径节点（route_hint 的 collection_path 或 example 的 collections）
+  // spec §2.2/§6: 只认 CollectionRef[] 新形态, 不写任何 list[str] 兼容分支
   const pathNodes: string[] = (() => {
     if (entry.entry_type === "route_hint") {
-      return (p.collection_path as string[]) ?? [];
+      const refs = (p.collection_path as CollectionRef[]) ?? [];
+      return refs.map((r) => `${r.database}.${r.collection}`);
     }
     if (entry.entry_type === "example") {
-      return (p.collections as string[]) ?? [];
+      const refs = (p.collections as CollectionRef[]) ?? [];
+      return refs.map((r) => `${r.database}.${r.collection}`);
     }
     return [];
   })();

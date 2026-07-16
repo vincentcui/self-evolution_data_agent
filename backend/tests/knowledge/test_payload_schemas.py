@@ -4,6 +4,7 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.schemas.knowledge_payload import (
+    CollectionRef,
     ExamplePayload,
     RouteHintPayload,
     RulePayload,
@@ -53,12 +54,14 @@ def test_example_payload_minimal():
 def test_example_payload_full():
     p = ExamplePayload(
         question_pattern="查看各订单状态的数量分布",
-        collections=["shop.orders"],
+        collections=[{"database": "shop", "collection": "orders"}],
         join_keys=[],
         final_query_plan={"steps": [{"db_type": "mongodb", "collection": "orders", "query": {"pipeline": []}}]},
         result_summary="在 orders 上按 status 字段 $group + $sum:1",
     )
     assert len(p.collections) == 1
+    assert p.collections[0].database == "shop"
+    assert p.collections[0].collection == "orders"
 
 
 def test_example_result_summary_at_limit_ok():
@@ -96,10 +99,16 @@ def test_rule_payload():
 
 def test_route_hint_payload():
     p = RouteHintPayload(
-        collection_path=["categories", "products", "skus"],
+        collection_path=[
+            {"database": "shop", "collection": "categories"},
+            {"database": "shop", "collection": "products"},
+            {"database": "shop", "collection": "skus"},
+        ],
         navigation_note="category._id ↔ product.categoryId, 类别在 product.categories[] 数组需 $unwind",
     )
-    assert p.collection_path == ["categories", "products", "skus"]
+    assert len(p.collection_path) == 3
+    assert p.collection_path[0].collection == "categories"
+    assert p.collection_path[2].collection == "skus"
     assert p.navigation_note.startswith("category._id")
 
 

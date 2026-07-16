@@ -131,3 +131,54 @@ async def test_supersede_sets_flag_and_deletes_vector(db, admin_client):
 async def test_supersede_404(db, admin_client):
     r = await admin_client.post("/api/knowledge/99999/supersede")
     assert r.status_code == 404
+
+
+# ════════════════════════════════════════════
+#  L2 HTTP 契约门 (design §7.3): PUT 旧裸名形态 → 422
+# ════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_put_route_hint_legacy_string_form_422(db, admin_client):
+    """L2 HTTP 层负路径: PUT /knowledge/{id} 旧 collection_path=["shop.orders"]
+    (string[] 裸名) 应被 parse_payload 拒绝, 返回 422.
+
+    design §7.3 L2: httpx 真打 PUT, 断言旧裸名形态 422, 新 CollectionRef 形态通过.
+    """
+    ns = Namespace(name="t-l2-422", slug="t-l2-422")
+    db.add(ns); await db.commit(); await db.refresh(ns)
+    entry = await _mk_entry(db, ns.id)
+    # 改为 route_hint 类型
+    entry.entry_type = "route_hint"
+    entry.payload = '{"collection_path": [], "navigation_note": "n"}'
+    await db.commit(); await db.refresh(entry)
+
+    # 旧形态: string[] 裸名 → 422
+    r = await admin_client.put(
+        f"/api/knowledge/{entry.id}",
+        json={"payload": {"collection_path": ["shop.orders"], "navigation_note": "n"}, "reason": "test"},
+    )
+    assert r.status_code == 422
+    assert "payload_validation_failed" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_put_route_hint_collection_ref_form_passes(db, admin_client):
+    """L2 HTTP 层正路径: PUT /knowledge/{id} 新 CollectionRef 形态通过."""
+    ns = Namespace(name="t-l2-pass", slug="t-l2-pass")
+    db.add(ns); await db.commit(); await db.refresh(ns)
+    entry = await _mk_entry(db, ns.id)
+    entry.entry_type = "route_hint"
+    entry.payload = '{"collection_path": [], "navigation_note": "n"}'
+    await db.commit(); await db.refresh(entry)
+
+    with patch("app.api.knowledge.upsert_knowledge_entry"), \
+         patch("app.api.knowledge.delete_knowledge_entry"):
+        r = await admin_client.put(
+            f"/api/knowledge/{entry.id}",
+            json={"payload": {
+                "collection_path": [{"database": "shop", "collection": "orders"}],
+                "navigation_note": "n",
+            }, "reason": "test"},
+        )
+    assert r.status_code == 200

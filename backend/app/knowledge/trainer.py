@@ -636,6 +636,7 @@ async def run_training_pipeline_with_progress(
             business_rules=code_result.business_rules_candidates,
             business_examples=business_examples,
             repo_name=name,
+            coll_to_db=coll_to_db,  # Task 1b: 裸集合名→CollectionRef 反查
         )
         await ke_db.commit()
 

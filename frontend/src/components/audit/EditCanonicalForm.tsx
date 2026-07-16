@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Collapse, Form, Input, Select, Space, Tag, message } from "antd";
 import { editKnowledge, previewConflict } from "@/api";
-import type { KnowledgeEntry } from "@/types";
+import type { CollectionRef, KnowledgeEntry } from "@/types";
 import ConflictDiff from "./ConflictDiff";
 import TerminologyEditPanel, { type TerminologyPayload } from "./TerminologyEditPanel";
 import ExampleEditPanel, { type ExamplePayload } from "./ExampleEditPanel";
@@ -66,13 +66,13 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
   const [payload, setPayload] = useState<TerminologyPayload>(initialPayload);
   const [termError, setTermError] = useState<string | undefined>(undefined);
 
-  // ── example 状态: 对齐后端 ExamplePayload schema ──
+  // ── example 状态: 只认 CollectionRef[] 新形态 (spec §2.2/§6: 不写任何双形态兼容分支) ──
   const [examplePayload, setExamplePayload] = useState<ExamplePayload>(() => {
     const p = (entry.payload ?? {}) as Record<string, unknown>;
     return {
       ...p,
       question_pattern:  p.question_pattern as string ?? p.question as string ?? entry.content ?? "",
-      collections:       (p.collections as string[]) ?? [],
+      collections:       (p.collections as CollectionRef[]) ?? [],
       join_keys:         (p.join_keys as Record<string, unknown>[]) ?? [],
       final_query_plan:  (p.final_query_plan as Record<string, unknown>) ?? (p.query_json as Record<string, unknown>) ?? null,
       result_summary:    (p.result_summary as string) ?? "",
@@ -83,11 +83,11 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     } as ExamplePayload;
   });
 
-  // ── route_hint 状态: 路径/导航说明来自 payload, 均可编辑 ──
+  // ── route_hint 状态: 只认 CollectionRef[] 新形态 (spec §2.2/§6: 不写任何双形态兼容分支) ──
   const [routeHintPayload, setRouteHintPayload] = useState<RouteHintPayload>(() => {
     const p = (entry.payload || {}) as Record<string, unknown>;
     return {
-      collection_path: Array.isArray(p.collection_path) ? (p.collection_path as string[]) : [],
+      collection_path:  (p.collection_path as CollectionRef[]) ?? [],
       navigation_note: typeof p.navigation_note === "string" ? p.navigation_note : "",
     };
   });
@@ -163,8 +163,8 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     <Form layout="vertical">
       {isExample ? (
         <ExampleEditPanel value={examplePayload} onChange={setExamplePayload} />
-      ) : isRouteHint ? (
-        <RouteHintEditPanel value={routeHintPayload} onChange={setRouteHintPayload} />
+      ) : isRouteHint && entry.namespace_id != null ? (
+        <RouteHintEditPanel nsId={entry.namespace_id} value={routeHintPayload} onChange={setRouteHintPayload} />
       ) : isTerminology && entry.namespace_id != null ? (
         <TerminologyEditPanel
           nsId={entry.namespace_id}

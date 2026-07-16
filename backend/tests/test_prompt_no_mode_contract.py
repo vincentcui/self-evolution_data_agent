@@ -111,3 +111,31 @@ def test_planner_prompt_no_render_strip_override():
     from app.engine.plan_generator import _PLANNER_SYSTEM
     assert "剥离并覆盖" not in _PLANNER_SYSTEM
     assert "自动包装" not in _PLANNER_SYSTEM or "不再自动包装" in _PLANNER_SYSTEM
+
+
+def test_lookup_contract_collection_fields_structured():
+    """Task 2: lookup_knowledge prompt contract — database.collection format."""
+    lookup = _spec("lookup_knowledge")
+    desc = lookup["description"]
+    # example: collections uses database.collection format
+    assert '"database.collection" 集合全名' in desc
+    # route_hint: collection_path uses database.collection format
+    assert '"database.collection" 有序集合路径' in desc
+    # rule: has applies_to_collections field
+    assert 'applies_to_collections:["database.collection"' in desc
+    # Old format removed
+    assert "collections:[表名/集合名]" not in desc
+    assert "collection_path:[有序集合路径]" not in desc
+
+
+def test_save_contract_collection_fields_structured():
+    """Task 2: save_knowledge prompt contract — {database, collection} format."""
+    save = _spec("save_knowledge")
+    desc = save["description"]
+    # example: collections uses {database, collection} format
+    assert "collections:[{database, collection}]" in desc
+    # rule: applies_to_collections uses {database, collection} format
+    assert "applies_to_collections?:[{database, collection}]" in desc
+    # Old format removed
+    assert "collections:[表名/集合名]" not in desc
+    assert "applies_to_collections?:[]" not in desc

@@ -11,6 +11,8 @@ import type { KnowledgeEntry } from "@/types";
 vi.mock("@/api", () => ({
   editKnowledge: vi.fn().mockResolvedValue({}),
   previewConflict: vi.fn().mockResolvedValue({ conflicts: [] }),
+  getDatabases: vi.fn().mockResolvedValue({ databases: [] }),
+  getCollections: vi.fn().mockResolvedValue({ collections: [], db_type: null }),
 }));
 
 const entry: KnowledgeEntry = {
@@ -139,7 +141,7 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
     entry_type: "route_hint",
     content: "某商品的订单数量",
     payload: {
-      collection_path: ["shop.orders", "shop.products"],
+      collection_path: [{ database: "shop", collection: "orders" }, { database: "shop", collection: "products" }],
       navigation_note: "orders.items[].sku ↔ products.sku",
     },
   } as unknown as KnowledgeEntry;

@@ -9,8 +9,15 @@ import CreateKnowledgeForm from "@/components/audit/CreateKnowledgeForm";
 
 vi.mock("@/api", () => ({
   createKnowledge: vi.fn(),
-  getDatabases: vi.fn().mockResolvedValue({ databases: [] }),
-  getCollections: vi.fn().mockResolvedValue({ collections: [], db_type: null }),
+  getDatabases: vi.fn().mockResolvedValue({
+    databases: [
+      { database: "shop_db", db_type: "mongodb" },
+    ],
+  }),
+  getCollections: vi.fn().mockResolvedValue({
+    database: "shop_db", db_type: "mongodb",
+    collections: ["orders", "products"],
+  }),
 }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -85,6 +92,63 @@ describe("CreateKnowledgeForm", () => {
     expect(onSubmitted).toHaveBeenCalled();
   });
 
+  it("route_hint 切换 → 渲染 DatabaseCollectionPicker, 提交 payload.collection_path 为 CollectionRef[]", async () => {
+    const { createKnowledge } = await import("@/api");
+    (createKnowledge as any).mockResolvedValue({ entry: { id: 100 }, conflicts: [], overflow: false });
+    const onSubmitted = vi.fn();
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={onSubmitted}
+      />,
+    );
+
+    // 切到 route_hint 类型
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const rhOption = await screen.findByText(/路由偏好.*多表关联路径/);
+    await user.click(rhOption);
+
+    // DatabaseCollectionPicker 渲染: 数据库 Select + 集合 Select
+    const dbInputs = screen.getAllByLabelText("数据库");
+    expect(dbInputs.length).toBeGreaterThan(0);
+
+    // 用 aria-label 定位 database Select 的 selector
+    const dbSelectEl = dbInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(dbSelectEl).toBeTruthy();
+    fireEvent.mouseDown(dbSelectEl!);
+    const dbOption = await screen.findByText(/shop_db \(mongodb\)/);
+    await user.click(dbOption);
+
+    // 等待 collections 加载
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 选择 collection
+    const collInputs = screen.getAllByLabelText(/集合|表/);
+    const collSelectEl = collInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(collSelectEl).toBeTruthy();
+    fireEvent.mouseDown(collSelectEl!);
+    const collOption = await screen.findByText("orders");
+    await user.click(collOption);
+
+    // 填写问题模式
+    await user.type(screen.getByLabelText("问题模式"), "查 X 关联的 Y");
+
+    // 提交
+    await user.click(screen.getByRole("button", { name: /确定|OK/ }));
+
+    await waitFor(() => expect(createKnowledge).toHaveBeenCalledTimes(1));
+    const body = (createKnowledge as any).mock.calls[0][0];
+    expect(body.entry_type).toBe("route_hint");
+    expect(body.content).toBe("查 X 关联的 Y");
+    expect(body.payload.collection_path).toEqual([{ database: "shop_db", collection: "orders" }]);
+    expect(onSubmitted).toHaveBeenCalled();
+  });
+
   it("example 非法 JSON → 阻止提交并展示 jsonError", async () => {
     const { createKnowledge } = await import("@/api");
     const user = userEvent.setup();
@@ -104,7 +168,7 @@ describe("CreateKnowledgeForm", () => {
     await user.click(opt);
 
     await user.type(await screen.findByLabelText("问题模式"), "Q1");
-    await user.type(screen.getByLabelText("涉及集合"), "shop.orders");
+    // 涉及集合现在使用 DatabaseCollectionPicker (可选, 此测试不填)
     // userEvent.type 把 `{` 解析为修饰符, 需 `{{` 转义.
     await user.type(screen.getByLabelText("查询计划"), "{{ this is not json");
 
@@ -113,4 +177,109 @@ describe("CreateKnowledgeForm", () => {
     expect(createKnowledge).not.toHaveBeenCalled();
     expect(await screen.findByText(/格式不合法/)).toBeInTheDocument();
   });
+
+
+  it("rule 提交 → payload.applies_to_collections 为 CollectionRef[]", async () => {
+    const { createKnowledge } = await import("@/api");
+    (createKnowledge as any).mockResolvedValue({ entry: { id: 101 }, conflicts: [], overflow: false });
+    const onSubmitted = vi.fn();
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={onSubmitted}
+      />,
+    );
+
+    // 切到 rule 类型
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const ruleOption = await screen.findByText(/查询规则.*查询约束/);
+    await user.click(ruleOption);
+
+    // 填写 rule_text
+    await user.type(await screen.findByLabelText("规则文本"), "查订单按下单时间倒序");
+
+    // 通过 DatabaseCollectionPicker 选择适用集合
+    const dbInputs = screen.getAllByLabelText("数据库");
+    const dbSelectEl = dbInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(dbSelectEl).toBeTruthy();
+    fireEvent.mouseDown(dbSelectEl!);
+    const dbOption = await screen.findByText(/shop_db \(mongodb\)/);
+    await user.click(dbOption);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const collInputs = screen.getAllByLabelText(/集合|表/);
+    const collSelectEl = collInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(collSelectEl).toBeTruthy();
+    fireEvent.mouseDown(collSelectEl!);
+    const collOption = await screen.findByText("orders");
+    await user.click(collOption);
+
+    // 提交
+    await user.click(screen.getByRole("button", { name: /确定|OK/ }));
+
+    await waitFor(() => expect(createKnowledge).toHaveBeenCalledTimes(1));
+    const body = (createKnowledge as any).mock.calls[0][0];
+    expect(body.entry_type).toBe("rule");
+    expect(body.payload.applies_to_collections).toEqual([{ database: "shop_db", collection: "orders" }]);
+    expect(onSubmitted).toHaveBeenCalled();
+  });
+
+  it("example 提交 → payload.collections 为 CollectionRef[] (不再 split 文本)", async () => {
+    const { createKnowledge } = await import("@/api");
+    (createKnowledge as any).mockResolvedValue({ entry: { id: 102 }, conflicts: [], overflow: false });
+    const onSubmitted = vi.fn();
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={onSubmitted}
+      />,
+    );
+
+    // 切到 example 类型
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const exOption = await screen.findByText(/示例查询.*成功查询案例/);
+    await user.click(exOption);
+
+    // 填写 question_pattern
+    await user.type(await screen.findByLabelText("问题模式"), "按状态分组统计订单数");
+
+    // 通过 DatabaseCollectionPicker 选择集合
+    const dbInputs = screen.getAllByLabelText("数据库");
+    const dbSelectEl = dbInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(dbSelectEl).toBeTruthy();
+    fireEvent.mouseDown(dbSelectEl!);
+    const dbOption = await screen.findByText(/shop_db \(mongodb\)/);
+    await user.click(dbOption);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const collInputs = screen.getAllByLabelText(/集合|表/);
+    const collSelectEl = collInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(collSelectEl).toBeTruthy();
+    fireEvent.mouseDown(collSelectEl!);
+    const collOption = await screen.findByText("orders");
+    await user.click(collOption);
+
+    // 提交
+    await user.click(screen.getByRole("button", { name: /确定|OK/ }));
+
+    await waitFor(() => expect(createKnowledge).toHaveBeenCalledTimes(1));
+    const body = (createKnowledge as any).mock.calls[0][0];
+    expect(body.entry_type).toBe("example");
+    expect(body.payload.collections).toEqual([{ database: "shop_db", collection: "orders" }]);
+    expect(body.content).toBe("按状态分组统计订单数");
+    expect(onSubmitted).toHaveBeenCalled();
+  });
+
 });

@@ -31,7 +31,7 @@ async def test_save_knowledge_route_hint_rejected_manual_only(db_session):
         entry_type="route_hint",
         content="路由提示",
         payload={
-            "collection_path": ["c_orders"],
+            "collection_path": [{"database": "shop", "collection": "c_orders"}],
             "navigation_note": "x",
             "extra_random_field": "haha",
         },
@@ -45,7 +45,7 @@ def test_route_hint_payload_extra_field_rejected_by_schema():
     """RouteHintPayload extra='forbid' 仍拦多塞字段 (人工 create 走 PUT 编辑时校验)."""
     with pytest.raises(ValidationError):
         parse_payload("route_hint", {
-            "collection_path": ["c_orders"],
+            "collection_path": [{"database": "shop", "collection": "c_orders"}],
             "navigation_note": "x",
             "extra_random_field": "haha",
         })
@@ -87,7 +87,10 @@ async def test_save_knowledge_example_extra_field_accepted(db_session):
         content="订单关联用户",
         payload={
             "question_pattern": "订单关联用户",
-            "collections": ["shop.orders", "shop.users"],
+            "collections": [
+                {"database": "shop", "collection": "orders"},
+                {"database": "shop", "collection": "users"},
+            ],
             "join_keys": [{"from": "orders.user_id", "to": "users.id"}],
             "final_query_plan": {"steps": [{"db_type": "mysql", "operation": "sql"}]},
             "bogus_field": "should_be_accepted_now",
@@ -102,7 +105,10 @@ async def test_save_knowledge_example_new_format():
     """ExamplePayload 五字段 schema 验证."""
     payload = ExamplePayload(
         question_pattern="订单关联用户",
-        collections=["shop.orders", "shop.users"],
+        collections=[
+            {"database": "shop", "collection": "orders"},
+            {"database": "shop", "collection": "users"},
+        ],
         join_keys=[{"from": "orders.user_id", "to": "users.id"}],
         final_query_plan={
             "steps": [{"db_type": "mysql", "database": "shop", "collection": "orders",

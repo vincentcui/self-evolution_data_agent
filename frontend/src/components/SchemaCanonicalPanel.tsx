@@ -243,6 +243,7 @@ export const SchemaCanonicalPanel: React.FC<Props> = ({ namespaceId }) => {
               key={selectedSco.id}
               sco={selectedSco}
               namespaceId={namespaceId}
+              allScos={scos}
               onOpenEvidence={handleOpenEvidence}
               onOpenHistory={handleOpenHistory}
               onLockField={handleLockField}

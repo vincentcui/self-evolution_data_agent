@@ -277,14 +277,19 @@ async def refine_traces_endpoint(
             qplan = normalize_query_plan(tool_trace)
             if qplan is not None:
                 p.payload["final_query_plan"] = qplan
-            if collections:
-                p.payload["collections"] = collections
+            # Task 1b: 无条件覆写 collections 为合规 list[CollectionRef] — 不信任 trace_refiner
+            # LLM 产的 dotted 串 (旧契约), 空 trace 时旧形态会存活致 422. code 归一真相.
+            p.payload["collections"] = (
+                [{"database": database, "collection": c} for c in collections]
+                if database and collections else [])
             joins = extract_join_keys(qplan)
             if joins:
                 p.payload["join_keys"] = joins
         elif p.entry_type == "rule":
-            if collections:
-                p.payload.setdefault("applies_to_collections", collections)
+            # Task 1b: 同 example — 无条件覆写, 不用 setdefault (防 LLM 旧 dotted 串存活)
+            p.payload["applies_to_collections"] = (
+                [{"database": database, "collection": c} for c in collections]
+                if database and collections else [])
 
     # ── 收口到 save_knowledge 接口: 抓手 D 演化 + terminology 唯一键闸门 + ──
     #     instance_alias schema 校验 — 同一治理路径与 agent 自学等价 (spec     ──

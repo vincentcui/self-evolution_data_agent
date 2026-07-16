@@ -7,36 +7,32 @@
 
 import React from "react";
 import { Form, Input } from "antd";
+import type { CollectionRef } from "@/types";
+import { DatabaseCollectionPicker } from "./DatabaseCollectionPicker";
 
 export interface RouteHintPayload {
-  collection_path: string[];
+  collection_path: CollectionRef[];
   navigation_note: string;
 }
 
 interface Props {
+  nsId: number;
   value: RouteHintPayload;
   onChange: (next: RouteHintPayload) => void;
 }
 
-export default function RouteHintEditPanel({ value, onChange }: Props) {
+export default function RouteHintEditPanel({ nsId, value, onChange }: Props) {
   const update = (patch: Partial<RouteHintPayload>) =>
     onChange({ ...value, ...patch });
 
   return (
     <>
-      <Form.Item label="集合路径 (有序, 逗号分隔)">
-        <Input
-          aria-label="集合路径"
-          value={value.collection_path.join(",")}
-          onChange={(e) =>
-            update({
-              collection_path: e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-          placeholder="shop.orders, shop.products"
+      <Form.Item label="集合路径 (有序)">
+        <DatabaseCollectionPicker
+          nsId={nsId}
+          mode="multiple"
+          value={value.collection_path}
+          onChange={(cp) => update({ collection_path: cp })}
         />
       </Form.Item>
 

@@ -21,6 +21,8 @@ vi.mock("@/api", () => ({
     listEnumDictionaries: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     listPendingEnumBindings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   },
+  getDatabases: vi.fn().mockResolvedValue({ databases: [] }),
+  getCollections: vi.fn().mockResolvedValue({ collections: [], db_type: null }),
 }));
 
 beforeEach(() => vi.clearAllMocks());

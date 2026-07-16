@@ -17,12 +17,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.metadata import async_session
 from app.knowledge.canonical_candidate import write_canonical_candidate
 from app.models import KnowledgeEntry
-from app.schemas.knowledge_payload import RulePayload
+from app.schemas.knowledge_payload import CollectionRef, RulePayload
 
 if TYPE_CHECKING:
     from app.knowledge.explain_gate import ExplainGate
 
 log = logging.getLogger(__name__)
+
+
+# ════════════════════════════════════════════════════════════════
+#  _refs_from_names — 裸集合名 → CollectionRef (Task 1b)
+# ════════════════════════════════════════════════════════════════
+
+
+def _refs_from_names(
+    names: list[str] | None,
+    coll_to_db: dict[str, tuple[str, str]] | None,
+) -> list[CollectionRef]:
+    """裸集合名 → CollectionRef, 用 coll_to_db 反查 database; 补不到跳过.
+
+    与 terminology 补全同源 (trainer._build_coll_to_db). 同名跨 db 歧义
+    由 coll_to_db 的 setdefault 先到先得决定, 接受.
+    """
+    refs: list[CollectionRef] = []
+    for n in names or []:
+        hit = coll_to_db.get(n) if coll_to_db else None
+        if hit:
+            refs.append(CollectionRef(database=hit[1], collection=n))
+    return refs
 
 
 # ════════════════════════════════════════════════════════════════
@@ -443,6 +465,7 @@ async def extract_and_write_knowledge(
     business_examples: list[dict] | None = None,
     explain_gate: "ExplainGate | None" = None,
     repo_name: str = "",
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
 ) -> int:
     """Write KnowledgeEntry(status=proposed) for knowledge-channel extractions.
 
@@ -451,13 +474,17 @@ async def extract_and_write_knowledge(
     - terminology (from business_terms, via upsert_terminology_with_validation)
     - example (from business_examples — sql2nl 查询模式, D3 恢复; agentic 管线核心产出)
 
+    Args:
+        coll_to_db: collection→database 反查表 (trainer._build_coll_to_db 构建).
+            用于将裸集合名补全为 CollectionRef{database, collection}. Task 1b.
+
     Returns total KE entries created.
     """
     total = 0
 
     # ── business_rules → rule KE ──
     for rule in business_rules:
-        created = await _write_rule_ke(db, namespace_id, repo_id, rule)
+        created = await _write_rule_ke(db, namespace_id, repo_id, rule, coll_to_db)
         if created:
             total += 1
 
@@ -469,7 +496,7 @@ async def extract_and_write_knowledge(
 
     # ── business_examples → example KE (sql2nl, D3 恢复) ──
     total += await _write_business_examples(
-        db, namespace_id, repo_id, business_examples or [],
+        db, namespace_id, repo_id, business_examples or [], coll_to_db,
     )
 
     log.info(
@@ -482,11 +509,14 @@ async def extract_and_write_knowledge(
 
 async def _write_business_examples(
     db: AsyncSession, namespace_id: int, repo_id: int, business_examples: list[dict],
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
 ) -> int:
     """sql2nl → example KE (D3 恢复). Stage A 下线, 本 spec 经 agentic 管线恢复为核心产出.
 
     每个 example dict (agent emit_knowledge entry_type=example 的 payload) →
     KnowledgeEntry(entry_type='example', status='proposed', source='code_extract').
+
+    Task 1b: collections 升级为 CollectionRef, sql_pattern/tables legacy compat 字段移除.
     """
     total = 0
     for ex in business_examples:
@@ -503,13 +533,10 @@ async def _write_business_examples(
             content=f"查询模式: {sql[:120]}",
             payload=json.dumps({
                 "question_pattern": ex.get("question_pattern") or ex.get("question", ""),
-                "collections": [f"{ex.get('database', '')}.{t}" if ex.get('database') else t
-                                for t in ex.get("tables", [])],
+                "collections": [r.model_dump() for r in _refs_from_names(ex.get("tables", []), coll_to_db)],
                 "join_keys": ex.get("join_keys", []),
                 "final_query_plan": ex.get("final_query_plan"),
                 "result_summary": ex.get("result_summary", ""),
-                "sql_pattern": sql,                          # legacy compat
-                "tables": ex.get("tables", []),              # legacy compat
                 "source_mapper": ex.get("mapper_namespace", ""),
                 "extraction_source": "mybatis_extract",
             }, ensure_ascii=False),
@@ -521,16 +548,21 @@ async def _write_business_examples(
 
 
 async def _write_rule_ke(
-    db: AsyncSession, namespace_id: int, repo_id: int, rule: dict
+    db: AsyncSession, namespace_id: int, repo_id: int, rule: dict,
+    coll_to_db: dict[str, tuple[str, str]] | None = None,
 ) -> bool:
-    """Create a KnowledgeEntry for a business rule extraction."""
+    """Create a KnowledgeEntry for a business rule extraction.
+
+    Task 1b: applies_to_collections 升级为 list[CollectionRef], 用 coll_to_db 反查补全.
+    """
     rule_text = rule.get("rule_text") or ""
     if not rule_text:
         return False
 
     payload = RulePayload(
         rule_text=rule_text,
-        applies_to_collections=rule.get("applies_to_collections") or [],
+        applies_to_collections=_refs_from_names(
+            rule.get("applies_to_collections"), coll_to_db),
         rule_kind=rule.get("rule_kind") or "business_constraint",
         evidence=rule.get("evidence"),
     )

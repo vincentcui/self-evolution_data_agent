@@ -10,7 +10,7 @@ import ExampleEditPanel, { type ExamplePayload } from "@/components/audit/Exampl
 const basePayload: ExamplePayload = {
   question_pattern: "统计品牌名称包含A级的品牌数量",
   question: "统计品牌名称包含A级的品牌数量",       // legacy fallback
-  collections: ["shop_db.products"],
+  collections: [{ database: "shop_db", collection: "products" }],
   join_keys: [],
   final_query_plan: {
     steps: [{

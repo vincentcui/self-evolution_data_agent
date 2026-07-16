@@ -158,10 +158,18 @@ async def rewrite_hq_for_entry(
 
 
 def _extract_route_path(entry: KnowledgeEntry) -> list[str] | None:
-    """从 entry.payload 提取 collection_path (用于 route_hint covered_path 校验)."""
+    """从 entry.payload 提取 collection_path 的裸 collection 名序列.
+
+    用于 route_hint covered_path 校验: HQ 路径拓扑无关 database, 取裸名
+    与 LLM 产的 covered_path 可比. 召回投影(给 LLM)的 db.coll 全串在
+    recall_payload_compactor 另走, 二者职责分离.
+    """
     try:
         payload = json.loads(entry.payload or "{}")
     except json.JSONDecodeError:
         return None
     cp = payload.get("collection_path")
-    return cp if isinstance(cp, list) else None
+    if not isinstance(cp, list) or not cp:
+        return None
+    out = [r["collection"] for r in cp if isinstance(r, dict) and r.get("collection")]
+    return out or None

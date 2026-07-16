@@ -341,3 +341,13 @@ export interface GitTokenConfig {
   updated_at: string | null;
   created_by: number | null;
 }
+
+/* ════════════════════════════════════════════
+ *  DatabaseCollectionPicker — 跨库集合引用
+ * ════════════════════════════════════════════ */
+
+/** 数据库 + 集合的唯一引用, 用于跨库路径配置 */
+export interface CollectionRef {
+  database: string;
+  collection: string;
+}

@@ -11,8 +11,9 @@
 import React, { useEffect, useState } from "react";
 import { Form, Input, InputNumber, Modal, Select, message } from "antd";
 import * as api from "@/api";
-import type { KnowledgeEntryCreateResponse } from "@/types";
+import type { CollectionRef, KnowledgeEntryCreateResponse } from "@/types";
 import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
+import { DatabaseCollectionPicker } from "./DatabaseCollectionPicker";
 import TerminologyEditPanel, {
   type TerminologyPayload,
 } from "./TerminologyEditPanel";
@@ -60,20 +61,20 @@ interface Props {
 
 interface RulePayloadDraft {
   rule_text: string;
-  applies_to_collections: string[];
+  applies_to_collections: CollectionRef[];
   priority: number;
 }
 
 interface ExamplePayloadDraft {
   question_pattern: string;
-  collections_text: string;
+  collections: CollectionRef[];
   final_query_plan_text: string;
   result_summary: string;
 }
 
 interface RouteHintPayloadDraft {
   question_pattern: string;   // 提交为 content
-  collection_path: string[];
+  collection_path: CollectionRef[];
   navigation_note: string;
 }
 
@@ -93,7 +94,7 @@ export default function CreateKnowledgeForm({
     rule_text: "", applies_to_collections: [], priority: 0,
   });
   const [exPayload, setExPayload] = useState<ExamplePayloadDraft>({
-    question_pattern: "", collections_text: "",
+    question_pattern: "", collections: [],
     final_query_plan_text: "", result_summary: "",
   });
   const [rhPayload, setRhPayload] = useState<RouteHintPayloadDraft>({
@@ -111,7 +112,7 @@ export default function CreateKnowledgeForm({
     setTermPayload({});
     setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
     setRulePayload({ rule_text: "", applies_to_collections: [], priority: 0 });
-    setExPayload({ question_pattern: "", collections_text: "", final_query_plan_text: "", result_summary: "" });
+    setExPayload({ question_pattern: "", collections: [], final_query_plan_text: "", result_summary: "" });
     setRhPayload({ question_pattern: "", collection_path: [], navigation_note: "" });
     setJsonError("");
   }, [open]);
@@ -173,7 +174,11 @@ export default function CreateKnowledgeForm({
         entry_type: "rule",
         namespace_id, tier,
         content: rulePayload.rule_text,
-        payload: { ...rulePayload },
+        payload: {
+          rule_text: rulePayload.rule_text,
+          applies_to_collections: rulePayload.applies_to_collections,
+          priority: rulePayload.priority,
+        },
       };
     } else if (entryType === "example") {
       if (!exPayload.question_pattern) {
@@ -189,15 +194,13 @@ export default function CreateKnowledgeForm({
           return;
         }
       }
-      const collections = exPayload.collections_text
-        .split(/[,;，；\s→]+/).filter(Boolean);
       body = {
         entry_type: "example",
         namespace_id, tier,
         content: exPayload.question_pattern,
         payload: {
           question_pattern: exPayload.question_pattern,
-          collections,
+          collections: exPayload.collections,
           join_keys: [],
           final_query_plan: planJson,
           result_summary: exPayload.result_summary,
@@ -290,7 +293,7 @@ export default function CreateKnowledgeForm({
         )}
 
         {entryType === "rule" && (
-          <RuleFields value={rulePayload} onChange={setRulePayload} />
+          <RuleFields nsId={defaultNamespaceId!} value={rulePayload} onChange={setRulePayload} />
         )}
 
         {entryType === "instance_alias" && defaultNamespaceId !== undefined && (
@@ -310,18 +313,18 @@ export default function CreateKnowledgeForm({
                 placeholder="记录的全名, 供审核者识别"
               />
             </Form.Item>
-            <Form.Item label="目标数据库" required>
-              <Input
-                value={iaPayload.target_database}
-                onChange={(e) => setIaPayload({ ...iaPayload, target_database: e.target.value })}
-                placeholder="数据库名"
-              />
-            </Form.Item>
-            <Form.Item label="目标集合" required>
-              <Input
-                value={iaPayload.target_collection}
-                onChange={(e) => setIaPayload({ ...iaPayload, target_collection: e.target.value })}
-                placeholder="集合名"
+            <Form.Item label="目标库 / 目标集合" required>
+              <DatabaseCollectionPicker
+                nsId={defaultNamespaceId!}
+                mode="single"
+                value={iaPayload.target_database
+                  ? [{ database: iaPayload.target_database, collection: iaPayload.target_collection }]
+                  : []}
+                onChange={(refs) => setIaPayload({
+                  ...iaPayload,
+                  target_database: refs[0]?.database ?? "",
+                  target_collection: refs[0]?.collection ?? "",
+                })}
               />
             </Form.Item>
             <Form.Item label="记录 ID" required>
@@ -342,14 +345,14 @@ export default function CreateKnowledgeForm({
         )}
 
         {entryType === "example" && (
-          <ExampleFields
+          <ExampleFields nsId={defaultNamespaceId!}
             value={exPayload} onChange={setExPayload}
             jsonError={jsonError} clearJsonError={() => setJsonError("")}
           />
         )}
 
         {entryType === "route_hint" && (
-          <RouteHintFields value={rhPayload} onChange={setRhPayload} />
+          <RouteHintFields nsId={defaultNamespaceId!} value={rhPayload} onChange={setRhPayload} />
         )}
       </Form>
     </Modal>
@@ -357,8 +360,8 @@ export default function CreateKnowledgeForm({
 }
 
 function RuleFields({
-  value, onChange,
-}: { value: RulePayloadDraft; onChange: (v: RulePayloadDraft) => void }) {
+  nsId, value, onChange,
+}: { nsId: number; value: RulePayloadDraft; onChange: (v: RulePayloadDraft) => void }) {
   return (
     <>
       <Form.Item label="规则文本" required>
@@ -370,17 +373,12 @@ function RuleFields({
           placeholder="例: 查询订单时, 默认按下单时间倒序"
         />
       </Form.Item>
-      <Form.Item label="适用集合 (可选, 逗号分隔)">
-        <Select
-          aria-label="适用集合"
-          mode="tags"
+      <Form.Item label="适用集合 (可选)">
+        <DatabaseCollectionPicker
+          nsId={nsId}
+          mode="multiple"
           value={value.applies_to_collections}
-          onChange={(next: string[]) =>
-            onChange({ ...value, applies_to_collections: next })
-          }
-          tokenSeparators={[",", "，"]}
-          notFoundContent={null}
-          open={false}
+          onChange={(refs) => onChange({ ...value, applies_to_collections: refs })}
         />
       </Form.Item>
       <Form.Item label="优先级 (可选, 默认 0)">
@@ -396,8 +394,9 @@ function RuleFields({
 }
 
 function ExampleFields({
-  value, onChange, jsonError, clearJsonError,
+  nsId, value, onChange, jsonError, clearJsonError,
 }: {
+  nsId: number;
   value: ExamplePayloadDraft;
   onChange: (v: ExamplePayloadDraft) => void;
   jsonError: string;
@@ -414,12 +413,12 @@ function ExampleFields({
           placeholder="语义骨架, 例: 按某状态分组统计某时段内的订单数"
         />
       </Form.Item>
-      <Form.Item label="涉及集合 (逗号/空格分隔)">
-        <Input
-          aria-label="涉及集合"
-          value={value.collections_text}
-          onChange={(e) => onChange({ ...value, collections_text: e.target.value })}
-          placeholder="例: shop.orders shop.users"
+      <Form.Item label="涉及集合 (可选)">
+        <DatabaseCollectionPicker
+          nsId={nsId}
+          mode="multiple"
+          value={value.collections}
+          onChange={(refs) => onChange({ ...value, collections: refs })}
         />
       </Form.Item>
       <Form.Item
@@ -453,8 +452,8 @@ function ExampleFields({
 }
 
 function RouteHintFields({
-  value, onChange,
-}: { value: RouteHintPayloadDraft; onChange: (v: RouteHintPayloadDraft) => void }) {
+  nsId, value, onChange,
+}: { nsId: number; value: RouteHintPayloadDraft; onChange: (v: RouteHintPayloadDraft) => void }) {
   return (
     <>
       <Form.Item label="问题模式" required>
@@ -465,20 +464,12 @@ function RouteHintFields({
           placeholder="问题模式, 例: 查 X 关联的 Y"
         />
       </Form.Item>
-      <Form.Item label="集合路径 (有序, 逗号分隔)" required>
-        <Input
-          aria-label="集合路径"
-          value={value.collection_path.join(",")}
-          onChange={(e) =>
-            onChange({
-              ...value,
-              collection_path: e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-          placeholder="shop.orders, shop.products"
+      <Form.Item label="集合路径 (有序)" required>
+        <DatabaseCollectionPicker
+          nsId={nsId}
+          mode="multiple"
+          value={value.collection_path}
+          onChange={(cp) => onChange({ ...value, collection_path: cp })}
         />
       </Form.Item>
       <Form.Item label="导航说明 (关联字段 / 关联类型 / 嵌套位置 / 避坑)">

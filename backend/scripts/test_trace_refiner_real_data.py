@@ -80,21 +80,27 @@ def inject_mechanical_fields(
         qplan = normalize_query_plan(tool_trace)
         if qplan is not None:
             payload["final_query_plan"] = qplan
-        if collections:
-            payload["collections"] = collections
+        # Task 1b: emit CollectionRef dicts (match production agent_traces.py)
+        payload["collections"] = (
+            [{"database": database, "collection": c} for c in collections]
+            if database and collections else [])
         joins = extract_join_keys(qplan)
         if joins:
             payload["join_keys"] = joins
     elif entry_type == "route_hint":
-        if collections:
-            payload["collection_path"] = collections
+        # Task 1b: emit CollectionRef dicts
+        payload["collection_path"] = (
+            [{"database": database, "collection": c} for c in collections]
+            if database and collections else [])
         payload["cost_strategy"] = derive_cost_strategy(tool_trace)
         joins = extract_join_fields(extract_final_pipeline(tool_trace))
         if joins:
             payload["join_fields"] = joins
     elif entry_type == "rule":
-        if collections:
-            payload.setdefault("applies_to_collections", collections)
+        # Task 1b: emit CollectionRef dicts (match production — unconditional overwrite)
+        payload["applies_to_collections"] = (
+            [{"database": database, "collection": c} for c in collections]
+            if database and collections else [])
     return payload
 
 

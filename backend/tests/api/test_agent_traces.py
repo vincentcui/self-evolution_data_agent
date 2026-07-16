@@ -493,3 +493,97 @@ async def test_detail_trace_damaged_signal(db, admin_client):
     body = resp.json()
     assert body["trace_damaged"] is True
     assert body["tool_trace_compact"] == []
+
+
+@pytest.mark.asyncio
+async def test_refine_overwrites_collections_to_collection_ref(fn_session, fn_admin_client):
+    """§8.8 自学习存活门: refine 路径无条件覆写 example/rule 的集合字段为
+    list[CollectionRef] (Task 1b agent_traces.py:280-292). trace_refiner LLM
+    产的是旧 dotted 串, code 层必须归一为唯一真相, 否则 parse_payload 422.
+
+    本测试验证:
+    1. tool_trace 含 database context (fetch_schema db_type+database)
+    2. LLM mock 产旧形态 applies_to_collections=["orders"] (dotted string)
+    3. refine endpoint 覆写为 [{database, collection}] 并成功落库 (非 422)
+    """
+    from app.knowledge.trace_refiner import ProposedKE
+    from app.models.knowledge_entry import KnowledgeEntry
+    from app.models.namespace import Namespace
+
+    ns = Namespace(name="t-collref-overwrite", slug="t-collref-overwrite", description="")
+    fn_session.add(ns); await fn_session.flush()
+
+    # tool_trace 含 database context — extract_db_context 会抽到 ("mysql", "shop")
+    # extract_collections 会抽到 ["orders", "products"]
+    trace_json = {
+        "tool_trace": [
+            {"name": "fetch_schema",
+             "input": {"target": "orders", "db_type": "mysql", "database": "shop"},
+             "output": {"fields": [{"name": "oid"}]}},
+            {"name": "execute_query",
+             "input": {"target": "products", "db_type": "mysql", "database": "shop"},
+             "output": {"count": 5}},
+        ]
+    }
+    tr = AgentTrace(
+        trace_id="refine-collref-1",
+        namespace_id=ns.id,
+        user_query="订单关联商品",
+        status="completed",
+        trace_json=_json.dumps(trace_json, ensure_ascii=False),
+    )
+    fn_session.add(tr)
+    await fn_session.commit()
+
+    # LLM 产旧形态 (dotted strings) — code 层必须覆写为 CollectionRef
+    fake_results = [
+        ProposedKE(
+            entry_type="rule",
+            content="订单关联商品规则",
+            payload={
+                "rule_text": "orders join products",
+                "applies_to_collections": ["orders", "products"],  # LLM 旧 dotted 串
+            },
+            evidence={"trace_ids": ["refine-collref-1"], "reasoning": "trace"},
+        ),
+        ProposedKE(
+            entry_type="example",
+            content="查询订单关联商品",
+            payload={
+                "question_pattern": "订单关联商品",
+                "collections": ["orders"],  # LLM 旧 dotted 串
+            },
+            evidence={"trace_ids": ["refine-collref-1"], "reasoning": "trace"},
+        ),
+    ]
+
+    with patch("app.knowledge.trace_refiner.refine_traces", return_value=fake_results):
+        resp = await fn_admin_client.post(
+            "/api/agent-traces/refine",
+            json={"trace_ids": ["refine-collref-1"]},
+        )
+
+    assert resp.status_code == 200, f"refine 应成功, 实际: {resp.text[:500]}"
+    out = resp.json()
+    assert out["proposed_count"] == 2
+
+    # 验证落库 KE 的 payload 为 CollectionRef 形态 (非 422)
+    for ke_id in out["proposed_ke_ids"]:
+        ke = (await fn_session.execute(
+            select(KnowledgeEntry).where(KnowledgeEntry.id == ke_id)
+        )).scalar_one()
+        payload = _json.loads(ke.payload)
+        if ke.entry_type == "rule":
+            colls = payload["applies_to_collections"]
+            assert isinstance(colls, list) and len(colls) == 2
+            assert all(isinstance(c, dict) and "database" in c and "collection" in c for c in colls)
+            assert colls[0] == {"database": "shop", "collection": "orders"}
+            assert colls[1] == {"database": "shop", "collection": "products"}
+        elif ke.entry_type == "example":
+            colls = payload["collections"]
+            # extract_collections 从 tool_trace 抽全部集合 ["orders", "products"],
+            # code 层无条件覆写 (不用 LLM 产的 ["orders"]), 用 trace 抽到的全集
+            assert isinstance(colls, list) and len(colls) == 2
+            assert all(isinstance(c, dict) and "database" in c and "collection" in c for c in colls)
+            assert colls[0] == {"database": "shop", "collection": "orders"}
+            assert colls[1] == {"database": "shop", "collection": "products"}

@@ -176,7 +176,7 @@ describe("AuditCard — entry_type type-specific blocks", () => {
     final_pipeline: { type: "execute_plan", steps: [] },
     chart_type: "bar",
     field_mappings: [{ collection: "c_product", field: "categoryId" }],
-    collections: ["c_product", "c_category_group"],
+    collections: [{ database: "shop", collection: "c_product" }, { database: "shop", collection: "c_category_group" }],
     tool_count: 5,
   };
   const exampleEntry: KnowledgeEntry = {
@@ -188,7 +188,7 @@ describe("AuditCard — entry_type type-specific blocks", () => {
   } as unknown as KnowledgeEntry;
 
   const routeHintPayload = {
-    collection_path: ["shop.orders", "shop.products"],
+    collection_path: [{ database: "shop", collection: "orders" }, { database: "shop", collection: "products" }],
     navigation_note: "orders.items[].sku ↔ products.sku",
   };
   const routeHintEntry: KnowledgeEntry = {
@@ -205,8 +205,8 @@ describe("AuditCard — entry_type type-specific blocks", () => {
   // pill span 替代 antd Tag. 断言对齐重写后的真实实现.
   it("example 类型渲染 collections 路径节点", () => {
     render(<AuditCard entry={exampleEntry} />);
-    expect(screen.getByText("c_product")).toBeInTheDocument();
-    expect(screen.getByText("c_category_group")).toBeInTheDocument();
+    expect(screen.getByText("shop.c_product")).toBeInTheDocument();
+    expect(screen.getByText("shop.c_category_group")).toBeInTheDocument();
   });
 
   it("route_hint 类型渲染 collection_path 路径 + navigation_note 摘要", () => {

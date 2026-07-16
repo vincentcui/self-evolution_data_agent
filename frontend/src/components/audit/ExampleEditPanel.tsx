@@ -10,13 +10,14 @@
 
 import React from "react";
 import { Form, Input, Space, Tag, Typography } from "antd";
+import type { CollectionRef } from "@/types";
 import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 
 const { Text } = Typography;
 
 export interface ExamplePayload {
   question_pattern: string;
-  collections: string[];
+  collections: CollectionRef[];
   join_keys: Record<string, unknown>[];
   final_query_plan: Record<string, unknown> | null;
   result_summary: string;
@@ -68,8 +69,8 @@ export default function ExampleEditPanel({ value, onChange }: Props) {
 
       <Form.Item label="涉及集合 (只读)">
         <Space wrap>
-          {(value.collections || []).map((c) => (
-            <Tag key={c} color="blue">{c}</Tag>
+          {(value.collections ?? []).map((c) => (
+            <Tag key={`${c.database}.${c.collection}`} color="blue">{c.database}.{c.collection}</Tag>
           ))}
           {(!value.collections || value.collections.length === 0) && (
             <Text type="secondary">(空)</Text>

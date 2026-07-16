@@ -27,6 +27,14 @@ _BSON_TYPE_KEYS: frozenset[str] = frozenset({
     "$code", "$symbol", "$uuid",
 })
 
+# entry_type → 含 collection refs 的 payload 字段名 (Task 1 CollectionRef 升级).
+# 召回投影: list[{database, collection}] → ["database.collection", ...] (给 LLM).
+_COLLECTION_FIELDS: dict[str, str] = {
+    "route_hint": "collection_path",
+    "example": "collections",
+    "rule": "applies_to_collections",
+}
+
 
 def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
     """召回入参 payload → 压缩后 payload, 不改原 dict (返回新对象).
@@ -37,21 +45,46 @@ def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
       业务语义文本 (reason/rule_text/synonyms 等), **原样返回**, 任何截断都会
       丢失知识本身.
 
+    Collection ref 投影 (Task 3): route_hint/example/rule 的集合字段从
+    list[{database, collection}] → ["database.collection", ...] 字符串列表,
+    给 LLM 简洁可寻址的集合标识. 投影在现有压缩逻辑之后追加, 不影响其他字段.
+
     历史 bug (2026-05-29): 早期实现对所有 entry_type 都跑 _walk, 导致
     route_hint.navigation_note (373 字完整避坑链路) 被 IS_RECALL_PAYLOAD_MAX_STR_LEN=120
     截断, 召回后 LLM 看到 "...<+273 chars>" 无法决策, 反而比无 KE 时跑得更差.
     """
     if not isinstance(payload, dict):
         return payload
-    if entry_type != "example":
-        # 语义文本类 payload 原样保留
-        return payload
-    # example.query_json + final_query_plan 含数据快照, 深度压缩
-    out = dict(payload)
-    if "final_query_plan" in out and isinstance(out["final_query_plan"], dict):
-        out["final_query_plan"] = _compact_query_plan(out["final_query_plan"])
-    if "query_json" in out:
-        out["query_json"] = _walk(out["query_json"])
+    if entry_type == "example":
+        # example.query_json + final_query_plan 含数据快照, 深度压缩
+        out = dict(payload)
+        if "final_query_plan" in out and isinstance(out["final_query_plan"], dict):
+            out["final_query_plan"] = _compact_query_plan(out["final_query_plan"])
+        if "query_json" in out:
+            out["query_json"] = _walk(out["query_json"])
+    else:
+        # 语义文本类 payload 不做字面量压缩; 但集合字段仍需投影 (若有)
+        field = _COLLECTION_FIELDS.get(entry_type)
+        if field and field in payload:
+            out = dict(payload)
+        else:
+            return payload
+    # Collection ref 投影: list[{database, collection}] → ["database.collection", ...]
+    field = _COLLECTION_FIELDS.get(entry_type)
+    if field and field in out:
+        out[field] = _project_collection_refs(out[field])
+    return out
+
+
+def _project_collection_refs(refs: list) -> list[str]:
+    """list[{database, collection}] → ["database.collection", ...] (输出侧投影给 LLM).
+
+    容错: 跳过非 dict / 缺 database / 缺 collection 的元素.
+    """
+    out = []
+    for r in refs or []:
+        if isinstance(r, dict) and r.get("database") and r.get("collection"):
+            out.append(f"{r['database']}.{r['collection']}")
     return out
 
 

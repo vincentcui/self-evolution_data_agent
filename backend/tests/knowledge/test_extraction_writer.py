@@ -313,6 +313,8 @@ async def test_concurrent_write_same_target_no_error(db_session, seeded):
 @pytest.mark.asyncio
 async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
     ns_id, repo_id = seeded
+    # Task 1b: coll_to_db 反查表 — 裸名转 CollectionRef
+    coll_to_db = {"t_order": ("mysql", "test_db")}
 
     business_rules = [{
         "rule_text": "查询订单时默认排除已删除记录: is_deleted=0",
@@ -326,6 +328,7 @@ async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
         namespace_id=ns_id, repo_id=repo_id,
         business_terms=[],
         business_rules=business_rules,
+        coll_to_db=coll_to_db,
     )
     await db_session.commit()
 
@@ -346,14 +349,21 @@ async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
 
     payload = json.loads(ke.payload)
     assert payload["rule_kind"] == "filter_default"
-    assert payload["applies_to_collections"] == ["t_order"]
+    # Task 1b: CollectionRef form, not bare list[str]
+    assert payload["applies_to_collections"] == [
+        {"database": "test_db", "collection": "t_order"}
+    ]
     assert payload["evidence"]["frequency"] == 0.92
 
 
 @pytest.mark.asyncio
 async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded):
-    """D3: business_examples (sql2nl) → entry_type=example KE 写入验证."""
+    """D3: business_examples (sql2nl) → entry_type=example KE 写入验证.
+
+    Task 1b: collections 升级为 CollectionRef, sql_pattern/tables legacy compat 字段移除.
+    """
     ns_id, repo_id = seeded
+    coll_to_db = {"orders": ("mysql", "test_db")}
 
     business_examples = [{
         "sql_pattern": "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC",
@@ -367,6 +377,7 @@ async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded
         namespace_id=ns_id, repo_id=repo_id,
         business_terms=[], business_rules=[],
         business_examples=business_examples,
+        coll_to_db=coll_to_db,
     )
     await db_session.commit()
 
@@ -385,10 +396,15 @@ async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded
     assert ke.source == "code_extract"
     assert ke.repo_id == repo_id
     payload = json.loads(ke.payload)
-    assert payload["sql_pattern"].startswith("SELECT * FROM orders")
-    assert payload["tables"] == ["orders"]
+    # Task 1b: CollectionRef form, not dotted strings
+    assert payload["collections"] == [
+        {"database": "test_db", "collection": "orders"}
+    ]
     assert payload["question_pattern"] == "按状态查订单并按创建时间倒序"
     assert payload["source_mapper"] == "com.example.OrderMapper"
+    # Task 1b: legacy compat fields removed
+    assert "sql_pattern" not in payload
+    assert "tables" not in payload
 
 
 @pytest.mark.asyncio
@@ -403,3 +419,108 @@ async def test_extract_and_write_knowledge_skips_empty_example(db_session, seede
     )
     await db_session.commit()
     assert total == 0
+
+# ════════════════════════════════════════════════════════════════
+#  _refs_from_names — CollectionRef 补全 helper (Task 1b)
+# ════════════════════════════════════════════════════════════════
+
+
+def test_refs_from_names_uses_coll_to_db():
+    """裸集合名经 coll_to_db 反查补全 database → list[CollectionRef]."""
+    from app.knowledge.extraction_writer import _refs_from_names
+    coll_to_db = {"orders": ("mysql", "shop"), "users": ("mysql", "shop")}
+    refs = _refs_from_names(["orders", "users", "unknown"], coll_to_db)
+    # unknown 补不到跳过
+    assert len(refs) == 2
+    assert refs[0].database == "shop" and refs[0].collection == "orders"
+    assert refs[1].database == "shop" and refs[1].collection == "users"
+
+
+def test_refs_from_names_empty_when_no_coll_to_db():
+    """coll_to_db 为 None 时返回空列表 (无法补全)."""
+    from app.knowledge.extraction_writer import _refs_from_names
+    assert _refs_from_names(["orders"], None) == []
+
+
+def test_refs_from_names_empty_names():
+    """names 为空或 None 时返回空列表."""
+    from app.knowledge.extraction_writer import _refs_from_names
+    assert _refs_from_names([], {"orders": ("mysql", "shop")}) == []
+    assert _refs_from_names(None, {"orders": ("mysql", "shop")}) == []
+
+
+def test_refs_from_names_skips_unresolvable():
+    """coll_to_db 中找不到的名字被静默跳过, 不报错."""
+    from app.knowledge.extraction_writer import _refs_from_names
+    coll_to_db = {"orders": ("mysql", "shop")}
+    assert _refs_from_names(["ghost_table"], coll_to_db) == []
+
+
+@pytest.mark.asyncio
+async def test_write_rule_ke_no_coll_to_db_emits_empty_list(db_session, seeded):
+    """无 coll_to_db 时 applies_to_collections 为空列表 (不 422, 不 emit 裸名)."""
+    ns_id, repo_id = seeded
+
+    business_rules = [{
+        "rule_text": "某规则",
+        "applies_to_collections": ["t_order"],
+    }]
+
+    total = await extract_and_write_knowledge(
+        db_session,
+        namespace_id=ns_id, repo_id=repo_id,
+        business_terms=[],
+        business_rules=business_rules,
+        # coll_to_db not passed (defaults to None)
+    )
+    await db_session.commit()
+    assert total == 1
+
+    rows = (await db_session.execute(
+        select(KnowledgeEntry).where(
+            KnowledgeEntry.namespace_id == ns_id,
+            KnowledgeEntry.entry_type == "rule",
+        )
+    )).scalars().all()
+    payload = json.loads(rows[0].payload)
+    # No coll_to_db → cannot resolve → empty list (not bare strings → 422)
+    assert payload["applies_to_collections"] == []
+
+
+@pytest.mark.asyncio
+async def test_write_business_examples_emits_collection_ref(db_session, seeded):
+    """_write_business_examples 使用 coll_to_db 转 CollectionRef, 移除旧 compat 字段."""
+    ns_id, repo_id = seeded
+    coll_to_db = {"orders": ("mysql", "test_db")}
+
+    business_examples = [{
+        "sql_pattern": "SELECT * FROM orders WHERE status = ?",
+        "tables": ["orders"],
+        "question": "按状态查订单",
+        "mapper_namespace": "com.example.OrderMapper",
+    }]
+
+    total = await extract_and_write_knowledge(
+        db_session,
+        namespace_id=ns_id, repo_id=repo_id,
+        business_terms=[], business_rules=[],
+        business_examples=business_examples,
+        coll_to_db=coll_to_db,
+    )
+    await db_session.commit()
+    assert total == 1
+
+    rows = (await db_session.execute(
+        select(KnowledgeEntry).where(
+            KnowledgeEntry.namespace_id == ns_id,
+            KnowledgeEntry.entry_type == "example",
+        )
+    )).scalars().all()
+    payload = json.loads(rows[0].payload)
+    # Collections are CollectionRef form
+    assert payload["collections"] == [
+        {"database": "test_db", "collection": "orders"}
+    ]
+    # Legacy compat fields removed (Task 1b)
+    assert "sql_pattern" not in payload
+    assert "tables" not in payload

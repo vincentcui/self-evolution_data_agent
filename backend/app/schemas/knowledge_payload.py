@@ -10,6 +10,19 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from app.config import settings
 
 
+class CollectionRef(BaseModel):
+    """带 database 的集合引用 — 多源关联下表/集合名不唯一, 必须配 database 定位.
+
+    存储富形态: KE.payload 里集合字段统一用此结构. 输出侧(召回给 LLM)投影成
+    "database.collection" 字符串; HQ 路径校验取裸 collection 名(拓扑无关 database).
+    database 与 collection 均不得含 "." (输出投影用点分, 含 "." 致回解歧义).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    database: str
+    collection: str
+
+
 class TerminologyPayload(BaseModel):
     """术语映射 — Phase 1 升级: 必填字段收紧 + term shape 校验."""
 
@@ -68,7 +81,7 @@ class ExamplePayload(BaseModel):
     """统一 example payload — agent_learn + code_extract + trace_refiner 共用.
 
     question_pattern: 语义骨架, ChromaDB 索引入口.
-    collections:      有序 db.collection 链 ["shop.orders", "shop.users"].
+    collections:      有序集合链 [{database, collection}].
     join_keys:        跨表连接键 [{"from": "orders.user_id", "to": "users.id"}].
     final_query_plan: 统一查询计划 (db_type 多态内化在 step.query 中).
     result_summary:   自然语言描述 filter+join+aggregate 模式.
@@ -76,7 +89,7 @@ class ExamplePayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     question_pattern: str
-    collections: list[str] = []
+    collections: list[CollectionRef] = []
     join_keys: list[dict] = []
     final_query_plan: dict | None = None
     result_summary: str = ""
@@ -106,7 +119,7 @@ class RulePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule_text: str
-    applies_to_collections: list[str] = []
+    applies_to_collections: list[CollectionRef] = []
     priority: int = 0
     # Phase 2 P2.T13: 规则分类 + 证据 — 向后兼容
     rule_kind: Literal["business_constraint", "filter_default", "join_pattern"] = "business_constraint"
@@ -118,18 +131,20 @@ class RouteHintPayload(BaseModel):
 
     spec 2026-07-08. question_pattern 不在 payload — 它是向量检索键,
     唯一真相源是 KnowledgeEntry.content.
+    collection_path: 有序集合路径, 每段带 database (多源下集合名不唯一).
     navigation_note 是人 deliberate 写的完整字段路径散文 (关联字段/关联类型/嵌套位置/避坑).
     """
     model_config = ConfigDict(extra="forbid")
 
-    collection_path: list[str] = []
+    collection_path: list[CollectionRef] = []
     navigation_note: str = ""
 
     @field_validator("collection_path")
     @classmethod
-    def _no_duplicate(cls, v: list[str]) -> list[str]:
-        if len(v) != len(set(v)):
-            raise ValueError("collection_path 不允许重复 collection 名")
+    def _no_duplicate(cls, v: list[CollectionRef]) -> list[CollectionRef]:
+        seen = {(r.database, r.collection) for r in v}
+        if len(v) != len(seen):
+            raise ValueError("collection_path 不允许重复 (database, collection) 组合")
         return v
 
 

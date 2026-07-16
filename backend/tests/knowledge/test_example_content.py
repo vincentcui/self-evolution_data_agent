@@ -76,7 +76,10 @@ def test_example_payload_five_field_full():
     """新字段可正常赋值."""
     p = ExamplePayload(
         question_pattern="订单关联用户",
-        collections=["orders", "users"],
+        collections=[
+            {"database": "shop", "collection": "orders"},
+            {"database": "shop", "collection": "users"},
+        ],
         join_keys=[{"from": "orders.user_id", "to": "users.id"}],
         final_query_plan={
             "steps": [{"db_type": "mysql", "database": "shop", "collection": "orders",
@@ -84,7 +87,9 @@ def test_example_payload_five_field_full():
         },
         result_summary="在orders上JOIN users关联",
     )
-    assert p.collections == ["orders", "users"]
+    assert len(p.collections) == 2
+    assert p.collections[0].collection == "orders"
+    assert p.collections[1].collection == "users"
     assert len(p.join_keys) == 1
     assert p.join_keys[0]["from"] == "orders.user_id"
     assert p.final_query_plan["steps"][0]["db_type"] == "mysql"
