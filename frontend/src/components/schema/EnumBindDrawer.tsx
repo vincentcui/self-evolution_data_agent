@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Drawer, Select, Button, Alert, Modal, Space, Tag } from "antd";
 import { enumApi } from "@/api";
 import type { EnumCanonical } from "@/types/schema-canonical";
+import { enumDictSourceLabel } from "./sourceLabels";
 
 interface Props {
   open: boolean;
@@ -15,6 +16,8 @@ interface Props {
   fieldType: string;
   namespaceId: number;
   samples?: (number | string)[];
+  /** 当前已绑定的 enum 字典 id —— “变更”时预回填到选择器 */
+  currentEnumId?: number | null;
   onClose: () => void;
   onBound: () => void;
 }
@@ -26,6 +29,7 @@ export function EnumBindDrawer({
   fieldType,
   namespaceId,
   samples,
+  currentEnumId,
   onClose,
   onBound,
 }: Props) {
@@ -36,13 +40,13 @@ export function EnumBindDrawer({
 
   useEffect(() => {
     if (!open) return;
-    setSelectedId(null);
+    setSelectedId(currentEnumId ?? null);
     setError(null);
     enumApi
       .listEnumDictionaries({ namespace_id: namespaceId })
       .then((d) => setEnums(d.items))
       .catch(() => setEnums([]));
-  }, [open, namespaceId]);
+  }, [open, namespaceId, currentEnumId]);
 
   const selectedEnum = enums.find((e) => e.id === selectedId);
   const enumValues = selectedEnum?.values.map((v) => v.db_value) ?? [];
@@ -122,7 +126,7 @@ export function EnumBindDrawer({
           }
           options={enums.map((e) => ({
             value: e.id,
-            label: `${e.enum_class_name} (${e.values.length} values, ${e.source})`,
+            label: `${e.enum_class_name} (${e.values.length} 个值, 来源: ${enumDictSourceLabel(e.source)})`,
           }))}
         />
 

@@ -44,8 +44,8 @@ describe("EnumDictionaryTab", () => {
     render(<EnumDictionaryTab namespaceId={1} dbType="mongodb" />);
     await waitFor(() => screen.getByText("OrderStatus"));
     expect(screen.getByText("UserRole")).toBeInTheDocument();
-    expect(screen.getByText("code")).toBeInTheDocument();
-    expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.getByText("代码")).toBeInTheDocument();
+    expect(screen.getByText("手动")).toBeInTheDocument();
   });
 
   it("opens create modal when 新建枚举 clicked", async () => {

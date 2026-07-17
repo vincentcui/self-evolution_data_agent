@@ -12,6 +12,7 @@ import type {
 import { ConfidenceTag } from "./ConfidenceTag";
 import { EnumBindDrawer } from "./EnumBindDrawer";
 import { FieldRowActions } from "./FieldRowActions";
+import { ENUM_FIELD_SOURCE_COLORS, enumFieldSourceLabel } from "./sourceLabels";
 
 /* ── Internal types ── */
 
@@ -120,6 +121,7 @@ function SubFieldsTree(props: {
     <div style={{ paddingLeft: depth > 0 ? 16 : 24 }}>
       <Table<EditableField>
         size="small"
+        tableLayout="fixed"
         dataSource={subFields}
         rowKey={(r) => r._key}
         pagination={false}
@@ -176,6 +178,7 @@ function SubFieldsTree(props: {
           {
             title: "描述",
             dataIndex: "description",
+            width: 220,
             render: (text: string, _record: EditableField, idx: number) => {
               if (editing) {
                 return (
@@ -191,7 +194,11 @@ function SubFieldsTree(props: {
                   />
                 );
               }
-              return text || <span style={{ color: "#999" }}>—</span>;
+              return text ? (
+                <div style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{text}</div>
+              ) : (
+                <span style={{ color: "#999" }}>—</span>
+              );
             },
           },
           {
@@ -518,6 +525,7 @@ export function AllFieldsTab(props: {
     {
       title: "描述",
       dataIndex: "description",
+      width: 240,
       render: (text: string, _record: EditableField, idx: number) => {
         if (editing) {
           return (
@@ -529,7 +537,11 @@ export function AllFieldsTab(props: {
             />
           );
         }
-        return text || <span style={{ color: "#999" }}>—</span>;
+        return text ? (
+          <div style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{text}</div>
+        ) : (
+          <span style={{ color: "#999" }}>—</span>
+        );
       },
     },
     {
@@ -547,65 +559,53 @@ export function AllFieldsTab(props: {
     {
       title: "枚举",
       dataIndex: "enum_values",
-      width: 80,
-      render: (vals: SchemaCanonicalField["enum_values"]) =>
-        vals && vals.length > 0 ? `枚举: ${vals.length}` : "—",
-    },
-    {
-      title: "Enum 绑定",
-      width: 160,
-      render: (_, field: EditableField) => {
-        const status = field.enum_match_status;
-        if (status === "matched") {
-          return (
-            <Space size={4}>
-              <Tag color="green">已绑定</Tag>
+      width: 180,
+      render: (vals: SchemaCanonicalField["enum_values"], field: EditableField) => {
+        const hasValues = !!(vals && vals.length > 0);
+        if (!editing) {
+          // 查看模式: 保持现有逻辑 —— 有值展示 "枚举: N", 无值展示 "—"
+          return hasValues ? `枚举: ${vals!.length}` : "—";
+        }
+        // 编辑模式: 无值 → "绑定" 按钮；有值 → "变更" 按钮（可重新选择绑定的枚举）；
+        // 若已存在实际绑定 (enum_ref_id) 则附加“解绑”按钮
+        const fieldName = getFieldName(field);
+        const isBound = field.enum_ref_id != null;
+        return (
+          <Space size={4}>
+            {hasValues && <span>{`枚举: ${vals!.length}`}</span>}
+            {field.enum_match_status === "conflict" && <Tag color="red">冲突</Tag>}
+            <Button
+              size="small"
+              type={hasValues ? "default" : "primary"}
+              onClick={() => handleBindEnum(field)}
+            >
+              {hasValues ? "变更" : "绑定"}
+            </Button>
+            {isBound && (
               <Button
                 size="small"
-                loading={unbinding === getFieldName(field)}
-                onClick={() => handleUnbindEnum(getFieldName(field))}
+                danger
+                loading={unbinding === fieldName}
+                onClick={() => handleUnbindEnum(fieldName)}
               >
                 解绑
               </Button>
-            </Space>
-          );
-        }
-        if (status === "pending") {
-          return (
-            <Space size={4}>
-              <Tag color="default">
-                未绑定{field.enum_class_hint ? ` [${field.enum_class_hint}]` : ""}
-              </Tag>
-              <Button
-                size="small"
-                type="primary"
-                onClick={() => handleBindEnum(field)}
-              >
-                绑定
-              </Button>
-            </Space>
-          );
-        }
-        if (status === "conflict") {
-          return <Tag color="red">冲突</Tag>;
-        }
-        return "—";
+            )}
+          </Space>
+        );
       },
     },
     {
       title: "Source",
       dataIndex: "enum_source",
-      width: 100,
+      width: 110,
       render: (s: string | null | undefined) => {
         if (!s) return null;
-        const colorMap: Record<string, string> = {
-          manual_binding: "blue",
-          code_hint: "green",
-          code_type: "green",
-          code_type_generic: "cyan",
-          name_heuristic: "orange",
-        };
-        return <Tag color={colorMap[s] ?? "default"}>{s}</Tag>;
+        return (
+          <Tag color={ENUM_FIELD_SOURCE_COLORS[s] ?? "default"}>
+            {enumFieldSourceLabel(s)}
+          </Tag>
+        );
       },
     },
     ...(editing
@@ -704,6 +704,7 @@ export function AllFieldsTab(props: {
         columns={columns}
         pagination={false}
         size="small"
+        tableLayout="fixed"
         expandable={{
           rowExpandable: (r) => !!(r.sub_fields?.length || r.enum_values?.length || editing),
           expandedRowRender: (record) => {
@@ -878,6 +879,7 @@ export function AllFieldsTab(props: {
           fieldType={bindDrawer.field.type || ""}
           namespaceId={props.namespaceId}
           samples={bindDrawer.field.sample_values}
+          currentEnumId={bindDrawer.field.enum_ref_id}
           onClose={() => setBindDrawer(null)}
           onBound={() => {
             setBindDrawer(null);

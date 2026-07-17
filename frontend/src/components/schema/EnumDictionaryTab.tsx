@@ -8,6 +8,7 @@ import { Table, Button, Tag, Space, Popconfirm, Input, message } from "antd";
 import { EnumEditorModal } from "./EnumEditorModal";
 import { enumApi } from "@/api";
 import type { EnumCanonical } from "@/types/schema-canonical";
+import { enumDictSourceLabel } from "./sourceLabels";
 
 interface Props {
   namespaceId: number;
@@ -76,7 +77,7 @@ export function EnumDictionaryTab({ namespaceId, dbType }: Props) {
             title: "来源",
             dataIndex: "source",
             width: 80,
-            render: (s: string) => <Tag color={s === "manual" ? "blue" : "green"}>{s}</Tag>,
+            render: (s: string) => <Tag color={s === "manual" ? "blue" : "green"}>{enumDictSourceLabel(s)}</Tag>,
           },
           { title: "引用字段", dataIndex: "reference_count", width: 90, render: (n) => n ?? "—" },
           {

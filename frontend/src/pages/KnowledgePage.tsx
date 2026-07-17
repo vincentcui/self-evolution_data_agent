@@ -260,14 +260,12 @@ const KnowledgePage: React.FC = () => {
 
       {activeNsId && (
         <>
-          {/* ── 左右两栏 ── */}
+          {/* ── 内容区域上方的横向导航 (原双左侧导航栏合并至此，释放内容区宽度) ── */}
           <div className={styles.layout}>
-            {/* 左侧分组导航 */}
             <nav className={styles.sideNav}>
               {NAV_GROUPS.map((group) => (
                 <div key={group.title} className={styles.navGroup}>
-                  <div className={styles.navGroupTitle}>{group.title}</div>
-                  <div className={styles.navGroupDesc}>{group.desc}</div>
+                  <span className={styles.navGroupTitle}>{group.title}</span>
                   {group.items.map((item) => {
                     const isActive = activeTab === item.key;
                     const badge = navBadges[item.key];
@@ -288,7 +286,7 @@ const KnowledgePage: React.FC = () => {
               ))}
             </nav>
 
-            {/* 右侧内容区 */}
+            {/* 内容区 */}
             <div className={styles.contentArea}>
               {activeTab === "knowledge" && (
                 <AuditQueue
