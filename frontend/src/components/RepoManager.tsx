@@ -231,11 +231,12 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
 
   return (
     <div className={styles.detailContent}>
-      {/* ── 顶部操作栏 ── */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-        <Form form={repoForm} layout="inline" style={{ flex: 1 }}>
+      {/* ── 顶部操作栏 (两行固定布局, 消除添加前后跳变) ── */}
+      <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Row 1: 添加仓库表单 */}
+        <Form form={repoForm} layout="inline" style={{ flex: 1, flexWrap: "wrap", rowGap: 8 }}>
           <Form.Item name="url" rules={[{ required: true, message: "请输入 URL" }]}>
-            <Input placeholder="https://github.com/org/repo.git" style={{ width: 280 }} />
+            <Input placeholder="https://gitlab.example.com/group/repo.git" style={{ width: 280 }} />
           </Form.Item>
           <Form.Item name="branch" initialValue="master">
             <Input placeholder="分支" style={{ width: 100 }} />
@@ -246,22 +247,29 @@ const RepoManager: React.FC<Props> = ({ nsId, datasources, repos, batchStatus, o
           <Form.Item
             name="git_token"
             label="Git Token"
-            tooltip="可选。留空时按优先级自动使用命名空间 Token 或全局 Git Token"
+            tooltip="可选。留空时按优先级自动使用命名空间 Token 或全局 Git Token。SSH (git@/ssh://) 协议未启用，请使用 http(s) URL。"
           >
-            <Input.Password placeholder="ghp_xxxx (可选)" style={{ width: 160 }} />
+            <Input.Password placeholder="http(s) 私有库 access token" style={{ width: 160 }} />
           </Form.Item>
           <Button type="primary" onClick={handleAddRepo} loading={adding}>添加</Button>
         </Form>
-        {pendingCount > 0 && (
-          <Button icon={<ThunderboltOutlined />} onClick={() => handleBatchParse(false)}>
+        {/* Row 2: 批量/全量解析 — 始终渲染, repos 空时 disabled (不再条件隐藏, 消除布局跳变) */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button
+            icon={<ThunderboltOutlined />}
+            onClick={() => handleBatchParse(false)}
+            disabled={pendingCount === 0}
+          >
             批量解析 ({pendingCount})
           </Button>
-        )}
-        {parsableCount > 0 && (
-          <Button icon={<ReloadOutlined />} onClick={handleFullRebuild}>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={handleFullRebuild}
+            disabled={parsableCount === 0}
+          >
             全量解析 ({parsableCount})
           </Button>
-        )}
+        </div>
       </div>
 
       {/* ── 二轮自答进度 ── */}

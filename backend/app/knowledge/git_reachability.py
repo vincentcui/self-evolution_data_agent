@@ -77,8 +77,8 @@ def _check_github_api(url: str, token: str, timeout: int) -> tuple[bool, str]:
     return False, "无法连接 Git 仓库，请检查 URL 和网络"
 
 
-def _check_generic_https(url: str, token: str, timeout: int) -> tuple[bool, str]:
-    """通过 HEAD 请求验证非 GitHub HTTPS 仓库可达性."""
+def _check_generic_http(url: str, token: str, timeout: int) -> tuple[bool, str]:
+    """通过 HEAD 请求验证非 GitHub http(s) 仓库可达性."""
     check_url = _inject_token(url, token=token)
     http_url = check_url.removesuffix(".git")
 
@@ -118,18 +118,23 @@ def check_repo_reachable(
     验证仓库可达且 token 有效.
 
     - GitHub URL → 走 API (https://api.github.com/repos/{owner}/{repo}), 稳定可靠
-    - 其他 HTTPS URL → 走 HEAD 请求
-    - SSH URL → 跳过校验, 返回 True
+    - 其他 http(s) URL → 走 HEAD 请求 (含 token 注入)
+    - SSH URL (git@ / ssh://) → 返回 False, SSH 协议未启用
+    - 其他协议 → 返回 False, 不支持
 
     timeout 默认 None → 从 settings.git_reachability_timeout_secs 读取.
     """
     if timeout is None:
         timeout = settings.git_reachability_timeout_secs
 
-    if not url.startswith("https://"):
-        return True, ""
+    # SSH 协议未启用 — 明确报错, 不静默放行 (容器无 ssh 客户端)
+    if url.startswith(("git@", "ssh://", "git+ssh://")):
+        return False, "SSH 协议未启用，请使用 http(s)+token 协议访问 Git 仓库"
+
+    if not url.startswith(("http://", "https://")):
+        return False, f"不支持的 Git URL 协议，请使用 http(s):// URL: {url}"
 
     if _GITHUB_RE.match(url):
         return _check_github_api(url, token, timeout)
 
-    return _check_generic_https(url, token, timeout)
+    return _check_generic_http(url, token, timeout)

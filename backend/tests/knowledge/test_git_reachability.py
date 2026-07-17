@@ -1,9 +1,9 @@
 """git_reachability — 掩码函数 + 仓库可达性校验测试"""
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 
-from app.knowledge.git_reachability import mask_token, check_repo_reachable
+from app.knowledge.git_reachability import check_repo_reachable, mask_token
 
 
 def _resp(status_code: int, is_success: bool = False, is_redirect: bool = False):
@@ -131,6 +131,40 @@ class TestGenericHttps:
 
 
 class TestSsh:
-    def test_ssh_url_skips(self):
-        ok, _ = check_repo_reachable("git@github.com:user/repo.git", token="")
-        assert ok is True
+    """SSH 协议未启用 — 明确报错, 不静默放行 (容器无 ssh 客户端)."""
+
+    def test_ssh_git_at_rejected(self):
+        ok, msg = check_repo_reachable("git@github.com:user/repo.git", token="")
+        assert ok is False
+        assert "SSH" in msg
+
+    def test_ssh_protocol_rejected(self):
+        ok, msg = check_repo_reachable("ssh://git@gitlab.example.com/u/r.git", token="tok")
+        assert ok is False
+        assert "SSH" in msg
+
+
+class TestUnsupportedProtocol:
+    """非 http(s)/ssh 协议 → 明确报错."""
+
+    def test_ftp_rejected(self):
+        ok, msg = check_repo_reachable("ftp://gitlab.example.com/u/r.git", token="tok")
+        assert ok is False
+        assert "不支持" in msg
+
+
+class TestGenericHttp:
+    """http:// (非 TLS) 同样走 HEAD 真校验 (内网明文 gitlab 修复点)."""
+
+    def test_http_reachable(self):
+        with patch("app.knowledge.git_reachability._http.head") as mock_head:
+            mock_head.return_value = _resp(200, is_success=True)
+            ok, _ = check_repo_reachable("http://gitlab.example.com/u/r.git", token="tok")
+            assert ok is True
+
+    def test_http_auth_failed(self):
+        with patch("app.knowledge.git_reachability._http.head") as mock_head:
+            mock_head.return_value = _resp(401)
+            ok, msg = check_repo_reachable("http://gitlab.example.com/u/r.git", token="bad")
+            assert ok is False
+            assert "无效" in msg or "不存在" in msg

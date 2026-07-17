@@ -45,24 +45,44 @@ def clone_or_update(
     return local_path, "clone"
 
 
+def _format_userinfo(host: str, token: str) -> str:
+    """
+    按 host 推断认证格式 (不绑死具体 host, 多 Git 平台通用).
+
+    - GitLab 实例 (host label 精确含 "gitlab") → "oauth2:{token}"
+      覆盖 gitlab.com / gitlab.example.com / corp.gitlab.io; 不误命中 my-gitlab.com / gitlabfoo.com
+    - 其他 (github / gitee / 自建非 gitlab) → 裸 "{token}" (与旧逻辑一致, 零回归)
+    """
+    labels = host.split(".") if host else []
+    if "gitlab" in labels:
+        return f"oauth2:{token}"
+    return token
+
+
 def _inject_token(url: str, *, token: str = "") -> str:
     """
-    将 token 注入 HTTPS URL
-    https://github.com/user/repo.git → https://<token>@github.com/user/repo.git
+    将 token 注入 http(s) URL, 按 host 推断认证格式.
 
-    token 为空时不注入, 返回原始 URL (公开仓库场景)
+      https://github.com/u/r.git      → https://<token>@github.com/u/r.git
+      http://gitlab.example.com/u/r.git    → http://oauth2:<token>@gitlab.example.com/u/r.git
+
+    - token 为空时不注入 (公开仓库场景)
+    - git@ / ssh:// 抛 ValueError — SSH 协议未启用, 强制 http(s)+token
+    - 其他非 http(s) 协议抛 ValueError
     """
     if not token:
         return url
 
-    # 只处理 HTTPS URL
-    if not url.startswith("https://"):
-        return url
+    if url.startswith(("git@", "ssh://", "git+ssh://")):
+        raise ValueError("SSH 协议未启用，请使用 http(s)+token 协议访问 Git 仓库")
+
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"不支持的 Git URL 协议，请使用 http(s):// URL: {url}")
 
     parsed = urlparse(url)
-    # 避免重复注入 (URL 已包含 token)
+    # 避免重复注入 (URL 已含凭据)
     if parsed.username:
         return url
 
-    # 重构 URL: scheme://token@netloc/path
-    return f"{parsed.scheme}://{token}@{parsed.netloc}{parsed.path}"
+    userinfo = _format_userinfo(parsed.hostname or "", token)
+    return f"{parsed.scheme}://{userinfo}@{parsed.netloc}{parsed.path}"

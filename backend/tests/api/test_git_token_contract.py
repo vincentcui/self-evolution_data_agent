@@ -5,8 +5,6 @@
 import pytest
 import pytest_asyncio
 
-from app.models.git_token_config import GitTokenConfig
-
 
 @pytest_asyncio.fixture
 async def super_client(make_client):
@@ -113,6 +111,7 @@ class TestGitTokenConfigOutMasking:
 
     def test_masked_token_correct(self):
         from unittest.mock import MagicMock
+
         from app.api.git_token_config import _to_out
 
         cfg = MagicMock()
@@ -143,6 +142,7 @@ class TestAddRepoReachabilityLogic:
     def test_public_repo_no_token_allowed(self):
         """公开仓库无 token → check_repo_reachable 返回 True (GitHub API 200)"""
         from unittest.mock import patch
+
         from app.knowledge.git_reachability import check_repo_reachable
 
         with patch("app.knowledge.git_reachability._http.get") as mock_get:
@@ -153,6 +153,7 @@ class TestAddRepoReachabilityLogic:
     def test_private_repo_no_token_blocked(self):
         """私有仓库无 token → check_repo_reachable 返回 False (GitHub API 404)"""
         from unittest.mock import patch
+
         from app.knowledge.git_reachability import check_repo_reachable
 
         with patch("app.knowledge.git_reachability._http.get") as mock_get:
@@ -161,10 +162,9 @@ class TestAddRepoReachabilityLogic:
             assert ok is False
             assert "私有仓库" in msg
 
-    def test_ssh_url_not_blocked(self):
-        """SSH URL 不受 token 检查影响"""
-        url = "git@github.com:user/repo.git"
-        resolved_token = ""
-        is_https = url.startswith("https://")
-        blocked = is_https and not resolved_token
-        assert blocked is False
+    def test_ssh_url_blocked(self):
+        """SSH URL → check_repo_reachable 返回 False (SSH 协议未启用)"""
+        from app.knowledge.git_reachability import check_repo_reachable
+        ok, msg = check_repo_reachable("git@github.com:user/repo.git", token="")
+        assert ok is False
+        assert "SSH" in msg

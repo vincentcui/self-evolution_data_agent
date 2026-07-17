@@ -98,6 +98,17 @@ class TestAddRepoReachabilityNegative:
             assert resp.status_code == 422
             assert "超时" in resp.json()["detail"]
 
+    @pytest.mark.asyncio
+    async def test_add_repo_ssh_url_422(self, make_client, ns_id):
+        """SSH URL → 422 (真实 check_repo_reachable 不 mock, git@ 不打网络直接拒)"""
+        client = await make_client(role="super_admin", user_id=1, username="admin")
+        resp = await client.post(f"/api/namespaces/{ns_id}/repos", json={
+            "url": "git@gitlab.example.com:u/r.git",
+            "branch": "master",
+        })
+        assert resp.status_code == 422
+        assert "SSH" in resp.json()["detail"]
+
 
 class TestTestReachabilityEndpoint:
     """test-reachability 端点负向路径."""
