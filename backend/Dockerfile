@@ -47,6 +47,11 @@ print("\n".join(deps))
 PY
 RUN pip install -r /tmp/requirements.txt
 
+# ── 预下载 tree-sitter grammar (tree_sitter_language_pack 1.9+ 按需从 GitHub 下载, 容器内网无外网会崩) ──
+#  build 机器不可达 GitHub 时降级跳过 (|| echo), 运行时由 _base.py 容错逐语言跳过缺失 grammar.
+RUN python -c "from tree_sitter_language_pack import download_all; download_all()" \
+    || echo "warning: tree-sitter grammar prefetch failed, runtime will skip missing languages"
+
 # ── 应用层 (--no-deps: 依赖已在上一层装好, 此层只构建并安装本包, 不再触网/重装依赖) ──
 #  hatchling packages=["app"] 打包需 app/ 就位, 故本包安装须在 COPY app/ 之后。
 COPY app/ app/

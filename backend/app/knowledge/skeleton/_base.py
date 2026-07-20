@@ -107,7 +107,7 @@ _LANGUAGES_DIR = Path(__file__).parent / "languages"
 
 
 def _discover_language_configs() -> dict[str, LanguageConfig]:
-    from tree_sitter_language_pack import get_parser
+    from tree_sitter_language_pack import DownloadError, get_parser
     configs: dict[str, LanguageConfig] = {}
     if not _LANGUAGES_DIR.is_dir():
         return configs
@@ -129,8 +129,8 @@ def _discover_language_configs() -> dict[str, LanguageConfig]:
         try:
             get_parser(cfg.tree_sitter_lang)  # verify grammar installed
             configs[cfg.name] = cfg
-        except (ImportError, LookupError, AttributeError, RuntimeError):
-            logger.debug("skip language %s: grammar not installed", entry)
+        except (ImportError, LookupError, AttributeError, RuntimeError, DownloadError):
+            logger.warning("skip language %s: grammar not installed/downloadable", entry)
     return configs
 
 
