@@ -3,6 +3,7 @@
 策略: information_schema.columns → 差集 ADD COLUMN（单事务，消除 TOCTOU）
 """
 
+import json
 import logging
 from typing import TypeAlias
 
@@ -642,6 +643,8 @@ async def run_all(engine: AsyncEngine) -> None:
     # canonical_audit_log / extraction_failure_log 四张新表 + partial unique index.
     # 修订 #4 要求 conflict 表 partial unique 仅约束 status='open' 行.
     await _ensure_schema_canonical_phase1_tables(engine)
+    # migration_035: conflict scope 按 relationship identity 分隔。
+    await _migrate_conflict_scopes(engine)
     # post-Stage1: drop 孤儿表 mongo_collection_indexes (运行时索引特性退役)
     await _drop_mongo_collection_indexes_table(engine)
     # migration_011 (enum-knowledge-binding): enum_dictionaries 表
@@ -896,6 +899,7 @@ async def _ensure_schema_canonical_phase1_tables(engine: AsyncEngine) -> None:
         target VARCHAR(200) NOT NULL,
         field_path VARCHAR(200) NOT NULL DEFAULT '',
         candidate_kind VARCHAR(32) NOT NULL,
+        conflict_scope VARCHAR(64) NOT NULL,
         conflict_type VARCHAR(32) NOT NULL,
         candidate_ids_json TEXT NOT NULL,
         candidates_snapshot_json TEXT NOT NULL,
@@ -913,10 +917,9 @@ async def _ensure_schema_canonical_phase1_tables(engine: AsyncEngine) -> None:
         "ON schema_canonical_conflicts(namespace_id)",
         "CREATE INDEX IF NOT EXISTS idx_conflict_open "
         "ON schema_canonical_conflicts(namespace_id, status)",
-        # 修订 #4 partial unique: 仅 status='open' 行参与, resolved 行不占位
+        # 仅 status='open' 行参与唯一约束；relationship 的 scope 含目标身份。
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_one_open_conflict_per_field "
-        "ON schema_canonical_conflicts"
-        "(namespace_id, db_type, database, target, field_path, candidate_kind) "
+        "ON schema_canonical_conflicts(namespace_id, conflict_scope) "
         "WHERE status = 'open'",
     ]
 
@@ -985,6 +988,72 @@ async def _ensure_schema_canonical_phase1_tables(engine: AsyncEngine) -> None:
     )
 
 
+async def _migrate_conflict_scopes(engine: AsyncEngine) -> None:
+    """migration_035: relationship conflict 改按 canonical relationship identity 隔离。
+
+    存量 field-level conflict 从快照回填稳定 scope；包含多个 relationship
+    identity 的旧 conflict 保留 field scope，随后在 promote 时重新分类并审计。
+    """
+    from app.models.schema_canonical_conflict import build_conflict_scope
+
+    async with engine.begin() as conn:
+        if not await _table_exists(conn, "schema_canonical_conflicts"):
+            return
+        if not await _column_exists(conn, "schema_canonical_conflicts", "conflict_scope"):
+            await conn.execute(text(
+                "ALTER TABLE schema_canonical_conflicts ADD COLUMN conflict_scope VARCHAR(64)"
+            ))
+
+        rows = (await conn.execute(text(
+            "SELECT id, db_type, database, target, field_path, candidate_kind, "
+            "candidates_snapshot_json FROM schema_canonical_conflicts "
+            "WHERE conflict_scope IS NULL OR conflict_scope = ''"
+        ))).mappings().all()
+        for row in rows:
+            field_key = (
+                row["db_type"], row["database"], row["target"],
+                row["field_path"], row["candidate_kind"],
+            )
+            values: list[dict] = []
+            try:
+                snapshot = json.loads(row["candidates_snapshot_json"])
+                values = [
+                    item["value"]
+                    for item in snapshot
+                    if isinstance(item.get("value"), dict)
+                ]
+            except (TypeError, ValueError):
+                pass
+
+            scope = build_conflict_scope(field_key)
+            if row["candidate_kind"] == "relationship" and values:
+                relationship_scopes = {
+                    build_conflict_scope(field_key, value) for value in values
+                }
+                if len(relationship_scopes) == 1:
+                    scope = relationship_scopes.pop()
+            await conn.execute(text(
+                "UPDATE schema_canonical_conflicts SET conflict_scope = :scope WHERE id = :id"
+            ), {"scope": scope, "id": row["id"]})
+
+        await conn.execute(text(
+            "ALTER TABLE schema_canonical_conflicts "
+            "ALTER COLUMN conflict_scope SET NOT NULL"
+        ))
+        indexdef = (await conn.execute(text(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = "
+            "'uq_one_open_conflict_per_field'"
+        ))).scalar_one_or_none()
+        if indexdef is None or "conflict_scope" not in indexdef:
+            await conn.execute(text("DROP INDEX IF EXISTS uq_one_open_conflict_per_field"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX uq_one_open_conflict_per_field "
+                "ON schema_canonical_conflicts(namespace_id, conflict_scope) "
+                "WHERE status = 'open'"
+            ))
+    log.info("[schema_migrations] conflict scopes migrated (migration_035)")
+
+
 async def _repair_open_conflict_partial_indexes(engine: AsyncEngine) -> None:
     """migration_018 (partial-index-repair): 把误建为全表 unique 的两个
     "单字段同时只能一个 open conflict" 索引重建为 PostgreSQL partial unique
@@ -1003,7 +1072,7 @@ async def _repair_open_conflict_partial_indexes(engine: AsyncEngine) -> None:
         (
             "uq_one_open_conflict_per_field",
             "schema_canonical_conflicts",
-            "(namespace_id, db_type, database, target, field_path, candidate_kind)",
+            "(namespace_id, conflict_scope)",
         ),
         (
             "uq_enum_conflict_open",

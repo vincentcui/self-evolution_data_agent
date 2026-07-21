@@ -38,7 +38,6 @@ async def _make_sco(db, ns_id: int, target: str = "test_table") -> int:
 async def _make_candidates(db, ns_id: int, target: str = "test_table"):
     """创建 3 种非终态候选: active×2 + pending×1 + in_conflict×1, 返回各自 ID 列表."""
     cands: dict[str, list[int]] = {"active": [], "pending": [], "in_conflict": []}
-    import json
 
     # active
     for fname, h in [("id", "h1"), ("name", "h2")]:
@@ -85,6 +84,7 @@ async def _make_conflict(db, ns_id: int, target: str = "test_table",
     c = SchemaCanonicalConflict(
         namespace_id=ns_id, db_type="mysql", database="test_db",
         target=target, field_path="status", candidate_kind="field_description",
+        conflict_scope="schema-canonical-delete-fixture",
         conflict_type="field_value",
         candidate_ids_json=json.dumps(ids),
         candidates_snapshot_json="[]", status="open",
@@ -131,7 +131,10 @@ async def test_delete_sco_ok(make_client, db):
             SchemaCanonicalCandidate.target == "test_table",
         )
     )).scalars().all()
-    assert len(cands) == 4, f"expected 4 candidates (2 active + 1 pending + 1 in_conflict), got {len(cands)}"
+    assert len(cands) == 4, (
+        "expected 4 candidates (2 active + 1 pending + 1 in_conflict), "
+        f"got {len(cands)}"
+    )
     assert all(c.status == "orphaned" for c in cands)
 
     # conflict 关闭

@@ -9,11 +9,12 @@ from typing import Literal
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, LOCAL_NOW
+from app.models.base import LOCAL_NOW, Base
 
 SchemaAuditAction = Literal[
     "auto_extract", "auto_promote", "auto_supersede",
     "conflict_open_diff", "conflict_open_semantic",
+    "conflict_reclassified",
     "conflict_resolve_keep_a", "conflict_resolve_keep_b",
     "conflict_resolve_merge", "conflict_resolve_reject",
     "user_confirm", "user_correct", "user_ignore",

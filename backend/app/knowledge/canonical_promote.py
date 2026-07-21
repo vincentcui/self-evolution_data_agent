@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.models.base import local_now
 from app.models.git_repo import GitRepo
+from app.models.schema_canonical_conflict import build_conflict_scope
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,122 @@ class PromoteReport:
     skipped_in_conflict: int = 0
     candidates_processed: int = 0
     duration_seconds: float = 0.0
+
+
+FieldKey = tuple[str, str, str, str, str]
+
+
+def _field_key(cand: SchemaCanonicalCandidate) -> FieldKey:
+    return (
+        cand.db_type,
+        cand.database,
+        cand.target,
+        cand.field_path,
+        cand.candidate_kind,
+    )
+
+
+def _candidate_conflict_scope(cand: SchemaCanonicalCandidate, key: FieldKey) -> str:
+    value = json.loads(cand.candidate_value_json) if key[-1] == "relationship" else None
+    return build_conflict_scope(key, value)
+
+
+def _group_candidates(
+    cands: list[SchemaCanonicalCandidate],
+) -> dict[tuple[FieldKey, str], list[SchemaCanonicalCandidate]]:
+    groups: dict[tuple[FieldKey, str], list[SchemaCanonicalCandidate]] = defaultdict(list)
+    for cand in cands:
+        key = _field_key(cand)
+        groups[(key, _candidate_conflict_scope(cand, key))].append(cand)
+    return groups
+
+
+@dataclass(frozen=True)
+class RelationshipConflictReclassification:
+    """一次旧 relationship conflict 重分类所涉及的字段范围。"""
+
+    conflict_id: int
+    namespace_id: int
+    db_type: str
+    database: str
+    target: str
+    field_path: str
+    candidate_count: int
+    scope_count: int
+
+
+async def find_misgrouped_relationship_conflicts(
+    db: AsyncSession, ns_id: int | None = None,
+) -> list[RelationshipConflictReclassification]:
+    """只读找出按 source field 错误聚合了多个关系身份的旧 conflict。"""
+    query = select(SchemaCanonicalConflict).where(
+        SchemaCanonicalConflict.candidate_kind == "relationship",
+        SchemaCanonicalConflict.status == "open",
+    )
+    if ns_id is not None:
+        query = query.where(SchemaCanonicalConflict.namespace_id == ns_id)
+    conflicts = list((await db.execute(query)).scalars().all())
+
+    reclassifications: list[RelationshipConflictReclassification] = []
+    for conflict in conflicts:
+        candidate_ids = json.loads(conflict.candidate_ids_json)
+        cands = list((await db.execute(
+            select(SchemaCanonicalCandidate).where(
+                SchemaCanonicalCandidate.id.in_(candidate_ids)
+            )
+        )).scalars().all())
+        scopes = {
+            _candidate_conflict_scope(cand, _field_key(cand))
+            for cand in cands
+        }
+        if len(scopes) > 1:
+            reclassifications.append(RelationshipConflictReclassification(
+                conflict_id=conflict.id,
+                namespace_id=conflict.namespace_id,
+                db_type=conflict.db_type,
+                database=conflict.database,
+                target=conflict.target,
+                field_path=conflict.field_path,
+                candidate_count=len(cands),
+                scope_count=len(scopes),
+            ))
+    return reclassifications
+
+
+async def reclassify_misgrouped_relationship_conflicts(
+    db: AsyncSession, ns_id: int | None = None,
+) -> list[RelationshipConflictReclassification]:
+    """将旧版多 identity relationship conflict 恢复为可重新 promote 的候选。"""
+    reclassifications = await find_misgrouped_relationship_conflicts(db, ns_id)
+    applied: list[RelationshipConflictReclassification] = []
+    for item in reclassifications:
+        conflict = await db.get(SchemaCanonicalConflict, item.conflict_id)
+        if conflict is None or conflict.status != "open":
+            continue
+        candidate_ids = json.loads(conflict.candidate_ids_json)
+        cands = list((await db.execute(
+            select(SchemaCanonicalCandidate).where(
+                SchemaCanonicalCandidate.id.in_(candidate_ids)
+            )
+        )).scalars().all())
+        for cand in cands:
+            if cand.status == "in_conflict":
+                cand.status = "pending"
+        conflict.status = "resolved"
+        conflict.resolution_reason = "system_reclassified_relationship_scope"
+        conflict.resolved_at = local_now()
+        await write_canonical_audit_log(
+            db,
+            namespace_id=conflict.namespace_id,
+            action="conflict_reclassified",
+            conflict_id=conflict.id,
+            field_path=conflict.field_path,
+            before={"candidate_count": len(cands), "scope_count": 1},
+            after={"candidate_count": len(cands), "scope_count": item.scope_count},
+            reason=conflict.resolution_reason,
+        )
+        applied.append(item)
+    return applied
 
 
 # 进程内 ns 级锁字典.
@@ -80,26 +197,29 @@ async def promote_candidates_to_canonical(
         return report
 
     try:
+        reclassified = await reclassify_misgrouped_relationship_conflicts(db, ns_id)
+        if reclassified:
+            log.info(
+                "[promote] ns=%d reclassified=%d legacy relationship conflicts",
+                ns_id,
+                len(reclassified),
+            )
+
         q = select(SchemaCanonicalCandidate).where(
             SchemaCanonicalCandidate.namespace_id == ns_id,
             SchemaCanonicalCandidate.status == "pending",
         )
         rows = list((await db.execute(q)).scalars().all())
         report.candidates_processed = len(rows)
-
-        # 按五元组分组
-        groups: dict[tuple, list[SchemaCanonicalCandidate]] = defaultdict(list)
-        for c in rows:
-            key = (c.db_type, c.database, c.target, c.field_path, c.candidate_kind)
-            groups[key].append(c)
+        groups = _group_candidates(rows)
 
         total_groups = len(groups)
         log.info("[promote] ns=%d 开始汇聚: %d candidates, %d groups",
                  ns_id, len(rows), total_groups)
 
         log_interval = max(1, total_groups // 10)  # 每 10% 输出一次
-        for idx, (key, cands) in enumerate(groups.items(), 1):
-            await _process_group(db, ns_id, key, cands, report)
+        for idx, ((key, conflict_scope), cands) in enumerate(groups.items(), 1):
+            await _process_group(db, ns_id, key, conflict_scope, cands, report)
             if idx % log_interval == 0 or idx == total_groups:
                 log.info("[promote] ns=%d 进度 %d/%d groups (promoted=%d, conflict=%d)",
                          ns_id, idx, total_groups,
@@ -140,9 +260,8 @@ async def promote_single_field(
         )
     )).scalars().all())
     report.candidates_processed = len(cands)
-    if cands:
-        key = (db_type, database, target, field_path, candidate_kind)
-        await _process_group(db, ns_id, key, cands, report)
+    for (key, conflict_scope), group in _group_candidates(cands).items():
+        await _process_group(db, ns_id, key, conflict_scope, group, report)
     return report
 
 
@@ -167,21 +286,18 @@ async def maybe_trigger_promote(db: AsyncSession, ns_id: int) -> PromoteReport |
 async def _process_group(
     db: AsyncSession,
     ns_id: int,
-    key: tuple,
+    key: FieldKey,
+    conflict_scope: str,
     cands: list[SchemaCanonicalCandidate],
     report: PromoteReport,
 ) -> None:
     db_type, database, target, field_path, kind = key
 
-    # 检查该字段已有 open conflict?
+    # 检查该 relationship / 字段 identity 是否已有 open conflict。
     open_conflict = (await db.execute(
         select(SchemaCanonicalConflict).where(
             SchemaCanonicalConflict.namespace_id == ns_id,
-            SchemaCanonicalConflict.db_type == db_type,
-            SchemaCanonicalConflict.database == database,
-            SchemaCanonicalConflict.target == target,
-            SchemaCanonicalConflict.field_path == field_path,
-            SchemaCanonicalConflict.candidate_kind == kind,
+            SchemaCanonicalConflict.conflict_scope == conflict_scope,
             SchemaCanonicalConflict.status == "open",
         )
     )).scalar_one_or_none()
@@ -204,13 +320,20 @@ async def _process_group(
     # 9 分支
     n = len(cands)
     if n == 1:
-        await _handle_single_candidate(db, ns_id, key, cands[0], sco, report)
+        await _handle_single_candidate(
+            db, ns_id, key, conflict_scope, cands[0], sco, report
+        )
     else:
-        await _handle_multi_candidates(db, ns_id, key, cands, sco, report)
+        await _handle_multi_candidates(
+            db, ns_id, key, conflict_scope, cands, sco, report
+        )
 
 
 async def _handle_single_candidate(
-    db: AsyncSession, ns_id: int, key: tuple,
+    db: AsyncSession,
+    ns_id: int,
+    key: FieldKey,
+    conflict_scope: str,
     cand: SchemaCanonicalCandidate,
     sco: SchemaCanonicalObject | None,
     report: PromoteReport,
@@ -221,7 +344,7 @@ async def _handle_single_candidate(
 
     db_type, database, target, field_path, kind = key
 
-    # B1/B9: 检查是否已有 active 候选 (不同 value_hash) → 应走 conflict
+    # B1/B9: 仅同一 relationship identity 的不同值才互斥。
     active_cands = list((await db.execute(
         select(SchemaCanonicalCandidate).where(
             SchemaCanonicalCandidate.namespace_id == ns_id,
@@ -231,13 +354,18 @@ async def _handle_single_candidate(
             SchemaCanonicalCandidate.field_path == field_path,
             SchemaCanonicalCandidate.candidate_kind == kind,
             SchemaCanonicalCandidate.status == "active",
-            SchemaCanonicalCandidate.value_hash != cand.value_hash,
         )
     )).scalars().all())
+    active_cands = [
+        active
+        for active in active_cands
+        if active.value_hash != cand.value_hash
+        and _candidate_conflict_scope(active, key) == conflict_scope
+    ]
     if active_cands:
         # 已有不同值的 active 候选 → 走 conflict (设计 §4.6 B1)
         all_cands = active_cands + [cand]
-        await _create_conflict(db, ns_id, key, all_cands, "field_value")
+        await _create_conflict(db, ns_id, key, conflict_scope, all_cands, "field_value")
         for c in all_cands:
             c.status = "in_conflict"
         report.conflicted_count += 1
@@ -249,11 +377,17 @@ async def _handle_single_candidate(
 
 
 async def _handle_multi_candidates(
-    db: AsyncSession, ns_id: int, key: tuple, cands: list[SchemaCanonicalCandidate],
-    sco: SchemaCanonicalObject | None, report: PromoteReport,
+    db: AsyncSession,
+    ns_id: int,
+    key: FieldKey,
+    conflict_scope: str,
+    cands: list[SchemaCanonicalCandidate],
+    sco: SchemaCanonicalObject | None,
+    report: PromoteReport,
 ) -> None:
     """N≥2 多候选 — 走 equivalence registry 链, 主流程零分支."""
     from app.knowledge.equivalence.registry import applicable_rules
+
     db_type, _, _, _, kind = key
     if len({c.value_hash for c in cands}) == 1:
         await _apply_to_canonical(db, ns_id, key, cands[0], sco, "multi_source_consistent")
@@ -270,7 +404,7 @@ async def _handle_multi_candidates(
         _finalize_losers(cands, winner, loser_status)
         report.promoted_count += 1
         return
-    await _record_conflict(db, ns_id, key, cands, report)
+    await _record_conflict(db, ns_id, key, conflict_scope, cands, report)
 
 
 async def _try_rule(rule: Any, cands: list[SchemaCanonicalCandidate], ns_id: int):
@@ -286,12 +420,15 @@ async def _try_rule(rule: Any, cands: list[SchemaCanonicalCandidate], ns_id: int
 
 
 async def _record_conflict(
-    db: AsyncSession, ns_id: int, key: tuple,
+    db: AsyncSession,
+    ns_id: int,
+    key: FieldKey,
+    conflict_scope: str,
     cands: list[SchemaCanonicalCandidate],
     report: PromoteReport,
 ) -> None:
     """全部 rule miss → 写 conflict + 标 candidate."""
-    await _create_conflict(db, ns_id, key, cands, "field_value")
+    await _create_conflict(db, ns_id, key, conflict_scope, cands, "field_value")
     for c in cands:
         c.status = "in_conflict"
     report.conflicted_count += 1
@@ -571,8 +708,12 @@ def _extract_repo_name(url: str) -> str:
 
 
 async def _create_conflict(
-    db: AsyncSession, ns_id: int, key: tuple,
-    cands: list[SchemaCanonicalCandidate], conflict_type: str,
+    db: AsyncSession,
+    ns_id: int,
+    key: FieldKey,
+    conflict_scope: str,
+    cands: list[SchemaCanonicalCandidate],
+    conflict_type: str,
 ) -> None:
     db_type, database, target, field_path, kind = key
 
@@ -596,7 +737,7 @@ async def _create_conflict(
     ]
     conflict = SchemaCanonicalConflict(
         namespace_id=ns_id, db_type=db_type, database=database, target=target,
-        field_path=field_path, candidate_kind=kind,
+        field_path=field_path, candidate_kind=kind, conflict_scope=conflict_scope,
         conflict_type=conflict_type,
         candidate_ids_json=json.dumps([c.id for c in cands]),
         candidates_snapshot_json=json.dumps(snapshot, ensure_ascii=False),

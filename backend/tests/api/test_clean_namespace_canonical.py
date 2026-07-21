@@ -92,6 +92,7 @@ async def two_namespaces_with_canonical_data(db) -> tuple[int, int]:
             target=f"{prefix}_coll",
             field_path="f0",
             candidate_kind="field_description",
+            conflict_scope="clean-namespace-canonical-fixture",
             conflict_type="field_value",
             candidate_ids_json=json.dumps([cand.id]),
             candidates_snapshot_json=json.dumps([{"id": cand.id}]),
