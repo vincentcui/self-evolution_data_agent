@@ -1,6 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════════════
  *  ExampleEditPanel — example 类型 KE 编辑面板单测
  *  覆盖: 5 个字段渲染 / question_pattern 编辑回调 / result_summary 编辑 / final_query_plan readOnly
+ *  Phase 5 清理: 不再使用 query_json / question legacy 字段
  * ══════════════════════════════════════════════════════════════════════════ */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -9,7 +10,6 @@ import ExampleEditPanel, { type ExamplePayload } from "@/components/audit/Exampl
 
 const basePayload: ExamplePayload = {
   question_pattern: "统计品牌名称包含A级的品牌数量",
-  question: "统计品牌名称包含A级的品牌数量",       // legacy fallback
   collections: [{ database: "shop_db", collection: "products" }],
   join_keys: [],
   final_query_plan: {
@@ -19,10 +19,6 @@ const basePayload: ExamplePayload = {
     }],
   },
   result_summary: "在 products 上按名称过滤统计数量",
-  // old fields preserved for passthrough
-  target_collection: "products",
-  target_database: "shop_db",
-  query_json: { pipeline: [{ $match: { auditStatus: 0 } }] },
 };
 
 describe("ExampleEditPanel", () => {
@@ -35,6 +31,40 @@ describe("ExampleEditPanel", () => {
     expect(screen.getByText("(空)")).toBeInTheDocument();
     // final_query_plan rendered as readonly textarea (contains $match from the plan)
     expect(screen.getByDisplayValue(/\$match/)).toBeInTheDocument();
+  });
+
+  it("渲染 final_query_plan 查询计划区（无 query_json fallback）", () => {
+    const plan = { steps: [{ db_type: "mongodb", collection: "products", operation: "filter", query: { filter: { active: true } } }] };
+    render(
+      <ExampleEditPanel
+        value={{
+          question_pattern: "查在售商品",
+          collections: [{ database: "shop", collection: "products" }],
+          join_keys: [],
+          final_query_plan: plan,
+          result_summary: "",
+        }}
+        onChange={() => {}}
+      />
+    );
+    expect(screen.getByLabelText("问题模式")).toHaveValue("查在售商品");
+    expect(screen.getByLabelText("查询计划")).toHaveValue(JSON.stringify(plan, null, 2));
+  });
+
+  it("final_query_plan 为 null 时查询计划区为空", () => {
+    render(
+      <ExampleEditPanel
+        value={{
+          question_pattern: "测试",
+          collections: [],
+          join_keys: [],
+          final_query_plan: null,
+          result_summary: "",
+        }}
+        onChange={() => {}}
+      />
+    );
+    expect(screen.getByLabelText("查询计划")).toHaveValue("");
   });
 
   it("question_pattern 可编辑触发 onChange", () => {

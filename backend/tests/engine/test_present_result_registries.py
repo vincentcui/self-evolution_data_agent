@@ -5,8 +5,10 @@ from __future__ import annotations
 def test_recall_window_treats_present_result_as_adopting():
     from app.engine.recall_window import ADOPTING_TOOLS
     assert "present_result" in ADOPTING_TOOLS
-    # 钉死兼容不变量: recommend_chart 旧名保留 (旧 trace 重放), 不得被误删
-    assert "recommend_chart" in ADOPTING_TOOLS
+    # Phase 8 T23 后现状: ADOPTING_TOOLS 仅含 TOOL_SPECS 活工具名
+    assert ADOPTING_TOOLS == {
+        "execute_query", "execute_plan", "present_result", "save_knowledge",
+    }
 
 
 def test_trace_compression_extracts_chart_type_from_chart_spec():

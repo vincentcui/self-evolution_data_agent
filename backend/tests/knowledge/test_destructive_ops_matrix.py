@@ -1,22 +1,22 @@
-"""Stage 2 Task 9 — 破坏性操作 12 用例测试矩阵索引.
+"""Stage 2 Task 9 — 破坏性操作 11 用例测试矩阵索引.
 
 依据 docs/todos/knowledge-unification-and-agent-loop/04-safety-and-bulk-ops.md §5.
-7/12 用例在 Stage 2 task 3-7 实现, 5/12 Stage 3 deferred.
+6/11 用例在 Stage 2 task 3-7 实现, 5/11 Stage 3 deferred.
 本文件做集成验证 — 不重复实现, 仅 index + 自检 + deferred placeholder.
 
-Stage 2 范围 (7 用例 — 跨文件实现, 跑全测试集自然 cover):
+Phase 8 T25: case #5 (reembed) 随 E 场景退役删除; case #10 改指 verify 脚本。
+
+Stage 2 范围 (6 用例 — 跨文件实现, 跑全测试集自然 cover):
     1. test_git_reparse_preserves_human_edits
        → tests/test_chroma_lifecycle.py::test_clean_ke_via_bulk_guard_preserves_manual
     2. test_namespace_delete_with_human_knowledge_warning
        → tests/knowledge/test_namespace_delete.py::test_dry_run_returns_protected_count
     3. test_repo_delete_orphan_cleanup_safe
        → tests/knowledge/test_cleanup_stale_schema_summary.py::test_human_edited_orphan_preserved
-    5. test_reembed_after_model_change_idempotent
-       → tests/knowledge/test_reembed_and_consistency.py::test_reembed_real_replaces_chromadb_docs
     9. test_tier_change_chromadb_sync
        → tests/knowledge/test_patch_chromadb_sync.py (4 cases)
     10. test_sqlite_chromadb_consistency_check
-        → tests/knowledge/test_reembed_and_consistency.py::test_verify_detects_sqlite_only_inconsistency
+        → scripts/verify_db_chromadb_consistency.py (离线诊断脚本)
     12. test_bulk_op_guard_blocks_above_threshold
         → tests/knowledge/test_namespace_delete.py::test_above_threshold_requires_confirm_token
 
@@ -42,12 +42,10 @@ STAGE2_COVERED_CASES = {
         "tests/knowledge/test_namespace_delete.py::test_dry_run_returns_protected_count"),
     3: ("test_repo_delete_orphan_cleanup_safe",
         "tests/knowledge/test_cleanup_stale_schema_summary.py::test_human_edited_orphan_preserved"),
-    5: ("test_reembed_after_model_change_idempotent",
-        "tests/knowledge/test_reembed_and_consistency.py::test_reembed_real_replaces_chromadb_docs"),
     9: ("test_tier_change_chromadb_sync",
         "tests/knowledge/test_patch_chromadb_sync.py (4 cases)"),
     10: ("test_sqlite_chromadb_consistency_check",
-         "tests/knowledge/test_reembed_and_consistency.py::test_verify_detects_sqlite_only_inconsistency"),
+         "scripts/verify_db_chromadb_consistency.py (离线诊断脚本)"),
     12: ("test_bulk_op_guard_blocks_above_threshold",
          "tests/knowledge/test_namespace_delete.py::test_above_threshold_requires_confirm_token"),
 }
@@ -71,17 +69,18 @@ STAGE3_DEFERRED_CASES = {
 # ════════════════════════════════════════════════════════════════════
 
 def test_stage2_destructive_matrix_coverage():
-    """Stage 2 必须覆盖 7 个 destructive ops 用例 (其余 5 个 Stage 3 deferred)."""
-    assert len(STAGE2_COVERED_CASES) == 7, (
-        f"Stage 2 应覆盖 7 用例, 实际 {len(STAGE2_COVERED_CASES)}"
+    """Stage 2 必须覆盖 6 个 destructive ops 用例 (其余 5 个 Stage 3 deferred)."""
+    assert len(STAGE2_COVERED_CASES) == 6, (
+        f"Stage 2 应覆盖 6 用例, 实际 {len(STAGE2_COVERED_CASES)}"
     )
     assert len(STAGE3_DEFERRED_CASES) == 5, (
         f"Stage 3 deferred 应 5 用例, 实际 {len(STAGE3_DEFERRED_CASES)}"
     )
-    # 12 用例编号 1..12 完整, 无重叠
+    # 11 用例编号完整 (原 #5 reembed 随 E 场景退役删除), 无重叠
     all_ids = set(STAGE2_COVERED_CASES.keys()) | set(STAGE3_DEFERRED_CASES.keys())
-    assert all_ids == set(range(1, 13)), (
-        f"12 用例编号应 1-12 完整, 实际 {sorted(all_ids)}"
+    expected = set(range(1, 13)) - {5}  # #5 retired (Phase 8 T25)
+    assert all_ids == expected, (
+        f"11 用例编号应完整 (排除退役 #5), 实际 {sorted(all_ids)}"
     )
 
 

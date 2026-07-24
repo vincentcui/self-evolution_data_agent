@@ -160,8 +160,7 @@ async def _amain() -> int:
     if report.db_only:
         sys.stderr.write(
             f"\n[FIX] DB 有但 ChromaDB 缺 ({len(report.db_only)} 条):\n"
-            f"      python -m scripts.reembed_after_model_change --dry-run=false\n"
-            f"      或精确补 backfill: python -m scripts.backfill_knowledge_vectors\n"
+            f"      python -m scripts.backfill_knowledge_vectors\n"
         )
     if report.chromadb_only:
         sys.stderr.write(
@@ -173,7 +172,7 @@ async def _amain() -> int:
         sys.stderr.write(
             f"\n[FIX] entry_type 错配 ({len(report.type_mismatch)} 条):\n"
             f"      samples={report.type_mismatch[:20]}\n"
-            f"      跑 reembed_after_model_change 重灌 metadata, 或 relabel 后再查.\n"
+            f"      跑 backfill_knowledge_vectors 重灌, 或 relabel 后再查.\n"
         )
 
     return 1 if (report.db_only or report.chromadb_only or report.type_mismatch) else 0

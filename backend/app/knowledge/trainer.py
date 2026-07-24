@@ -62,7 +62,7 @@ def _map_agent_to_channels(
     agent_objects: list[dict], knowledge_proposals: list[dict],
     coll_to_db: dict[str, tuple[str, str]] | None,
 ) -> tuple[CodeParseResult, list[dict]]:
-    """Agent emit 产物 → CodeParseResult 7 通道 + business_examples (sql2nl).
+    """Agent emit 产物 → CodeParseResult 7 通道 + business_examples.
 
     database 字段留给 write_canonical_candidates_from_parse 经 coll_to_db 补全,
     此处顺手填一份便于隔离测试与日志。enum_classes 通道留空 — agent 把枚举内联到
@@ -592,7 +592,7 @@ async def run_training_pipeline_with_progress(
     # ── collection→db 反查表 (实时连 DataSource, 供 database 补全) ──
     coll_to_db = await _build_coll_to_db(ns_id, name)
 
-    # ── agent 产物 → 7 通道 + business_examples (sql2nl) ──
+    # ── agent 产物 → 7 通道 + business_examples ──
     code_result, business_examples = _map_agent_to_channels(
         result.objects, result.knowledge_proposals, coll_to_db,
     )
@@ -624,7 +624,7 @@ async def run_training_pipeline_with_progress(
     # ── 4.5b enum 确定性安全网 (D5/§6.3 — agent 漏标兜底, Java glob) ──
     await _run_enum_safety_net(local_path, ns_id, name)
 
-    # ── 4.6 写入 knowledge entries proposed (含 sql2nl business_examples) ──
+    # ── 4.6 写入 knowledge entries proposed (含 business_examples) ──
     await on_progress(60, "写入知识候选...")
     from app.knowledge.extraction_writer import extract_and_write_knowledge
     async with async_session() as ke_db:
@@ -647,7 +647,9 @@ async def run_training_pipeline_with_progress(
     t_eval = time.time()
     all_trained = ddls + jpa_docs
     report.duration_seconds = round(time.time() - start, 2)
-    report = await asyncio.to_thread(evaluate_parse_quality, report, all_trained, namespace_id=ns_id)
+    report = await asyncio.to_thread(
+        evaluate_parse_quality, report, all_trained, namespace_id=ns_id,
+    )
     log.info("[%s] 评估完成 耗时 %.1fs score=%d",
              name, time.time() - t_eval, report.completeness_score)
 

@@ -964,7 +964,7 @@ def _extract_rows_chart(result: AgentResult) -> tuple[int, str]:
             if count and rows_count == 0:
                 rows_count = count
         if name in CHART_TOOLS:
-            # present_result: chart_type 埋在 chart_spec; 兼容旧 recommend_chart 顶层 chart_type
+            # present_result: chart_type 埋在 chart_spec; 兜底读顶层 chart_type
             spec = out.get("chart_spec")
             ct = spec.get("chart_type") if isinstance(spec, dict) else None
             ct = ct or out.get("chart_type")

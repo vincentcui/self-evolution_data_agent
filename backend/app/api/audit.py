@@ -124,7 +124,10 @@ async def _supersede_old_entries(
             log.info("[audit] supersede skip: entry id=%d 不存在", old_id)
             continue
         if old.status != "canonical":
-            log.info("[audit] supersede skip: entry id=%d status=%s 非 canonical", old_id, old.status)
+            log.info(
+                "[audit] supersede skip: entry id=%d status=%s 非 canonical",
+                old_id, old.status,
+            )
             continue
         old.status = "superseded"
         old.is_superseded = True
@@ -191,11 +194,11 @@ async def approve_entry(
     # ── ChromaDB 同步 (commit 后, derived data 失败不阻) ──
     slug = await resolve_ns_slug(db, entry.namespace_id)
     # Phase 3 C2: rule/route_hint 主+hq_* 由 hq_writer 全权管, 跳过 chroma_upsert_safe
-    if entry.entry_type not in {"rule", "route_hint"}:
+    if entry.entry_type not in {"rule", "route_hint", "example"}:
         await chroma_upsert_safe(slug, entry)
 
     # ── Phase 3: 统一 hq_writer (approve 路径) ──
-    if entry.entry_type in {"rule", "route_hint"}:
+    if entry.entry_type in {"rule", "route_hint", "example"}:
         from app.knowledge.hq_writer import rewrite_hq_for_entry
         try:
             await rewrite_hq_for_entry(db, slug, entry)

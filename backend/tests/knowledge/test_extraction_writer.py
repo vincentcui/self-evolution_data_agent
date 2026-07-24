@@ -358,18 +358,18 @@ async def test_extract_and_write_knowledge_creates_rule_ke(db_session, seeded):
 
 @pytest.mark.asyncio
 async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded):
-    """D3: business_examples (sql2nl) → entry_type=example KE 写入验证.
+    """D3: business_examples → entry_type=example KE 写入验证.
 
-    Task 1b: collections 升级为 CollectionRef, sql_pattern/tables legacy compat 字段移除.
+    Task 3: content=question, payload 含单步 final_query_plan; 死字段 source_mapper/extraction_source 移除.
     """
     ns_id, repo_id = seeded
     coll_to_db = {"orders": ("mysql", "test_db")}
 
     business_examples = [{
-        "sql_pattern": "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC",
-        "tables": ["orders"],
         "question": "按状态查订单并按创建时间倒序",
-        "mapper_namespace": "com.example.OrderMapper",
+        "operation": "sql",
+        "query": {"sql": "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC"},
+        "tables": ["orders"],
     }]
 
     total = await extract_and_write_knowledge(
@@ -401,21 +401,20 @@ async def test_extract_and_write_knowledge_creates_example_ke(db_session, seeded
         {"database": "test_db", "collection": "orders"}
     ]
     assert payload["question_pattern"] == "按状态查订单并按创建时间倒序"
-    assert payload["source_mapper"] == "com.example.OrderMapper"
-    # Task 1b: legacy compat fields removed
+    # Task 3: dead fields removed (source_mapper, extraction_source, sql_pattern)
     assert "sql_pattern" not in payload
-    assert "tables" not in payload
+    assert "source_mapper" not in payload
 
 
 @pytest.mark.asyncio
 async def test_extract_and_write_knowledge_skips_empty_example(db_session, seeded):
-    """business_examples 缺 sql_pattern → 跳过, 不产 example KE."""
+    """business_examples 缺 query → 跳过, 不产 example KE."""
     ns_id, repo_id = seeded
     total = await extract_and_write_knowledge(
         db_session,
         namespace_id=ns_id, repo_id=repo_id,
         business_terms=[], business_rules=[],
-        business_examples=[{"tables": ["orders"], "question": "x"}],  # 无 sql_pattern
+        business_examples=[{"tables": ["orders"], "question": "x"}],  # 无 query
     )
     await db_session.commit()
     assert total == 0
@@ -494,10 +493,10 @@ async def test_write_business_examples_emits_collection_ref(db_session, seeded):
     coll_to_db = {"orders": ("mysql", "test_db")}
 
     business_examples = [{
-        "sql_pattern": "SELECT * FROM orders WHERE status = ?",
-        "tables": ["orders"],
         "question": "按状态查订单",
-        "mapper_namespace": "com.example.OrderMapper",
+        "operation": "sql",
+        "query": {"sql": "SELECT * FROM orders WHERE status = ?"},
+        "tables": ["orders"],
     }]
 
     total = await extract_and_write_knowledge(
@@ -521,6 +520,5 @@ async def test_write_business_examples_emits_collection_ref(db_session, seeded):
     assert payload["collections"] == [
         {"database": "test_db", "collection": "orders"}
     ]
-    # Legacy compat fields removed (Task 1b)
+    # Task 3: dead fields removed
     assert "sql_pattern" not in payload
-    assert "tables" not in payload

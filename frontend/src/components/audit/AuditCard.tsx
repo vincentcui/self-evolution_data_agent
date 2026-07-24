@@ -159,9 +159,10 @@ export default function AuditCard({
     if (entry.entry_type !== "instance_alias") return null;
     const db = p.target_database as string | undefined;
     const coll = p.target_collection as string | undefined;
+    const dbType = p.db_type as string | undefined;
     const idField = p.id_field as string | undefined;
     const id = p.target_id as string | undefined;
-    return [db, coll, `${idField ?? "_id"}=${id ?? "?"}`].filter(Boolean).join(" · ");
+    return [dbType, db, coll, `${idField ?? "_id"}=${id ?? "?"}`].filter(Boolean).join(" · ");
   })();
 
   // 「编辑全部」按钮 — proposed / canonical / rejected 三态操作区共用, 抽出消重复

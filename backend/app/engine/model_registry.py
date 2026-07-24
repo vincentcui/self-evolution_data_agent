@@ -15,8 +15,7 @@
 切换策略:
 - Chat: 支持运行时热切换, 新请求即时生效, 无需重建任何索引。
 - Embedding: 仅在首次激活或服务启动时加载, 不支持直接热切换。
-  切换 Embedding 模型会导致 ChromaDB 旧向量与新查询向量不兼容,
-  必须先完成知识库重嵌入 (scripts/reembed_after_model_change.py), 首期禁止直接切换。
+  Embedding 模型固定, 切换已禁用; 如需切换属运维变更需单独评审。
 
 使用示例:
     from app.engine.model_registry import registry

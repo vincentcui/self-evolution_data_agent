@@ -33,7 +33,7 @@ async def test_sse_events_include_all_required_types(test_namespace):
     fake_result = AgentResult(
         final_answer="42", iterations=1, stop_reason="end_turn",
         tool_trace=[{
-            "name": "execute_batched_aggregate",
+            "name": "execute_query",
             "input": {},
             "output": {"row_count": 1},
             "status": "ok",
@@ -47,12 +47,12 @@ async def test_sse_events_include_all_required_types(test_namespace):
         await emit({"event": "text_delta", "data": {"delta": "Thinking..."}})
         await emit({"event": "tool_use", "data": {
             "tool_call_id": "tc1",
-            "name": "execute_batched_aggregate",
+            "name": "execute_query",
             "input": {},
         }})
         await emit({"event": "tool_result", "data": {
             "tool_call_id": "tc1",
-            "name": "execute_batched_aggregate",
+            "name": "execute_query",
             "output": "1 row",
             "status": "ok",
         }})

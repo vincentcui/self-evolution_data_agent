@@ -1,6 +1,6 @@
-"""Stage 2 抓手 A — 由 LLM 为 rule / route_hint 生成"假设触发问题"用作 ChromaDB 多向量 key.
+"""Stage 2 抓手 A — LLM 为 rule / route_hint / example 生成"假设触发问题"作 ChromaDB 多向量 key.
 
-仅启用类型: rule / route_hint (Stage 2 决策 D3).
+仅启用类型: rule / route_hint / example (Stage 2 决策 D3).
 失败容错: LLM 异常返空数组, upsert 退化为单向量入库.
 
 Phase 3 升级: HQItem (q + covered_path) + is_valid_covered_path 严格连续子序列校验.
@@ -18,7 +18,7 @@ from app.engine.llm import chat_completion
 
 log = logging.getLogger(__name__)
 
-ENABLED_ENTRY_TYPES: frozenset[str] = frozenset({"rule", "route_hint"})
+ENABLED_ENTRY_TYPES: frozenset[str] = frozenset({"rule", "route_hint", "example"})
 
 
 # ════════════════════════════════════════════
@@ -31,7 +31,7 @@ class HQItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     q: str
-    covered_path: list[str]
+    covered_path: list[str] = []   # 原: list[str] (必填); example 无路径时为空
 
     @field_validator("q")
     @classmethod
@@ -46,8 +46,7 @@ class HQItem(BaseModel):
     @field_validator("covered_path")
     @classmethod
     def _path_length(cls, v: list[str]) -> list[str]:
-        if not v:
-            raise ValueError("covered_path 不能为空")
+        # 放宽: 允许空 (example); 非空时仍校验上限
         max_len = settings.hq_covered_path_max
         if len(v) > max_len:
             raise ValueError(f"covered_path 超长 (≤{max_len}, 当前 {len(v)})")
@@ -194,10 +193,50 @@ def _call_llm_for_hq_items(
     return items
 
 
+def _build_example_hq_prompt(content: str, n: int) -> str:
+    max_len = settings.hq_question_max_len
+    return f'''\
+<role>
+你是一名问题改写助手, 为查询模式知识条目生成自然语言问题变体, 用于向量召回.
+</role>
+<goal>
+读 1 条查询模式 (entry_type=example, content 是该查询的自然语言问题模式), 生成至多 {n} 条用户可能的真实问法. 每条问法语义等价于 content, 但用词/视角不同, 用于提升召回鲁棒性.
+</goal>
+<constraints>
+- 通用电商域举例 (用户/订单/商品/类目), 不锚定具体行业
+- 每条 q 文本 ≤ {max_len} 字
+- 严格 JSON 输出, 不含 markdown 围栏
+- 与 content 语义等价, 不引入 content 未涉及的业务概念
+- 无法生成合理变体 → 返回空数组 []
+</constraints>
+<input>
+content: {content}
+</input>
+<output_format>
+严格 JSON 数组, 每条 shape:
+{{"q": "<问题文本>"}}
+
+无合法条目返回 []
+</output_format>
+<examples>
+example 1 (content="按状态分组统计订单数"):
+[
+  {{"q": "每个状态有多少订单"}},
+  {{"q": "订单按状态分类的各自数量"}},
+  {{"q": "不同订单状态下的订单计数"}}
+]
+
+example 2 (无合法变体):
+[]
+</examples>'''
+
+
 def _build_hq_prompt_with_schema(
     content: str, entry_type: str, n: int,
 ) -> str:
     """Phase 3 prompt: 按 prompt-engineering-2026 D1-D8 标准, 要求 LLM 自报 covered_path."""
+    if entry_type == "example":
+        return _build_example_hq_prompt(content, n)
     max_len = settings.hq_question_max_len
     # route_or_null 由 caller 在 content 中已隐含 (KE.content 描述路由),
     # 但 collection_path 信息不在 prompt 中暴露 — 由后端校验兜底.
@@ -276,7 +315,7 @@ _PROMPT_TEMPLATE = """\
 输出格式:
 {{"queries": ["query1", "query2", "query3"]}}"""
 
-_KIND_LABEL = {"rule": "规则", "route_hint": "查询路径偏好"}
+_KIND_LABEL = {"rule": "规则", "route_hint": "查询路径偏好", "example": "查询模式"}
 
 
 @observe(name="hypothetical_queries.generate", as_type="chain")

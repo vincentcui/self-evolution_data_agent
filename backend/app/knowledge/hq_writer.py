@@ -87,7 +87,7 @@ async def rewrite_hq_for_entry(
     返回最终落库的 hq 文本列表.
     不在内部 commit — caller 负责事务边界.
     """
-    if entry.entry_type not in {"rule", "route_hint"}:
+    if entry.entry_type not in {"rule", "route_hint", "example"}:
         return []
 
     if manual_hqs is None:

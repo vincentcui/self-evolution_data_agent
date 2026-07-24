@@ -80,3 +80,9 @@ select = ["E", "F", "I", "N", "W"]
 "app/api/_async_extract_prompt.py" = ["E501"]
 # C4 审批版本 verbatim prompt literal in trace_refiner.py 必须逐字保留, 无法折行
 "app/knowledge/trace_refiner.py" = ["E501"]
+# verbatim prompt literals (TOOL_SPECS description + SYSTEM_PROMPT / 枚举抽取 prompt / HyQE prompt) 必须逐字保留, 折行即改 prompt 内容; noqa 无法作用于字符串内部行
+"app/engine/tools/registry.py" = ["E501"]
+"app/knowledge/extraction_tools.py" = ["E501"]
+"app/knowledge/trainer.py" = ["E501"]
+"app/knowledge/hypothetical_queries.py" = ["E501"]
+"app/knowledge/extraction_prompts.py" = ["E501"]

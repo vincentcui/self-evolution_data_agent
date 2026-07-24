@@ -325,7 +325,14 @@ EXTRACTION_TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "emit_knowledge",
-        "description": "提交一条知识发现 (非 schema 对象)。Use when: SQL SELECT语义化→emit example / 发现术语→emit terminology / 发现规则→emit rule。Do not use when: 提交数据表/集合 schema (用 emit_schema_object)。Input: entry_type + payload 按类型填对应必填字段。Output: {status: ok|error, message}",
+        "description": (
+            "提交一条知识发现 (非 schema 对象). "
+            "Use when: 发现可复用查询模式→emit example / 发现业务术语→emit terminology / 发现业务规则→emit rule. "
+            "Do not use when: 提交数据表/集合 schema (用 emit_schema_object). "
+            "Input: entry_type + payload 按类型填对应必填字段. "
+            "输入示例: {entry_type:'example', payload:{question:'按状态分组统计订单数', operation:'aggregate', query:{pipeline:[{'$group':{'_id':'$status','count':{'$sum':1}}}]}, tables:['orders']}}. "
+            "Output: {status: ok|error, message}"
+        ),
         "input_schema": {
             "type": "object",
             "required": ["entry_type", "payload"],
@@ -333,7 +340,7 @@ EXTRACTION_TOOL_SPECS: list[dict[str, Any]] = [
                 "entry_type": {
                     "type": "string",
                     "enum": ["terminology", "rule", "example"],
-                    "description": "example=查询模式(SELECT语义化), terminology=术语, rule=业务规则"
+                    "description": "example=查询模式(自然语言问题+native query body), terminology=术语, rule=业务规则"
                 },
                 "payload": {
                     "oneOf": [
@@ -348,12 +355,20 @@ EXTRACTION_TOOL_SPECS: list[dict[str, Any]] = [
                          "required": ["rule_text"],
                          "properties": {"rule_text": {"type": "string"}}},
                         {"title": "example", "type": "object",
-                         "required": ["sql_pattern", "tables"],
+                         "required": ["question", "operation", "query", "tables"],
                          "properties": {
-                             "sql_pattern": {"type": "string"},
-                             "tables": {"type": "array", "items": {"type": "string"}},
-                             "question": {"type": "string"},
-                             "mapper_namespace": {"type": "string"},
+                             "question": {"type": "string", "description": "自然语言查询模式, 如 '按状态分组统计订单数'"},
+                             "operation": {"type": "string", "enum": ["sql", "aggregate", "filter"],
+                                           "description": "sql=关系型查询, filter=MongoDB find, aggregate=MongoDB 聚合"},
+                             "query": {"type": "object",
+                                       "description": "查询体 native shape: sql={sql:串} / filter={filter:{...}} / aggregate={pipeline:[...]}",
+                                       "properties": {
+                                           "sql": {"type": "string"},
+                                           "filter": {"type": "object"},
+                                           "pipeline": {"type": "array"},
+                                       }},
+                             "tables": {"type": "array", "items": {"type": "string"},
+                                        "description": "涉及的表名/集合名 (数据库真实名, 不用类名)"},
                          }},
                     ]
                 }

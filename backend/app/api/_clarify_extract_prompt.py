@@ -18,19 +18,12 @@ Agent 给的澄清原因: {clarify_reason}
 【分类规则】请只输出以下 4 类之一:
 
 1. instance_alias — 用户回答里给出了一个具体记录的 ID/唯一标识, 且 Agent 问的是"哪一条记录"
-   触发特征: 用户回答含明确的 ID 字符串 / 唯一标识符 / 全名+缩写映射
-   示例: 用户原问题"VIP 用户的订单数", Agent 问"哪个 VIP 等级", 用户答
-        "黄金会员, 等级编码 GOLD_V3, ID 是 5f8a1b2c3d4e5f6a7b8c9d0e"
-        → alias="黄金会员", canonical_name="黄金会员 GOLD_V3",
-          target_collection="user_levels", target_id="5f8a1b2c3d4e5f6a7b8c9d0e"
-   payload schema:
-     {{"alias": "用户问题里的简称原词",
-       "canonical_name": "记录的全名 (供审核者识别)",
-       "target_collection": "落库集合名",
-       "target_database": "数据库名",
-       "target_id": "记录的 _id 或唯一键值",
-       "id_field": "默认 _id, 自定义唯一键填实际字段名"}}
-   content: 直接用 alias 字符串 (供向量索引)
+   例: 澄清"哪个会员等级" → 用户答 ID "5f8a1b2c3d4e5f6a7b8c9d0e"
+   沉淀 payload:
+     alias="金牌会员", canonical_name="金牌会员等级",
+     target_database="shop", target_collection="user_levels",
+     target_id="5f8a1b2c3d4e5f6a7b8c9d0e", id_field="_id",
+     db_type="mongodb"
 
 2. terminology_synonym — 用户回答暗示某业务概念有新同义词, 应补进现有 terminology
    触发特征: 用户给出"X 就是 Y 的另一种叫法" / "我们内部叫 X, 其实是 Y"

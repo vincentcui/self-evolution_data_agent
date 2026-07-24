@@ -6,16 +6,12 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.knowledge.git_reachability import check_repo_reachable, mask_token
-from app.knowledge.git_token_resolver import get_global_git_token
 
 from app.api._audit_helpers import (
     automaton_invalidate_safe,
@@ -26,6 +22,8 @@ from app.auth import assert_ns_access, require_admin_or_above, require_ns_manage
 from app.config import settings
 from app.db.metadata import get_db
 from app.knowledge.audit import detect_conflict_against_canonical, write_audit
+from app.knowledge.git_reachability import check_repo_reachable, mask_token
+from app.knowledge.git_token_resolver import get_global_git_token
 from app.knowledge.intake import (
     CONFLICT_CANDIDATE_LIMIT,
     IntakeLLMError,
@@ -44,6 +42,7 @@ from app.models import (
     Namespace,
     RepoDataSourceMapping,
 )
+from app.models.base import local_now
 from app.models.user import User
 from app.schemas import (
     BatchStatus,
@@ -139,6 +138,19 @@ async def create_knowledge(
             entry=KnowledgeEntryOut.model_validate(ke),
         )
 
+    # ── Task 4: payload 校验 — instance_alias 走专用闸门, 其余走 parse_payload ──
+    validated_payload = None
+    if body.payload is not None:
+        try:
+            if body.entry_type == "instance_alias":
+                from app.knowledge.instance_alias_intake import validate_instance_alias_payload
+                validated_payload = dict(validate_instance_alias_payload(body.payload))
+            else:
+                parsed = parse_payload(body.entry_type, body.payload)
+                validated_payload = parsed.model_dump(exclude_none=False)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"payload 校验失败: {e}")
+
     refined = await asyncio.to_thread(
         refine_knowledge, body.entry_type, body.content, body.tier,
     )
@@ -190,8 +202,8 @@ async def create_knowledge(
         source="manual",
         # Stage 1: 手工录入默认 proposed (待人审进 RAG); 走 PATCH status=canonical 通过审核
         status="proposed",
-        payload=json.dumps(body.payload, ensure_ascii=False) if body.payload else None,
-        refined_at=datetime.now(),
+        payload=json.dumps(validated_payload, ensure_ascii=False) if validated_payload else None,
+        refined_at=local_now(),
     )
     db.add(entry)
     await db.commit()
@@ -545,7 +557,7 @@ async def edit_knowledge(
             log.warning("[edit] hq_writer manual fail entry=%d: %s", entry.id, e)
     elif (
         content_changed
-        and entry.entry_type in {"rule", "route_hint"}
+        and entry.entry_type in {"rule", "route_hint", "example"}
         and entry.status == "canonical"
     ):
         try:
@@ -672,7 +684,7 @@ async def add_repo(
     if not ns:
         raise HTTPException(404, "命名空间不存在")
 
-    # ── Token 优先级解析: body.git_token > namespace.git_token > 全局配置中心 > settings.git_token ──
+    # ── Token 优先级: body.git_token > namespace.git_token > 全局配置中心 > settings.git_token ──
     global_token = await get_global_git_token(db)
     resolved_token = body.git_token or ns.git_token or global_token
 

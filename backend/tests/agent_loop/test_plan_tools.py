@@ -134,7 +134,7 @@ async def test_execute_plan_returns_rows_and_columns():
 
 
 # ════════════════════════════════════════════
-#  present_result_tool (反转自 recommend_chart_tool)
+#  present_result_tool (声明式: ref + chart_spec)
 # ════════════════════════════════════════════
 
 def test_present_result_echoes_ref_and_spec():

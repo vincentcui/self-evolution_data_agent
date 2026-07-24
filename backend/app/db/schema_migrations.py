@@ -639,12 +639,13 @@ async def run_all(engine: AsyncEngine) -> None:
     await _ensure_schema_canonical_objects_table(engine)
     # schema-knowledge-onboarding Phase 1: schema_canonical_objects 新增 3 列
     await _add_missing(engine, "schema_canonical_objects", _SCHEMA_CANONICAL_OBJECT_NEW_COLS)
+    # migration_035: 旧 conflict 表必须先补 conflict_scope，才可创建 scope 唯一索引。
+    # 新库尚无表时该 migration 安全返回，随后 Phase 1 DDL 一次建表。
+    await _migrate_conflict_scopes(engine)
     # migration_010 (schema-knowledge-onboarding Phase 1): candidate / conflict /
     # canonical_audit_log / extraction_failure_log 四张新表 + partial unique index.
     # 修订 #4 要求 conflict 表 partial unique 仅约束 status='open' 行.
     await _ensure_schema_canonical_phase1_tables(engine)
-    # migration_035: conflict scope 按 relationship identity 分隔。
-    await _migrate_conflict_scopes(engine)
     # post-Stage1: drop 孤儿表 mongo_collection_indexes (运行时索引特性退役)
     await _drop_mongo_collection_indexes_table(engine)
     # migration_011 (enum-knowledge-binding): enum_dictionaries 表

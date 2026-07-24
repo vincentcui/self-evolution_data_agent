@@ -472,7 +472,8 @@ async def extract_and_write_knowledge(
     Creates KE entries for:
     - rule (from business_rules)
     - terminology (from business_terms, via upsert_terminology_with_validation)
-    - example (from business_examples — sql2nl 查询模式, D3 恢复; agentic 管线核心产出)
+    - example (from business_examples — agent 产 question + native query body,
+      writer 包单步 final_query_plan)
 
     Args:
         coll_to_db: collection→database 反查表 (trainer._build_coll_to_db 构建).
@@ -494,7 +495,7 @@ async def extract_and_write_knowledge(
         if created:
             total += 1
 
-    # ── business_examples → example KE (sql2nl, D3 恢复) ──
+    # ── business_examples → example KE ──
     total += await _write_business_examples(
         db, namespace_id, repo_id, business_examples or [], coll_to_db,
     )
@@ -511,18 +512,28 @@ async def _write_business_examples(
     db: AsyncSession, namespace_id: int, repo_id: int, business_examples: list[dict],
     coll_to_db: dict[str, tuple[str, str]] | None = None,
 ) -> int:
-    """sql2nl → example KE (D3 恢复). Stage A 下线, 本 spec 经 agentic 管线恢复为核心产出.
+    """agentic emit_knowledge(example) → example KE.
 
-    每个 example dict (agent emit_knowledge entry_type=example 的 payload) →
-    KnowledgeEntry(entry_type='example', status='proposed', source='code_extract').
-
-    Task 1b: collections 升级为 CollectionRef, sql_pattern/tables legacy compat 字段移除.
+    agent 产 question (NL 问题, 必填, 召回键) + query (native shape) + operation + tables.
+    writer 包成单步 final_query_plan; coll_to_db 解析 collection → (db_type, database).
+    content = question (D1 召回键唯一真相源).
     """
     total = 0
     for ex in business_examples:
-        sql = ex.get("sql_pattern", "")
-        if not sql:
+        question = (ex.get("question") or ex.get("question_pattern") or "").strip()
+        query = ex.get("query")
+        tables = ex.get("tables") or []
+        if not question or not isinstance(query, dict) or not tables:
             continue
+        db_type, database = _resolve_coll_db(tables[0], coll_to_db)
+        operation = ex.get("operation") or _infer_operation(db_type)
+        step = {
+            "db_type": db_type,
+            "database": database,
+            "collection": tables[0],
+            "operation": operation,
+            "query": dict(query),
+        }
         db.add(KnowledgeEntry(
             namespace_id=namespace_id,
             entry_type="example",
@@ -530,21 +541,40 @@ async def _write_business_examples(
             tier="normal",
             source="code_extract",
             repo_id=repo_id,
-            content=f"查询模式: {sql[:120]}",
+            content=question,
             payload=json.dumps({
-                "question_pattern": ex.get("question_pattern") or ex.get("question", ""),
-                "collections": [r.model_dump() for r in _refs_from_names(ex.get("tables", []), coll_to_db)],
+                "question_pattern": question,
+                "collections": [r.model_dump() for r in _refs_from_names(tables, coll_to_db)],
                 "join_keys": ex.get("join_keys", []),
-                "final_query_plan": ex.get("final_query_plan"),
+                "final_query_plan": {"steps": [step]},
                 "result_summary": ex.get("result_summary", ""),
-                "source_mapper": ex.get("mapper_namespace", ""),
-                "extraction_source": "mybatis_extract",
             }, ensure_ascii=False),
         ))
         total += 1
     if total:
         await db.flush()
     return total
+
+
+def _resolve_coll_db(
+    collection: str, coll_to_db: dict[str, tuple[str, str]] | None,
+) -> tuple[str, str]:
+    """collection → (db_type, database) via coll_to_db; 缺失返 ("", "")."""
+    if coll_to_db:
+        entry = coll_to_db.get(collection)
+        if entry:
+            return (entry[0], entry[1])
+    return ("", "")
+
+
+def _infer_operation(db_type: str) -> str:
+    """db_type → 默认 operation (agent 未产 operation 时的兜底)."""
+    from app.engine.db_types import DOCUMENT_DB_TYPES, SQL_DB_TYPES
+    if db_type in SQL_DB_TYPES:
+        return "sql"
+    if db_type in DOCUMENT_DB_TYPES:
+        return "aggregate"
+    return "unknown"
 
 
 async def _write_rule_ke(
@@ -591,7 +621,10 @@ async def _write_terminology_ke(
 
     repo_id 形参保留但有意忽略: 术语只归属 schema/namespace (ns 级), 不写 repo_id.
     """
-    from app.knowledge.terminology_intake import upsert_terminology_with_validation, _resolve_db_type
+    from app.knowledge.terminology_intake import (
+        _resolve_db_type,
+        upsert_terminology_with_validation,
+    )
 
     term_name = term.get("term") or ""
     if not term_name:

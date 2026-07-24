@@ -31,7 +31,7 @@ _EXTRACTION_AGENT_BASE_FALLBACK = (
     "你是代码 schema 提取专家。分析仓库源码，提取所有数据持久化定义。"
     "按探索原则自主发现实体、递归展开字段、提取枚举、标记关联关系。"
     "嵌套深度上限 ${max_depth} 层。每个持久化对象通过 emit_schema_object 提交。"
-    "SELECT SQL 语义化后通过 emit_knowledge (entry_type=example) 提交。"
+    "发现可复用查询模式时通过 emit_knowledge(entry_type=example) 提交 question + native query body。"
 )
 
 

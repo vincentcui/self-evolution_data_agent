@@ -1,7 +1,7 @@
 """
 可视化智能推荐 — 确定性渲染器
 图表类型/列角色由 LLM 在 present_result 的 chart_spec 给出; 渲染器只机械拼 option.
-(旧 dtype 启发式 recommend_chart 已于 Stage 2 删除, 反转为 render_chart.)
+(旧 dtype 启发式图表推荐工具已于 Stage 2 删除, 反转为 render_chart.)
 """
 
 import math
@@ -46,7 +46,7 @@ def _to_serializable(val):
 
 # ════════════════════════════════════════════
 #  Stage 1: 确定性渲染器 (LLM 出列角色, 此处机械渲染)
-#  反转自旧 recommend_chart: 不再 dtype 猜类型, 只按 chart_spec 拼 option.
+#  反转自旧启发式: 不再 dtype 猜类型, 只按 chart_spec 拼 option.
 # ════════════════════════════════════════════
 
 _VALID_CHART_TYPES = frozenset({"card", "line", "pie", "bar", "table"})

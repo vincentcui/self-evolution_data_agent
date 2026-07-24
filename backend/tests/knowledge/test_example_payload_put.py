@@ -35,7 +35,7 @@ async def test_put_example_5field_payload_200(
             "question_pattern": "查询订单",
             "collections": [{"database": "shop", "collection": "orders"}],
             "join_keys": [],
-            "final_query_plan": None,
+            "final_query_plan": {"steps": []},
             "result_summary": "",
         }),
         source="manual",
@@ -86,10 +86,10 @@ async def test_put_example_5field_payload_200(
 
 
 @pytest.mark.asyncio
-async def test_put_example_old_payload_compat_200(
+async def test_put_example_old_payload_rejected_422(
     db_session,
 ):
-    """Old payload with question+target_collection+query_json still passes extra='allow'."""
+    """Old payload with question+target_collection+query_json now rejected by extra='forbid' → 422."""
     ns = Namespace(name="test-ns-old", slug="test-ns-old", description="")
     db_session.add(ns)
     await db_session.commit()
@@ -103,9 +103,8 @@ async def test_put_example_old_payload_compat_200(
         content="查看各订单状态",
         created_at=datetime.utcnow(),
         payload=json.dumps({
-            "question": "查看各订单状态",
-            "target_collection": "orders",
-            "query_json": {"pipeline": []},
+            "question_pattern": "查看各订单状态",
+            "final_query_plan": {"steps": []},
         }),
         source="qmql_history",
     )
@@ -129,20 +128,21 @@ async def test_put_example_old_payload_compat_200(
                 json={
                     "content": "查看各订单状态分布",
                     "tier": "normal",
-                    "reason": "test compat",
+                    "reason": "test forbid",
                     "payload": {
                         "question_pattern": "查看各订单状态分布",
-                        "question": "查看各订单状态",
-                        "target_collection": "orders",
-                        "query_json": {"pipeline": []},
+                        "question": "查看各订单状态",  # 死字段, forbid 拒绝
+                        "target_collection": "orders",  # 死字段
+                        "query_json": {"pipeline": []},  # 死字段
                         "collections": [{"database": "shop", "collection": "orders"}],
                         "join_keys": [],
-                        "final_query_plan": None,
+                        "final_query_plan": {"steps": []},
                         "result_summary": "",
                     },
                 },
             )
 
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 422, resp.text
+        assert "extra_forbidden" in resp.text
     finally:
         app.dependency_overrides.clear()

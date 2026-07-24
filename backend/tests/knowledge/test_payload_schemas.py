@@ -43,11 +43,11 @@ def test_example_payload_requires_question_pattern():
 
 
 def test_example_payload_minimal():
-    p = ExamplePayload(question_pattern="查询订单")
+    p = ExamplePayload(question_pattern="查询订单", final_query_plan={"steps": []})
     assert p.question_pattern == "查询订单"
     assert p.collections == []
     assert p.join_keys == []
-    assert p.final_query_plan is None
+    assert p.final_query_plan == {"steps": []}
     assert p.result_summary == ""
 
 
@@ -67,7 +67,7 @@ def test_example_payload_full():
 def test_example_result_summary_at_limit_ok():
     """result_summary 恰好等于配置上限 → 通过 (边界 == 合法)."""
     max_len = settings.example_result_summary_max_len
-    p = ExamplePayload(question_pattern="查询订单", result_summary="订" * max_len)
+    p = ExamplePayload(question_pattern="查询订单", final_query_plan={"steps": []}, result_summary="订" * max_len)
     assert len(p.result_summary) == max_len
 
 
@@ -75,20 +75,23 @@ def test_example_result_summary_over_limit_rejected():
     """result_summary 超配置上限一字 → ValidationError (config 驱动硬上限)."""
     max_len = settings.example_result_summary_max_len
     with pytest.raises(ValidationError, match="result_summary 超过字数上限"):
-        ExamplePayload(question_pattern="查询订单", result_summary="订" * (max_len + 1))
+        ExamplePayload(question_pattern="查询订单", final_query_plan={"steps": []}, result_summary="订" * (max_len + 1))
 
 
-def test_example_payload_accepts_old_fields():
-    """extra='allow' — old fields pass through without rejection."""
-    p = ExamplePayload(
-        question_pattern="查询订单",
-        question="查询订单",
-        target_collection="orders",
-        query_json={"find": {"createdAt": {"$gte": "2026-04-28"}}},
-        nl_paraphrases=["查看订单"],
-    )
-    assert p.question_pattern == "查询订单"
-    assert p.model_extra is not None
+def test_example_payload_rejects_old_fields():
+    """extra='forbid' — old fields (question/target_collection/query_json/nl_paraphrases) are rejected."""
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ExamplePayload(
+            question_pattern="查询订单",
+            final_query_plan={"steps": []},
+            question="查询订单",  # 死字段
+        )
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ExamplePayload(
+            question_pattern="查询订单",
+            final_query_plan={"steps": []},
+            nl_paraphrases=["查看订单"],  # 死字段
+        )
 
 
 def test_rule_payload():

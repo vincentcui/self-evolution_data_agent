@@ -58,7 +58,7 @@ _KNOWLEDGE_PAYLOAD_SCHEMA: dict[str, dict] = {
     "route_hint":  {"required": ["mapper_namespace", "canonical_sql"]},
     "terminology": {"required": ["term"]},
     "rule":        {"required": ["rule_text"]},
-    "example":     {"required": ["sql_pattern", "tables"]},
+    "example":     {"required": ["question", "query", "operation", "tables"]},
 }
 
 
@@ -184,7 +184,7 @@ async def run_extraction_agent(
     ]
 
     emitted: list[dict] = []
-    knowledge_proposals: list[dict] = []  # sql2nl/example/route_hint/terminology/rule
+    knowledge_proposals: list[dict] = []  # example/route_hint/terminology/rule
 
     def _make_emit_handler(buf: list[dict]) -> Callable:
         def _handler(**data: Any) -> dict:

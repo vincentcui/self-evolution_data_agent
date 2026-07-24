@@ -1,7 +1,7 @@
 """召回 payload 字面量压缩 — lookup_knowledge 返 LLM 前剥离数据快照.
 
 目的:
-- example.query_json 含具体 ObjectId 列表 / 长 regex / 整段子 pipeline 等"一次性快照",
+- example.final_query_plan 含具体 ObjectId 列表 / 长 regex / 整段子 pipeline 等"一次性快照",
   直接喂 LLM 会浪费 token 且诱导 LLM 当模板复用.
 - 本模块按 mongo / SQL 语法层通用规则递归压缩, 保 pipeline/operator/业务字段名等
   "可复用结构", 摘掉具体字面量值.
@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
-
 
 # Mongo 逻辑容器: list[dict] 是控制流结构, 不是数据数组, 递归保元素.
 _LOGICAL_LIST_KEYS: frozenset[str] = frozenset({
@@ -40,7 +39,7 @@ def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
     """召回入参 payload → 压缩后 payload, 不改原 dict (返回新对象).
 
     **按 entry_type 分发**, 因为不同 entry_type 的 payload 性质完全不同:
-    - example.query_json: 数据快照 (含 ObjectId 列表 / 时间戳等字面量), 必须压缩
+    - example.final_query_plan: 数据快照 (含 ObjectId 列表 / 时间戳等字面量), 必须压缩
     - 其他 entry_type (terminology/rule/route_hint/instance_alias): 全是
       业务语义文本 (reason/rule_text/synonyms 等), **原样返回**, 任何截断都会
       丢失知识本身.
@@ -56,12 +55,11 @@ def compact_payload_for_recall(entry_type: str, payload: dict) -> dict:
     if not isinstance(payload, dict):
         return payload
     if entry_type == "example":
-        # example.query_json + final_query_plan 含数据快照, 深度压缩
+        # example.final_query_plan 含数据快照, 深度压缩
         out = dict(payload)
         if "final_query_plan" in out and isinstance(out["final_query_plan"], dict):
             out["final_query_plan"] = _compact_query_plan(out["final_query_plan"])
-        if "query_json" in out:
-            out["query_json"] = _walk(out["query_json"])
+
     else:
         # 语义文本类 payload 不做字面量压缩; 但集合字段仍需投影 (若有)
         field = _COLLECTION_FIELDS.get(entry_type)
@@ -93,7 +91,7 @@ def _project_collection_refs(refs: list) -> list[str]:
 
 def _compact_query_plan(plan: dict) -> dict:
     """Compress query plan by step.db_type: SQL literal stripping, Mongo _walk."""
-    from app.engine.db_types import SQL_DB_TYPES, DOCUMENT_DB_TYPES
+    from app.engine.db_types import DOCUMENT_DB_TYPES, SQL_DB_TYPES
 
     out = dict(plan)
     steps: list[dict] = []
@@ -208,13 +206,18 @@ def _placeholder_for_list(node: list) -> dict:
     first = node[0]
     if isinstance(first, str):
         elem_type = "str"
-        elem_meta = f"avg_len={int(sum(len(x) for x in node if isinstance(x, str)) / max(1, len(node)))}"
+        elem_meta = (
+            f"avg_len={int(sum(len(x) for x in node if isinstance(x, str)) / max(1, len(node)))}"
+        )
     elif isinstance(first, bool):
         elem_type = "bool"
         elem_meta = ""
     elif isinstance(first, int):
         elem_type = "int"
-        elem_meta = f"range=[{min(node)},{max(node)}]" if all(isinstance(x, int) for x in node) else ""
+        elem_meta = (
+            f"range=[{min(node)},{max(node)}]"
+            if all(isinstance(x, int) for x in node) else ""
+        )
     elif isinstance(first, float):
         elem_type = "float"
         elem_meta = ""

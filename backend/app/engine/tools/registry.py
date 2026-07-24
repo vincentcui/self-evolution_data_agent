@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.engine.db_types import SUPPORTED_DB_TYPES
 from app.engine.tools.catalog_tools import list_databases, list_tables
 from app.engine.tools.data_access_tools import (
     estimate_cost,
@@ -75,9 +76,9 @@ REGISTRY: dict[str, Callable] = {
 #  工具 input 字段映射 — 抽取器消费方真相源
 # ════════════════════════════════════════════
 # 历史教训 (2026-05-14): extractor-protocol stage Task 2 写的 helper 在
-# api/query.py 把工具名/字段名硬编码 (fetch_collection_schema / input.collection),
-# 但 stage 3 多态化把工具改名为 fetch_schema / inspect_values / execute_query,
-# 字段从 collection 改 target. 抽取器看不到 stage 3 工具 → 知识沉淀失效.
+# api/query.py 把工具名/字段名硬编码, 但 stage 3 多态化把工具改名 (旧名 →
+# fetch_schema / inspect_values / execute_query), 字段从 collection 改 target.
+# 抽取器看不到 stage 3 工具 → 知识沉淀失效.
 # 本常量集中维护工具→字段映射, 工具改名时仅改这里一处.
 
 # 数据访问工具的 collection-target 字段名 (空字符串 = 该工具不持有 target).
@@ -170,35 +171,177 @@ TOOL_SPECS: list[dict] = [
         "description": (
             "把本轮会话学到的知识写入知识库待审池. "
             "Use when: clarify 获得用户确认后沉淀可复用知识. "
-            "Do not use when: 信息仅对当前查询有效, 或该业务名词的库/表路由已在已提供给你的术语中. "
-            "payload 按 entry_type 不同:\n"
-            "- terminology: {term, primary_collection, primary_database, "
-            "db_type: mysql|mongodb|oracle, synonyms?:[], source_collections?:[]}\n"
-            "- instance_alias: {alias, target_collection, target_database, "
-            "target_id, id_field?:'_id', canonical_name?}\n"
-            "- example: {question_pattern:语义骨架, "
-            "collections:[{database, collection}], "
-            "join_keys:[{from:源表.字段, "
-            "to:目标表.字段}], "
-            "final_query_plan:{steps:[{db_type:数据库类型, database, "
-            "collection:表名/集合名, operation:sql|aggregate|filter, "
-            "query:{sql:SQL串 或 pipeline:[Mongo聚合阶段]}}]}, "
-            "result_summary?:一句话结果形态}\n"
-            "- rule: {rule_text, applies_to_collections?:[{database, collection}]}\n"
-            "输入示例: {\"entry_type\":\"example\", \"content\":\"按状态分组统计订单数\", "
-            "\"payload\":{question_pattern:.., collections:[..], join_keys:[..], final_query_plan:{..}, result_summary:..}, "
-            "\"evidence\":{\"trace_ids\":[\"t1\"],\"reasoning\":\"从本次查询 trace 提取\"}, "
-            "\"tier\":\"normal\"}\n"
+            "Do not use when: 信息仅对当前查询有效, "
+            "或该业务名词的库/表路由已在已提供给你的术语中. "
+            "Input: entry_type 选 payload 对应类型, content 为自然语言精炼, "
+            "payload 字段见 input_schema.oneOf, evidence 含 trace 证据. "
+            "输入示例: {entry_type:'example', content:'按状态分组统计订单数', "
+            "payload:{question_pattern:.., final_query_plan:{..}}, "
+            "evidence:{trace_ids:['t1'], reasoning:'从本次查询提取'}, "
+            "tier:'normal'}. "
             "返回 {entry_id, status} 或 {success:false, reason}."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "entry_type": {"enum": _SAVE_ENTRY_TYPES},
-                "content": {"type": "string"},
-                "payload": {"type": "object"},
-                "evidence": {"type": "object"},
-                "tier": {"enum": ["normal", "critical"]},
+                "entry_type": {
+                    "enum": _SAVE_ENTRY_TYPES,
+                    "description": "terminology/instance_alias/example/rule",
+                },
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "自然语言精炼 (terminology=术语名, "
+                        "example=查询意图, rule=规则文本)"
+                    ),
+                },
+                "payload": {
+                    "type": "object",
+                    "description": "按 entry_type 填对应字段, 见 oneOf",
+                    "oneOf": [
+                        {"title": "terminology", "type": "object",
+                         "required": [
+                             "term", "primary_collection",
+                             "primary_database", "db_type",
+                         ],
+                         "properties": {
+                             "term": {
+                                 "type": "string",
+                                 "description": (
+                                     "业务术语 (实体类型/业务对象, "
+                                     "如 '订单' '商品')"
+                                 ),
+                             },
+                             "primary_collection": {
+                                 "type": "string",
+                                 "description": "术语对应的真实表名/集合名",
+                             },
+                             "primary_database": {
+                                 "type": "string",
+                                 "description": "该表/集合所在数据库名",
+                             },
+                             "db_type": {
+                                 "type": "string",
+                                 "enum": sorted(SUPPORTED_DB_TYPES),
+                                 "description": "该库的数据库类型",
+                             },
+                             "synonyms": {
+                                 "type": "array",
+                                 "items": {"type": "string"},
+                                 "description": "同义词 (可选)",
+                             },
+                             "source_collections": {
+                                 "type": "array",
+                                 "items": {"type": "string"},
+                                 "description": "来源集合 (可选)",
+                             },
+                         }},
+                        {"title": "instance_alias", "type": "object",
+                         "required": [
+                             "alias", "target_collection",
+                             "target_database", "target_id", "db_type",
+                         ],
+                         "properties": {
+                             "alias": {
+                                 "type": "string",
+                                 "description": "用户问题里的口语化简称原词",
+                             },
+                             "canonical_name": {
+                                 "type": "string",
+                                 "description": "记录全名",
+                             },
+                             "target_collection": {
+                                 "type": "string",
+                                 "description": "落库集合名",
+                             },
+                             "target_database": {
+                                 "type": "string",
+                                 "description": "数据库名",
+                             },
+                             "target_id": {
+                                 "type": "string",
+                                 "description": "记录的唯一键值 (如 _id)",
+                             },
+                             "id_field": {
+                                 "type": "string",
+                                 "description": "唯一键字段名 (默认 '_id')",
+                             },
+                             "db_type": {
+                                 "type": "string",
+                                 "enum": sorted(SUPPORTED_DB_TYPES),
+                                 "description": "该记录所在库的数据库类型",
+                             },
+                         }},
+                        {"title": "example", "type": "object",
+                         "required": ["question_pattern", "final_query_plan"],
+                         "properties": {
+                             "question_pattern": {
+                                 "type": "string",
+                                 "description": (
+                                     "自然语言查询意图, "
+                                     "如 '按状态分组统计订单数'"
+                                 ),
+                             },
+                             "collections": {
+                                 "type": "array",
+                                 "items": {"type": "object"},
+                                 "description": (
+                                     "涉及集合 [{database, collection}]"
+                                 ),
+                             },
+                             "join_keys": {
+                                 "type": "array",
+                                 "items": {"type": "object"},
+                                 "description": (
+                                     "跨表连接键 "
+                                     "[{from:源表.字段, to:目标表.字段}]"
+                                 ),
+                             },
+                             "final_query_plan": {
+                                 "type": "object",
+                                 "description": (
+                                     "查询计划 {steps:[{db_type, database, "
+                                     "collection, operation:sql|aggregate"
+                                     "|filter, query:{sql:SQL串 / "
+                                     "filter:{...} / "
+                                     "pipeline:[Mongo聚合阶段]}}]}"
+                                 ),
+                             },
+                             "result_summary": {
+                                 "type": "string",
+                                 "description": "一句话结果形态 (可选)",
+                             },
+                         }},
+                        {"title": "rule", "type": "object",
+                         "required": ["rule_text"],
+                         "properties": {
+                             "rule_text": {
+                                 "type": "string",
+                                 "description": "业务规则文本",
+                             },
+                             "applies_to_collections": {
+                                 "type": "array",
+                                 "items": {"type": "object"},
+                                 "description": (
+                                     "规则适用的集合 "
+                                     "[{database, collection}] (可选)"
+                                 ),
+                             },
+                         }},
+                    ],
+                },
+                "evidence": {
+                    "type": "object",
+                    "description": (
+                        "{trace_ids:[...], reasoning:'提取依据'}"
+                    ),
+                },
+                "tier": {
+                    "enum": ["normal", "critical"],
+                    "description": (
+                        "normal 进 RAG, critical 跳过 RAG 直接加载"
+                    ),
+                },
             },
             "required": ["entry_type", "content", "payload", "evidence"],
         },
@@ -527,6 +670,15 @@ types 按需选择: instance_alias(别名→记录ID) / example(历史成功对)
 8. **能力兼容**: 构造 aggregate pipeline 前, 比对 fetch_schema / estimate_cost 返回的 \
 db_profile 里的能力限制 (unsupported_ops / unsupported_stage_variants / syntax_constraints). \
 命中任一项时按 equivalent_hints 改用等效写法; 无 hint 时改用不命中该限制的等价表达.
+
+【instance_alias 别名直达】
+当 lookup_knowledge 召回 instance_alias 命中 (payload 含 target_id) 时, 说明用户口语别名已映射到一条具体记录, 直接走精确查:
+1. 用 payload 的 db_type + target_database + target_collection 作为 execute_query 的 (db_type, database, target) 三件套.
+2. 用 id_field + target_id 构造精确过滤条件:
+   - SQL 库 (db_type 为 mysql/oracle 等): query={{sql: "SELECT * FROM <target_collection> WHERE <id_field> = '<target_id>'"}}
+   - MongoDB (db_type=mongodb): query={{filter: {{<id_field>: <target_id>}}}}
+3. 直接调 execute_query, 跳过 fetch_schema / inspect_values 探查 (别名已定位, 无需再摸字段).
+4. 若 target_id 命中 0 条 (记录已删/迁移), 回退正常探查流程, 不要复用该 alias.
 
 # 数据源协议
 

@@ -11,7 +11,8 @@
 import React, { useEffect, useState } from "react";
 import { Form, Input, InputNumber, Modal, Select, message } from "antd";
 import * as api from "@/api";
-import type { CollectionRef, KnowledgeEntryCreateResponse } from "@/types";
+import type { CollectionRef, DbType, KnowledgeEntryCreateResponse } from "@/types";
+import { DB_TYPE_META } from "@/types";
 import { RESULT_SUMMARY_MAX_LEN } from "./knowledgeConstants";
 import { DatabaseCollectionPicker } from "./DatabaseCollectionPicker";
 import TerminologyEditPanel, {
@@ -88,8 +89,8 @@ export default function CreateKnowledgeForm({
   const [termPayload, setTermPayload] = useState<TerminologyPayload>({});
   const [iaPayload, setIaPayload] = useState<{
     alias: string; canonical_name: string; target_collection: string;
-    target_database: string; target_id: string; id_field: string;
-  }>({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
+    target_database: string; target_id: string; id_field: string; db_type: string;
+  }>({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "", db_type: "" });
   const [rulePayload, setRulePayload] = useState<RulePayloadDraft>({
     rule_text: "", applies_to_collections: [], priority: 0,
   });
@@ -110,7 +111,7 @@ export default function CreateKnowledgeForm({
     setScope("namespace");
     setTier("normal");
     setTermPayload({});
-    setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "" });
+    setIaPayload({ alias: "", canonical_name: "", target_collection: "", target_database: "", target_id: "", id_field: "", db_type: "" });
     setRulePayload({ rule_text: "", applies_to_collections: [], priority: 0 });
     setExPayload({ question_pattern: "", collections: [], final_query_plan_text: "", result_summary: "" });
     setRhPayload({ question_pattern: "", collection_path: [], navigation_note: "" });
@@ -143,8 +144,8 @@ export default function CreateKnowledgeForm({
       };
     } else if (entryType === "instance_alias") {
       const p = iaPayload;
-      if (!p.alias || !p.target_database || !p.target_collection || !p.target_id) {
-        message.warning("alias / target_database / target_collection / target_id 必填");
+      if (!p.alias || !p.target_database || !p.target_collection || !p.target_id || !p.db_type) {
+        message.warning("alias / target_database / target_collection / target_id / db_type 必填");
         return;
       }
       if (namespace_id === null || namespace_id === undefined) {
@@ -163,6 +164,7 @@ export default function CreateKnowledgeForm({
           target_database: p.target_database,
           target_id: p.target_id,
           id_field: p.id_field || "_id",
+          db_type: p.db_type,
         },
       };
     } else if (entryType === "rule") {
@@ -320,11 +322,27 @@ export default function CreateKnowledgeForm({
                 value={iaPayload.target_database
                   ? [{ database: iaPayload.target_database, collection: iaPayload.target_collection }]
                   : []}
-                onChange={(refs) => setIaPayload({
-                  ...iaPayload,
+                onChange={(refs) => setIaPayload((prev) => ({
+                  ...prev,
                   target_database: refs[0]?.database ?? "",
                   target_collection: refs[0]?.collection ?? "",
-                })}
+                }))}
+                onDbTypeChange={(dbType) => setIaPayload((prev) => ({
+                  ...prev, db_type: dbType ?? "",
+                }))}
+              />
+            </Form.Item>
+            <Form.Item label="数据库类型" required>
+              <Select
+                aria-label="数据库类型"
+                value={(iaPayload.db_type || undefined) as DbType | undefined}
+                placeholder="选择数据库类型"
+                onChange={(v: DbType) => setIaPayload({ ...iaPayload, db_type: v })}
+                options={(Object.keys(DB_TYPE_META) as DbType[]).map((k) => ({
+                  value: k,
+                  label: DB_TYPE_META[k].label,
+                }))}
+                style={{ width: 200 }}
               />
             </Form.Item>
             <Form.Item label="记录 ID" required>

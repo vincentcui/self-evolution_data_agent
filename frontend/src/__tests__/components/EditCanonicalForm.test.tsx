@@ -127,11 +127,6 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
         steps: [{ db_type: "mongodb", collection: "products", query: { pipeline: [{ $match: {} }] } }],
       },
       result_summary: "按名称过滤统计",
-      // legacy
-      question: "统计品牌名称包含A级的品牌数量",
-      target_collection: "products",
-      target_database: "shop_db",
-      query_json: { pipeline: [{ $match: {} }] },
     },
   } as unknown as KnowledgeEntry;
 
@@ -151,6 +146,33 @@ describe("EditCanonicalForm — entry_type-specific panels", () => {
     // ExampleEditPanel 特征 label
     expect(screen.getByText(/涉及集合/)).toBeInTheDocument();
     expect(screen.getByText(/查询计划/)).toBeInTheDocument();
+  });
+
+  it("example 编辑不渲染 dynamic_variants 折叠区", () => {
+    const mybatisEntry = {
+      ...entry,
+      id: 144,
+      entry_type: "example",
+      content: "查在售商品",
+      payload: {
+        question_pattern: "查在售商品",
+        final_query_plan: { steps: [] },
+        collections: [],
+        join_keys: [],
+        result_summary: "",
+        extraction_source: "mybatis_extract",
+        source_mapper: "ProductMapper",
+        source_method: "selectOnSale",
+        explain_verified: true,
+        dynamic_variants: [
+          { branch_conditions: ["status == 1"], sql: "SELECT * FROM products WHERE status=1", verified: true },
+        ],
+      },
+    } as unknown as KnowledgeEntry;
+    render(<EditCanonicalForm entry={mybatisEntry} />);
+    // 即使 payload 残留 dynamic_variants, UI 也不渲染折叠区
+    expect(screen.queryByText(/动态分支/)).toBeNull();
+    expect(screen.queryByText(/mybatis_extract/)).toBeNull();
   });
 
   it("route_hint 类型挂 RouteHintEditPanel", () => {

@@ -200,7 +200,7 @@ def test_route_hint_not_injected_even_when_present():
 @pytest.mark.real_llm
 @pytest.mark.asyncio
 async def test_anchored_query_first_tool_targets_correct_collection():
-    """Real LLM 验证: anchors 注入后, 首个 fetch_collection_schema 应针对 c_category.
+    """Real LLM 验证: anchors 注入后, 首个 fetch_schema 应针对 c_category.
 
     Phase 4 Task 4.5 不门控真 LLM — 真实验证留 Phase 5 acceptance gate.
     """

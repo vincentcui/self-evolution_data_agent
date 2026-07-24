@@ -4,7 +4,7 @@
  * ════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Collapse, Form, Input, Select, Space, Tag, message } from "antd";
+import { Badge, Button, Form, Input, Select, Space, message } from "antd";
 import { editKnowledge, previewConflict } from "@/api";
 import type { CollectionRef, KnowledgeEntry } from "@/types";
 import ConflictDiff from "./ConflictDiff";
@@ -71,15 +71,11 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     const p = (entry.payload ?? {}) as Record<string, unknown>;
     return {
       ...p,
-      question_pattern:  p.question_pattern as string ?? p.question as string ?? entry.content ?? "",
+      question_pattern:  (p.question_pattern as string) ?? "",
       collections:       (p.collections as CollectionRef[]) ?? [],
       join_keys:         (p.join_keys as Record<string, unknown>[]) ?? [],
-      final_query_plan:  (p.final_query_plan as Record<string, unknown>) ?? (p.query_json as Record<string, unknown>) ?? null,
+      final_query_plan:  (p.final_query_plan as Record<string, unknown>) ?? null,
       result_summary:    (p.result_summary as string) ?? "",
-      // legacy passthrough
-      question:          p.question as string,
-      target_collection: p.target_collection as string,
-      query_json:        p.query_json as Record<string, unknown>,
     } as ExamplePayload;
   });
 
@@ -120,7 +116,8 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
     setSubmitting(true);
     try {
       if (isExample) {
-        const q = (examplePayload.question_pattern as string || examplePayload.question as string || "").trim();
+        // content = question_pattern 同源同步
+        const q = ((examplePayload.question_pattern as string) || "").trim();
         if (!q) {
           message.warning("问题模式不能为空");
           setSubmitting(false);
@@ -198,39 +195,6 @@ export default function EditCanonicalForm({ entry, onDone }: Props) {
         </Button>
         {conflicts.length > 0 && <Badge count={conflicts.length} title="冲突" />}
       </Space>
-
-      {/* ── dynamic_variants 折叠区 (mybatis_extract 专用) ── */}
-      {isExample && entry.payload?.extraction_source === "mybatis_extract" && (
-        <>
-          <div style={{ background: "#fafafa", padding: 8, marginTop: 16, fontSize: 12, borderRadius: 4 }}>
-            来源: {String(entry.payload.source_mapper ?? "")}.{String(entry.payload.source_method ?? "")}
-            {entry.payload.source_repo_id != null && ` (repo #${entry.payload.source_repo_id})`}
-            {" | "}
-            EXPLAIN 验证: {entry.payload.explain_verified ? "✓ 通过" : "✗ 未通过"}
-          </div>
-          {Array.isArray(entry.payload.dynamic_variants) && (entry.payload.dynamic_variants as any[]).length > 0 && (
-            <Collapse
-              size="small"
-              style={{ marginTop: 8 }}
-              items={[{
-                key: "variants",
-                label: `动态分支 (${(entry.payload.dynamic_variants as any[]).length})`,
-                children: (
-                  <Space direction="vertical" style={{ width: "100%" }}>
-                    {(entry.payload.dynamic_variants as any[]).map((v: any, i: number) => (
-                      <div key={i} style={{ borderBottom: "1px solid #f0f0f0", paddingBottom: 8 }}>
-                        <strong>branch {i + 1}:</strong> {Array.isArray(v.branch_conditions) ? v.branch_conditions.join(" AND ") : ""}
-                        {v.verified && <Tag color="green" style={{ marginLeft: 8 }}>verified ✓</Tag>}
-                        <pre style={{ background: "#f5f5f5", padding: 8, marginTop: 4, fontSize: 12 }}>{v.sql}</pre>
-                      </div>
-                    ))}
-                  </Space>
-                ),
-              }]}
-            />
-          )}
-        </>
-      )}
     </Form>
   );
 }

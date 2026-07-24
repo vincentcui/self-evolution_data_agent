@@ -8,11 +8,8 @@ fetch_schema / inspect_values / estimate_cost / execute_query
 - 错误统一转结构化 dict (不抛给 agent_loop)
 - LLM 不感知 datasource_id
 
-与旧工具的关系:
-- fetch_schema 替代 fetch_collection_schema
-- inspect_values 替代 inspect_field_values
-- estimate_cost 替代 estimate_query_cost
-- execute_query 合并 prequery_collection + execute_count_only + execute_batched_aggregate
+execute_query 是唯一多态数据访问工具 (db_type+database+target 三件套, 走 driver
+注册表); fetch_schema / inspect_values / estimate_cost 配套。
 """
 from __future__ import annotations
 

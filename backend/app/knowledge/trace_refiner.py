@@ -92,8 +92,11 @@ terminology:
 instance_alias:
   - alias (str, ≤50 字, 用户口语别名)
   - canonical_name (str, 记录的全名供审核者识别)
+  - target_database (str, 记录所在数据库名)
+  - target_collection (str, 记录所在集合/表名)
   - target_id (str, 记录的 _id 或唯一键值)
   - id_field (str, 默认 "_id")
+  - db_type (str, 该记录所在库的数据库类型, executor 据此选 SQL/Mongo 语法; 取值见 lookup_knowledge 召回的 db_type 元信息)
 
 example:
   - question_pattern (str, 可复用语义骨架, 用于向量检索匹配类似问题)

@@ -52,7 +52,7 @@ def test_route_hint_reject_legacy_string_form():
 
 
 def test_example_collections_structured():
-    p = ExamplePayload(question_pattern="q", collections=[
+    p = ExamplePayload(question_pattern="q", final_query_plan={"steps": []}, collections=[
         {"database": "shop", "collection": "orders"},
     ])
     assert p.collections[0].database == "shop"

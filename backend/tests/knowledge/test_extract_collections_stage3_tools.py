@@ -1,8 +1,8 @@
 """Stage extractor-completeness Task 1 — 抽取器必须感知 stage 3 多态工具签名.
 
 历史教训: extractor-protocol stage Task 2 写的 helper 看 input.collection /
-fetch_collection_schema / inspect_field_values, 但 stage 3 把这些工具改名为
-fetch_schema / inspect_values / execute_query, 字段从 collection 改 target.
+旧 schema/inspect 工具名, 但 stage 3 把这些工具改名为 fetch_schema /
+inspect_values / execute_query, 字段从 collection 改 target.
 导致走 stage 3 工具的查询永远不沉淀知识. 本测试守住对齐.
 """
 import pytest
@@ -57,7 +57,7 @@ def test_extract_collections_skips_non_data_tools():
     trace = [
         {"name": "lookup_knowledge", "input": {"query": "商品"}, "output": {}},
         {"name": "save_knowledge", "input": {"content": "x"}, "output": {}},
-        {"name": "recommend_chart", "input": {"rows": []}, "output": {}},
+        {"name": "present_result", "input": {"ref": "c1"}, "output": {}},
         {"name": "clarify_with_user", "input": {"question": "?"}, "output": {}},
     ]
     assert _extract_collections(trace) == []

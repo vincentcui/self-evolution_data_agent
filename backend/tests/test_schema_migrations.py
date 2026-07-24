@@ -9,8 +9,8 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.db.schema_migrations import ensure_knowledge_entry_columns, run_all
 from app.models.base import Base
-from app.db.schema_migrations import ensure_knowledge_entry_columns
 
 TEST_DATABASE_URL = os.environ.get(
     "IS_TEST_DATABASE_URL",
@@ -98,3 +98,35 @@ async def test_ensure_columns_adds_all_when_all_missing(legacy_engine):
             "WHERE table_schema = 'public' AND table_name = 'knowledge_entries'"
         ))).all()}
     assert {"tier", "raw_input", "description", "is_superseded", "refined_at"} <= cols
+
+
+@pytest.mark.asyncio
+async def test_run_all_adds_conflict_scope_before_creating_scope_index(fresh_engine):
+    """旧 conflict 表缺 conflict_scope 时，启动迁移不应在建索引阶段失败。"""
+    async with fresh_engine.begin() as conn:
+        await conn.execute(text("DROP INDEX IF EXISTS uq_one_open_conflict_per_field"))
+        await conn.execute(text(
+            "ALTER TABLE schema_canonical_conflicts DROP COLUMN conflict_scope"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX uq_one_open_conflict_per_field "
+            "ON schema_canonical_conflicts"
+            "(namespace_id, db_type, database, target, field_path, candidate_kind) "
+            "WHERE status = 'open'"
+        ))
+
+    await run_all(fresh_engine)
+
+    async with fresh_engine.connect() as conn:
+        columns = {row[0] for row in (await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "AND table_name = 'schema_canonical_conflicts'"
+        ))).all()}
+        indexdef = (await conn.execute(text(
+            "SELECT indexdef FROM pg_indexes "
+            "WHERE indexname = 'uq_one_open_conflict_per_field'"
+        ))).scalar_one()
+
+    assert "conflict_scope" in columns
+    assert "conflict_scope" in indexdef

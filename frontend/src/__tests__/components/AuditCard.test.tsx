@@ -223,4 +223,24 @@ describe("AuditCard — entry_type type-specific blocks", () => {
     // 重写后用 CSS module pill class (ENTRY_TYPE_CLS), 非 antd ant-tag-green
     expect(pill.className).toMatch(/pill/);
   });
+  it("instance_alias 类型渲染 db_type chip (对齐 terminology)", () => {
+    const iaEntry: KnowledgeEntry = {
+      ...baseEntry,
+      id: 134,
+      entry_type: "instance_alias",
+      content: "黄金会员",
+      payload: {
+        alias: "黄金会员",
+        canonical_name: "黄金会员等级",
+        target_database: "shop",
+        target_collection: "user_levels",
+        target_id: "5f8a1b2c3d4e5f6a7b8c9d0e",
+        id_field: "_id",
+        db_type: "mongodb",
+      } as unknown as Record<string, unknown>,
+    } as unknown as KnowledgeEntry;
+    render(<AuditCard entry={iaEntry} />);
+    // chip 含 db_type · db · coll · idField=id
+    expect(screen.getByText("mongodb · shop · user_levels · _id=5f8a1b2c3d4e5f6a7b8c9d0e")).toBeInTheDocument();
+  });
 });

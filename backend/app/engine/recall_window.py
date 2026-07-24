@@ -24,13 +24,10 @@ log = logging.getLogger(__name__)
 
 # 隐式信号分类 (Spec D5 决策 2b) — backend 无关, 仍是模块级常量
 ADOPTING_TOOLS: frozenset[str] = frozenset({
-    "prequery_collection", "execute_query", "execute_plan",
-    "execute_count_only", "execute_batched_aggregate", "recommend_chart", "present_result",
-    "save_knowledge",
+    "execute_query", "execute_plan", "present_result", "save_knowledge",
 })
 NEGATIVE_TOOLS: frozenset[str] = frozenset({
-    "fetch_schema", "fetch_collection_schema",
-    "clarify_with_user", "inspect_values", "inspect_field_values",
+    "fetch_schema", "clarify_with_user", "inspect_values",
 })
 
 

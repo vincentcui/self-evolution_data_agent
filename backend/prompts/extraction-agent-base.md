@@ -75,15 +75,18 @@ emit 的 name 会去数据源按真实库表/列名精确匹配落库。用对�
 - 同一类型被多个字段引用 → 每个字段独立展开 sub_fields
 </nesting_rules>
 
-<sql2nl>
-遇到 SELECT 类 SQL 或 ORM XML <select> 映射（如 MyBatis）时, 转为自然语言查询模式描述:
-- 查询意图 — "按状态+时间范围查订单"
-- 关键过滤字段(忽略 is_deleted=0 等技术过滤)
-- 排序/分页模式
-INSERT / UPDATE / DELETE → 跳过(写入操作)。
-参数化占位符(? / #{xxx} / ${xxx}) → 保留为"按某字段过滤"。
-无法理解语义 → 丢弃, 禁止编造。
-</sql2nl>
+<example_rules>
+遇到 SELECT 类 SQL / ORM 映射 (如 MyBatis <select>) / DAO 查询方法时, 通过 emit_knowledge(entry_type="example") 提交一条可复用查询模式:
+- question: 自然语言查询意图, 如 "按状态分组统计订单数". 忽略 is_deleted=0 等技术过滤, 聚焦业务语义.
+- operation: sql (关系型) / filter (MongoDB find) / aggregate (MongoDB 聚合)
+- query: 查询体 native shape:
+    * 关系型 → {sql: "SELECT ..."} (保留参数化占位符 ? / #{xxx}, 不填实参)
+    * MongoDB find → {filter: {字段: 条件, ...}}
+    * MongoDB 聚合 → {pipeline: [{阶段}, ...]}
+- tables: 涉及的表名/集合名 (数据库真实名, 不用类名)
+INSERT / UPDATE / DELETE → 跳过 (写入操作不产 example).
+无法理解语义 → 丢弃, 禁止编造 question 或 query.
+</example_rules>
 
 <enum_rules>
 - 遇到枚举定义(Java enum / Python Enum / 其他) → 完整提取 name + db_value + description

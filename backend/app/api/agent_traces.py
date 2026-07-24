@@ -225,7 +225,8 @@ async def refine_traces_endpoint(
     llm_allowed_fields: dict[str, set[str]] = {
         "terminology": {"term", "primary_collection", "synonyms",
                         "primary_field", "source_collections"},
-        "instance_alias": {"alias", "canonical_name", "target_id", "id_field"},
+        "instance_alias": {"alias", "canonical_name", "target_id", "id_field",
+                           "target_database", "target_collection", "db_type"},
         "rule": {"rule_text", "rule_kind", "applies_to_collections",
                  "priority", "evidence"},
         "example": {"question_pattern", "result_summary",
@@ -269,6 +270,8 @@ async def refine_traces_endpoint(
             if not p.payload.get("primary_collection") and collections:
                 p.payload["primary_collection"] = collections[0]
         elif p.entry_type == "instance_alias":
+            if db_type:
+                p.payload["db_type"] = db_type
             if database:
                 p.payload["target_database"] = database
             if not p.payload.get("target_collection") and collections:

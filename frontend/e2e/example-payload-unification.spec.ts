@@ -5,7 +5,8 @@
  *          ExampleEditPanel (5 fields) → EditCanonicalForm submit
  *
  *  Auth:  Real login (admin / admin123456) via _rbac_helpers — exercises real
- *         backend parse_payload gate (extra='allow' for old, 5-field for new).
+ *         backend parse_payload gate (ExamplePayload extra='forbid', D6 不兼容:
+ *         old shape → 422, new 5-field shape → 201).
  *  Browser: chromium-only — validates business path + API contract, not CSS.
  *
  *  NOTE: Requires full backend + frontend stack running. Data is created/modified
@@ -31,6 +32,9 @@ const EXAMPLE_PAYLOAD_5FIELD = {
   },
   result_summary: "在 merchants 表上按 type 分组统计各类型商家数量",
 };
+
+// ── chromium-only: 业务路径 + API 契约, 非 CSS/富 UI (per e2e/CLAUDE.md) ──
+test.skip(({ browserName }) => browserName !== "chromium");
 
 test.describe("Example payload unification e2e", () => {
 
@@ -139,16 +143,20 @@ test.describe("Example payload unification e2e", () => {
     await expect(page.getByText("已编辑")).toBeVisible({ timeout: 3000 });
   });
 
-  test("L4: Backward compat — old payload with question still renders", async ({
+  test("L4: D6 不兼容 — old-shape payload 422, new-shape 201 + renders", async ({
     page, request,
   }) => {
-    // ── Use API to create an old-format example entry ──
+    // ── D6 "不迁移不兼容" 策略锁定 ──
+    // 旧 shape (question / target_collection / query_json, 缺 final_query_plan)
+    // 被 ExamplePayload(extra="forbid") + final_query_plan 必填拒绝 → 422.
+    // 新 shape (question_pattern + final_query_plan) → 201 且 UI 正常渲染.
     const loginResp = await request.post("/api/auth/login", {
       data: { username: "admin", password: "admin123456" },
     });
     const token = (await loginResp.json()).access_token;
 
-    const createResp = await request.post("/api/knowledge", {
+    // ── Old shape: unknown fields + missing final_query_plan → 422 ──
+    const oldShapeResp = await request.post("/api/knowledge", {
       headers: { Authorization: `Bearer ${token}` },
       data: {
         entry_type: "example",
@@ -164,31 +172,54 @@ test.describe("Example payload unification e2e", () => {
         },
       },
     });
-    expect(createResp.status()).toBe(200);
+    expect(oldShapeResp.status()).toBe(422);
 
-    // ── Refresh page and find the entry ──
+    // ── New shape: question_pattern + final_query_plan → 201 ──
+    const newQp = "按订单状态统计数量分布 " + Date.now();
+    const newShapeResp = await request.post("/api/knowledge", {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        entry_type: "example",
+        namespace_id: 1,
+        tier: "normal",
+        content: newQp,
+        payload: {
+          question_pattern: newQp,
+          collections: [{ database: "shop", collection: "orders" }],
+          join_keys: [],
+          final_query_plan: {
+            steps: [{
+              db_type: "mongodb",
+              database: "shop",
+              collection: "orders",
+              operation: "aggregate",
+              query: { pipeline: [{ $group: { _id: "$status", count: { $sum: 1 } } }] },
+            }],
+          },
+          result_summary: "在 orders 上按 status 字段 $group + $sum:1",
+        },
+      },
+    });
+    expect(newShapeResp.status()).toBe(201);
+
+    // ── New-shape entry renders in the knowledge queue ──
     await page.goto("/knowledge");
     await page.waitForLoadState("networkidle");
 
-    const oldRow = page.getByText("查看各订单状态的数量分布");
-    await expect(oldRow.first()).toBeVisible({ timeout: 5000 });
+    const newRow = page.getByText(newQp);
+    await expect(newRow.first()).toBeVisible({ timeout: 5000 });
 
-    // ── Edit should work (extra='allow') ──
+    // ── Edit panel shows new-shape fields (question_pattern + final_query_plan) ──
     const editBtn = page.getByRole("button", { name: /编辑|编 辑/ }).first();
     await editBtn.click();
 
-    // question_pattern should fallback to question value
     const qpInput = page.getByLabel("question_pattern");
-    await expect(qpInput).toHaveValue("查看各订单状态的数量分布");
+    await expect(qpInput).toHaveValue(newQp, { timeout: 3000 });
 
-    // Save should succeed
-    await page.getByPlaceholder("为何修改").fill("compat test");
-    const putPromise = page.waitForResponse(
-      (r) => r.url().includes("/api/knowledge/") && r.request().method() === "PUT",
-    );
-    await page.getByRole("button", { name: /^保.?存$/ }).click();
-    const putResp = await putPromise;
-    expect(putResp.status()).toBe(200);
+    const planTextarea = page.getByLabel("final_query_plan");
+    await expect(planTextarea).toBeVisible({ timeout: 3000 });
+    const planJson = JSON.parse(await planTextarea.inputValue());
+    expect(planJson.steps[0].collection).toBe("orders");
   });
 
   test("L5: New fields survive round-trip (create → edit → verify)", async ({

@@ -25,9 +25,9 @@ def _make_fake_result(tool_calls, stop_reason):
 @pytest.mark.parametrize("stop_reason", ["max_iterations", "dead_loop", "cancelled"])
 def test_no_route_hint_for_non_success_stop(stop_reason):
     fake_trace = [
-        {"name": "fetch_collection_schema", "input": {"collection": "c_category"},
+        {"name": "fetch_schema", "input": {"target": "c_category"},
          "output": {}, "status": "ok"},
-        {"name": "fetch_collection_schema", "input": {"collection": "c_product"},
+        {"name": "fetch_schema", "input": {"target": "c_product"},
          "output": {}, "status": "ok"},
     ]
     fake_result = _make_fake_result(fake_trace, stop_reason)
@@ -39,7 +39,7 @@ def test_no_route_hint_for_non_success_stop(stop_reason):
 def test_single_collection_does_not_generate():
     """tool_count < min (默认 5) → skip."""
     fake_trace = [
-        {"name": "fetch_collection_schema", "input": {"collection": "c_category"},
+        {"name": "fetch_schema", "input": {"target": "c_category"},
          "output": {}, "status": "ok"},
     ]
     fake_result = _make_fake_result(fake_trace, "end_turn")

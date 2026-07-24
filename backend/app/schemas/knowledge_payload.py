@@ -31,7 +31,7 @@ class TerminologyPayload(BaseModel):
     term: str
     primary_collection: str
     primary_database: str
-    db_type: Literal["mysql", "mongodb", "oracle"]  # ← 与 DRIVERS 注册表同步 (SUPPORTED_DB_TYPES); Python 不支持 Literal[*frozenset] 故手动列举
+    db_type: Literal["mysql", "mongodb", "oracle"]  # 与 DRIVERS SUPPORTED_DB_TYPES 同步
     primary_field: str | None = None
     synonyms: list[str] = []
     source_collections: list[str] = []
@@ -78,30 +78,24 @@ class TerminologyPayload(BaseModel):
 
 
 class ExamplePayload(BaseModel):
-    """统一 example payload — agent_learn + code_extract + trace_refiner 共用.
+    """example KE payload — 5 路径统一.
 
-    question_pattern: 语义骨架, ChromaDB 索引入口.
-    collections:      有序集合链 [{database, collection}].
-    join_keys:        跨表连接键 [{"from": "orders.user_id", "to": "users.id"}].
-    final_query_plan: 统一查询计划 (db_type 多态内化在 step.query 中).
-    result_summary:   自然语言描述 filter+join+aggregate 模式.
+    路径: code_extract / agent_learn / trace_refine / async_extract / manual.
+
+    question_pattern: NL 问题模式, 召回键 (content 同源).
+    collections:       有序集合链 [{database, collection}].
+    join_keys:         跨表连接键 [{"from": "orders.user_id", "to": "users.id"}].
+    final_query_plan:  查询唯一真相 {steps:[{db_type,database,collection,operation,query}]},
+                       单步/多步皆可, 跨库跨步在 steps 数组表达.
+    result_summary:    自然语言描述 filter+join+aggregate 模式.
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     question_pattern: str
     collections: list[CollectionRef] = []
     join_keys: list[dict] = []
-    final_query_plan: dict | None = None
+    final_query_plan: dict
     result_summary: str = ""
-
-    # Phase 2 P2.T13: NL paraphrases 索引升级 — 向后兼容
-    nl_paraphrases: list[str] = []
-    dynamic_variants: list[dict] = []
-    extraction_source: Literal["qmql_history", "mybatis_extract"] = "qmql_history"
-    source_mapper: str | None = None
-    source_method: str | None = None
-    source_repo_id: int | None = None
-    explain_verified: bool = False
 
     @field_validator("result_summary")
     @classmethod
@@ -122,7 +116,9 @@ class RulePayload(BaseModel):
     applies_to_collections: list[CollectionRef] = []
     priority: int = 0
     # Phase 2 P2.T13: 规则分类 + 证据 — 向后兼容
-    rule_kind: Literal["business_constraint", "filter_default", "join_pattern"] = "business_constraint"
+    rule_kind: Literal[
+        "business_constraint", "filter_default", "join_pattern",
+    ] = "business_constraint"
     evidence: dict | None = None
 
 

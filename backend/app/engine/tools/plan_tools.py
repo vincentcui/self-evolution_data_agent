@@ -207,7 +207,7 @@ async def execute_plan_tool(
 
 # ════════════════════════════════════════════
 #  Tool 3: present_result_tool (声明最终结果集 + 图表列角色)
-#  反转自 recommend_chart: 不收 rows 数组, 只收 ref(指针) + chart_spec(列角色).
+#  声明式: 不收 rows 数组, 只收 ref(指针) + chart_spec(列角色).
 #  工具内 tool_trace 不可见 → 只校验+回显; 渲染在 api finalization 按 ref 取全量数据.
 # ════════════════════════════════════════════
 

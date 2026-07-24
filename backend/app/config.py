@@ -72,8 +72,6 @@ class Settings(BaseSettings):
     """retrieve_layer3 normal tier 召回上限"""
     knowledge_retrieve_default_k: int = 5
     """lookup_knowledge tool 默认 k 值"""
-    knowledge_content_max_bytes: int = 8192  # noqa: hardcode
-    """knowledge_entries.content 长度上限"""
     recall_payload_max_list_len: int = 8
     """召回 payload 内 list (非逻辑容器) 的元素数上限, 超出整体替换为 placeholder"""
     recall_payload_max_str_len: int = 120  # noqa: hardcode
@@ -135,8 +133,6 @@ class Settings(BaseSettings):
     """隐式 ID 引用命中阈值, env: IS_USAGE_IMPLICIT_ID_REF_HIT_THRESHOLD"""
     extraction_failure_retry_max: int = 3
     """抽取失败最大重试次数, env: IS_EXTRACTION_FAILURE_RETRY_MAX"""
-    nl_paraphrases_per_example: int = 5
-    """H 维度 NL paraphrases 生成数量, env: IS_NL_PARAPHRASES_PER_EXAMPLE"""
     promote_lock_timeout_secs: int = 30
     """ns-level promote 锁超时, env: IS_PROMOTE_LOCK_TIMEOUT_SECS"""
     dynamic_sql_max_branches: int = 32
@@ -272,8 +268,6 @@ class Settings(BaseSettings):
     """estimate_query_cost 单层扫描告警阈值, 超此值返 warning='single_layer_overflow'"""
     query_cost_total_limit: int = 5_000_000  # noqa: hardcode
     """全链路累计扫描硬上限 (后续 plan_executor 决策, 此处仅声明)"""
-    query_cost_default_batch_size: int = 500  # noqa: hardcode
-    """execute_batched_aggregate 默认 batch 大小"""
     clarify_wait_timeout_secs: int = 600  # noqa: hardcode
 
     # ── 异步知识抽取阈值 ──

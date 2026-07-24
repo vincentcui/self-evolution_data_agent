@@ -165,16 +165,9 @@ def upsert_knowledge_entry(
     coll = get_knowledge_collection(target_slug)
     doc_id = make_doc_id(entry_id)
 
-    # Phase 2 P2.T13: example 类型用 question + nl_paraphrases 拼接作为索引内容
-    # example: build index from question_pattern (new) or question (old) + paraphrases
-    index_content = content
-    if entry_type == "example" and payload:
-        from app.knowledge.knowledge_content import build_example_content
-        index_content = build_example_content(payload)
-
     coll.upsert(
         ids=[doc_id],
-        documents=[index_content],
+        documents=[content],
         metadatas=[{
             "tier": tier,
             "entry_type": entry_type,
@@ -270,7 +263,7 @@ def delete_knowledge_entry(
         return
 
     # ── Stage 2 抓手 A: rule / route_hint 多向量分支 (HyQE) ──
-    if entry_type in {"rule", "route_hint"}:
+    if entry_type in {"rule", "route_hint", "example"}:
         from app.engine.embedding import get_embedding_function
         from app.engine.registry import get_chroma_client
 

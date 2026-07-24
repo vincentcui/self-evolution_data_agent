@@ -1,10 +1,13 @@
-"""Stage 4 Task 6 — cost-aware tools 测试 (estimate / count_only / batched_aggregate).
+"""Stage 4 Task 6 — cost-aware tools 测试 (estimate_query_cost).
 
 Mongo 驱动用 unittest.mock.AsyncMock + MagicMock (CI 真 mongo 代价高,
 与 Task 4 / 5 同模式).
 
 P0-3 Task 4 update: estimate_query_cost 签名加 sse_emit, 所有调用点同步补齐.
 datasource_id 已废弃 → namespace_id + database 双参.
+
+历史: count 短路 / 分批 aggregate 死函数已删 (Stage 3 后被 execute_query
+取代), 对应用例同步清除。
 """
 from __future__ import annotations
 
@@ -84,115 +87,59 @@ async def test_estimate_query_cost_warns_when_above_limit(monkeypatch):
     fake_emit.assert_awaited()
 
 
-# ════════════════════════════════════════════
-#  execute_count_only
-# ════════════════════════════════════════════
-
 @pytest.mark.asyncio
-async def test_execute_count_only_returns_count():
+async def test_estimate_query_cost_advice_no_dead_tools(monkeypatch):
+    """single_layer_overflow 时 cost_warning advice 不得引用已删工具名.
+
+    Phase 8 T22: count 短路 / 分批 aggregate 工具已退役,
+    advice 文本若仍提及死工具名会误导 LLM 调不存在的工具。
+    """
+    monkeypatch.setattr(
+        "app.config.settings.query_cost_single_layer_limit", 100
+    )
+    fake_explain = {
+        "executionStats": {"totalDocsExamined": 200},
+        "queryPlanner": {"winningPlan": {}},
+    }
+    fake_find = MagicMock()
+    fake_find.explain = AsyncMock(return_value=fake_explain)
     fake_coll = MagicMock()
-    fake_coll.count_documents = AsyncMock(return_value=42)
+    fake_coll.find = MagicMock(return_value=fake_find)
     fake_db = MagicMock()
     fake_db.__getitem__.return_value = fake_coll
 
+    fake_emit = AsyncMock()
     with patch(
         "app.engine.tools.cost_tools.get_mongo_db",
         new=AsyncMock(return_value=fake_db),
     ):
-        from app.engine.tools.cost_tools import execute_count_only
+        from app.engine.tools.cost_tools import estimate_query_cost
 
-        out = await execute_count_only(
-            namespace_id=1, collection="c_product", database="testdb",
-            filter={"categoryId": "b1"},
+        await estimate_query_cost(
+            namespace_id=1, collection="c", database="d", filter={},
+            sse_emit=fake_emit,
         )
 
-    assert out["count"] == 42
-    assert out["distinct_count"] is None
+    fake_emit.assert_awaited()
+    payload = fake_emit.await_args.args[0]
+    advice = payload["data"]["advice"]
+    assert "execute_count_only" not in advice
+    assert "execute_batched_aggregate" not in advice
+    assert "execute_query" in advice
 
 
-@pytest.mark.asyncio
-async def test_execute_count_only_with_distinct():
-    fake_coll = MagicMock()
-    fake_coll.count_documents = AsyncMock(return_value=10)
-    fake_coll.distinct = AsyncMock(return_value=["a", "b", "c"])
-    fake_db = MagicMock()
-    fake_db.__getitem__.return_value = fake_coll
+def test_cost_tools_module_has_no_dead_functions():
+    """Phase 8 T22: 死函数定义不得残留."""
+    import app.engine.tools.cost_tools as ct
 
-    with patch(
-        "app.engine.tools.cost_tools.get_mongo_db",
-        new=AsyncMock(return_value=fake_db),
-    ):
-        from app.engine.tools.cost_tools import execute_count_only
-
-        out = await execute_count_only(
-            namespace_id=1, collection="c_product", database="testdb",
-            filter={"categoryId": "b1"},
-            distinct_field="authorId",
-        )
-
-    assert out["count"] == 10
-    assert out["distinct_count"] == 3
-
-
-# ════════════════════════════════════════════
-#  execute_batched_aggregate
-# ════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_batched_aggregate_splits_and_substitutes():
-    seen_match_lengths: list[int] = []
-
-    def aggregate_side(pipeline, **kw):
-        match_in = pipeline[0]["$match"]["skuId"]["$in"]
-        seen_match_lengths.append(len(match_in))
-
-        async def _gen():
-            yield {"_id": None, "n": len(match_in)}
-
-        return _gen()
-
-    fake_coll = MagicMock()
-    fake_coll.aggregate = MagicMock(side_effect=aggregate_side)
-    fake_db = MagicMock()
-    fake_db.__getitem__.return_value = fake_coll
-
-    with patch(
-        "app.engine.tools.cost_tools.get_mongo_db",
-        new=AsyncMock(return_value=fake_db),
-    ):
-        from app.engine.tools.cost_tools import execute_batched_aggregate
-
-        ids = [f"q{i}" for i in range(1200)]
-        out = await execute_batched_aggregate(
-            namespace_id=1, collection="c_audio", database="testdb",
-            pipeline_template=[
-                {"$match": {"skuId": {"$in": "<batch>"}}},
-            ],
-            batch_field="skuId",
-            batch_ids=ids,
-            batch_size=500,
-        )
-
-    assert out["total_batches"] == 3
-    assert out["batch_sizes"] == [500, 500, 200]
-    assert out["row_count"] == 3
-    assert seen_match_lengths == [500, 500, 200]
+    assert not hasattr(ct, "execute_count_only")
+    assert not hasattr(ct, "execute_batched_aggregate")
+    assert not hasattr(ct, "_substitute_batch")
 
 
 # ════════════════════════════════════════════
 #  Stage 4 Task 6 follow-up — 边界 / 兜底测试
 # ════════════════════════════════════════════
-
-def test_substitute_batch_replaces_in_list_element():
-    """`<batch>` 直接作为 list 元素 (常见 $expr/$in 模式) 必须被替换."""
-    from app.engine.tools.cost_tools import _substitute_batch
-
-    out = _substitute_batch(
-        {"$expr": {"$in": ["$_id", "<batch>"]}},
-        [1, 2, 3],
-    )
-    assert out["$expr"]["$in"] == ["$_id", [1, 2, 3]]
-
 
 @pytest.mark.asyncio
 async def test_estimate_query_cost_aggregate_returns_pruned_explain():
@@ -377,56 +324,3 @@ async def test_estimate_query_cost_with_empty_explain():
     assert out["estimated_docs"] == 42
     assert out["hit_indexes"] == []
     assert out.get("warning") is None
-
-
-@pytest.mark.asyncio
-async def test_batched_aggregate_with_empty_batch_ids():
-    """空 batch_ids → 0 batches, aggregate 不调."""
-    fake_coll = MagicMock()
-    fake_coll.aggregate = MagicMock(side_effect=AssertionError("不该被调"))
-    fake_db = MagicMock()
-    fake_db.__getitem__.return_value = fake_coll
-
-    with patch(
-        "app.engine.tools.cost_tools.get_mongo_db",
-        new=AsyncMock(return_value=fake_db),
-    ):
-        from app.engine.tools.cost_tools import execute_batched_aggregate
-        out = await execute_batched_aggregate(
-            namespace_id=1, collection="c", database="testdb",
-            pipeline_template=[{"$match": {"x": "<batch>"}}],
-            batch_field="x", batch_ids=[], batch_size=100,
-        )
-    assert out["total_batches"] == 0
-    assert out["batch_sizes"] == []
-    assert out["row_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_batched_aggregate_closes_db_on_exception():
-    """中途 aggregate 抛错, finally 仍 close_db."""
-    closed: list[bool] = []
-
-    def aggregate_side(pipeline, **kw):
-        raise RuntimeError("simulated mongo failure")
-
-    fake_coll = MagicMock()
-    fake_coll.aggregate = MagicMock(side_effect=aggregate_side)
-    fake_client = MagicMock()
-    fake_client.close = MagicMock(side_effect=lambda: closed.append(True))
-    fake_db = MagicMock()
-    fake_db.client = fake_client
-    fake_db.__getitem__.return_value = fake_coll
-
-    with patch(
-        "app.engine.tools.cost_tools.get_mongo_db",
-        new=AsyncMock(return_value=fake_db),
-    ):
-        from app.engine.tools.cost_tools import execute_batched_aggregate
-        with pytest.raises(RuntimeError, match="simulated mongo"):
-            await execute_batched_aggregate(
-                namespace_id=1, collection="c", database="testdb",
-                pipeline_template=[{"$match": {"x": "<batch>"}}],
-                batch_field="x", batch_ids=[1, 2, 3], batch_size=100,
-            )
-    assert closed == [True], "close_db 必须 finally 触发"

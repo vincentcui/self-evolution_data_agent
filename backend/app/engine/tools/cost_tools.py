@@ -1,18 +1,15 @@
-"""Stage 4 Task 6 — cost-aware tools (estimate / count_only / batched_aggregate).
+"""Stage 4 Task 6 — cost-aware tools (estimate_query_cost).
 
-三件套帮 agent 决策"这查询能不能跑、要不要切换 count、需不需要分批":
+帮 agent 决策"这查询能不能跑、要不要收窄 filter / abort":
 
 - estimate_query_cost: read-only explain('executionStats') 估扫描行数 + 命中索引
-- execute_count_only:  极便宜 count_documents / distinct, 不拉数据
-- execute_batched_aggregate: 按 batch_field 切 batch_ids 跑 aggregate, 大循环必带
-                              cancel 检查点 (asyncio.sleep(0))
 
-事务契约: 全部 read-only, 不 commit, 不动 SQLite, 仅 mongo 直查.
+事务契约: read-only, 不 commit, 不动 SQLite, 仅 mongo 直查.
+
+实际数据访问统一走 execute_query (支持聚合); 本工具仅做只读代价预估.
 """
 from __future__ import annotations
 
-import asyncio
-import copy
 import logging
 from typing import Any
 
@@ -80,7 +77,7 @@ async def estimate_query_cost(
             await sse_emit({"event": "cost_warning", "data": {
                 "estimated_docs": result["estimated_docs"],
                 "threshold": settings.query_cost_single_layer_limit,
-                "advice": "考虑使用 execute_count_only 短路或 execute_batched_aggregate 分批降级",
+                "advice": "考虑收窄 filter 或 abort; 若需精确 count 用 execute_query 带聚合",
             }})
         return result
     finally:
@@ -148,8 +145,7 @@ async def _estimate_aggregate(
         "hint": (
             "Read explain_raw to find: totalDocsExamined per stage, COLLSCAN signals, "
             "indexName usage, SORT without index, $lookup amplification. Decide whether "
-            "to abort, narrow filter, or fall back to execute_count_only / "
-            "execute_batched_aggregate. mongo_version tells you which explain shape to expect."
+            "to abort or narrow filter. mongo_version tells you which explain shape to expect."
         ),
     }
     record_span_io(
@@ -177,119 +173,3 @@ def _collect_indexes(plan: Any) -> list[str]:
         for v in plan:
             names.extend(_collect_indexes(v))
     return names
-
-
-# ════════════════════════════════════════════
-#  execute_count_only — 不拉数据, 只数数
-# ════════════════════════════════════════════
-
-@observe(name="tool.execute_count_only")
-async def execute_count_only(
-    *, namespace_id: int, collection: str, filter: dict, database: str,
-    distinct_field: str | None = None,
-) -> dict:
-    """count_documents (+ optional distinct), 极便宜, 不拉数据."""
-    db_ = await get_mongo_db(namespace_id=namespace_id, database=database)
-    try:
-        count = await db_[collection].count_documents(filter)
-        distinct_count: int | None = None
-        if distinct_field:
-            vals = await db_[collection].distinct(distinct_field, filter)
-            distinct_count = len(vals)
-    finally:
-        close_db(db_)
-
-    out = {"count": count, "distinct_count": distinct_count}
-    record_span_io(
-        input={
-            "namespace_id": namespace_id,
-            "collection": collection,
-            "database": database,
-            "distinct_field": distinct_field,
-        },
-        output=out,
-    )
-    return out
-
-
-# ════════════════════════════════════════════
-#  execute_batched_aggregate — 大列表切批
-# ════════════════════════════════════════════
-
-@observe(name="tool.execute_batched_aggregate")
-async def execute_batched_aggregate(
-    *, namespace_id: int, collection: str, database: str,
-    pipeline_template: list[dict], batch_field: str,
-    batch_ids: list[Any], batch_size: int | None = None,
-) -> dict:
-    """按 batch_size 切 batch_ids, 字面 '<batch>' 占位运行时替换为当前 chunk.
-
-    每 batch 头部 await asyncio.sleep(0) — cancel 检查点 (大循环关键,
-    用户 POST /cancel 后 worker 必须能 yield 回事件循环)
-    """
-    if batch_size is None:
-        batch_size = settings.query_cost_default_batch_size
-
-    db_ = await get_mongo_db(namespace_id=namespace_id, database=database)
-    all_results: list[dict] = []
-    batch_sizes: list[int] = []
-    try:
-        coll = db_[collection]
-        for offset in range(0, len(batch_ids), batch_size):
-            await asyncio.sleep(0)  # cancel 检查点
-            chunk = batch_ids[offset:offset + batch_size]
-            batch_sizes.append(len(chunk))
-            pipeline = [_substitute_batch(stage, chunk) for stage in pipeline_template]
-            async for row in coll.aggregate(pipeline, allowDiskUse=True):
-                all_results.append(row)
-    finally:
-        close_db(db_)
-
-    out = {
-        "total_batches": len(batch_sizes),
-        "batch_sizes": batch_sizes,
-        "rows": all_results,
-        "row_count": len(all_results),
-    }
-    record_span_io(
-        input={
-            "namespace_id": namespace_id,
-            "collection": collection,
-            "database": database,
-            "batch_field": batch_field,
-            "total_ids": len(batch_ids),
-            "batch_size": batch_size,
-        },
-        output={
-            "total_batches": len(batch_sizes),
-            "row_count": len(all_results),
-        },
-    )
-    return out
-
-
-def _substitute_batch(stage: dict, chunk: list) -> dict:
-    """深拷贝 stage 后 walk dict/list, 把字面 '<batch>' 替换为 chunk 列表.
-
-    list 分支必须支持元素位替换: 形如 `{"$expr": {"$in": ["$_id", "<batch>"]}}` 的
-    常见 mongo 模式中 <batch> 直接作为 list 元素 (而非 dict value), 早期实现只递归
-    不替换会导致 silently 漏替换, agent 拿到原样 "<batch>" 字符串去查 mongo 必抛错.
-    """
-    s = copy.deepcopy(stage)
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, dict):
-            for k, v in list(node.items()):
-                if v == "<batch>":
-                    node[k] = chunk
-                else:
-                    _walk(v)
-        elif isinstance(node, list):
-            for i, v in enumerate(node):
-                if v == "<batch>":
-                    node[i] = chunk
-                else:
-                    _walk(v)
-
-    _walk(s)
-    return s

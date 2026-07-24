@@ -282,4 +282,113 @@ describe("CreateKnowledgeForm", () => {
     expect(onSubmitted).toHaveBeenCalled();
   });
 
+  it("instance_alias 渲染 db_type 选择器 (选项来自 DB_TYPE_META)", async () => {
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={() => {}}
+      />,
+    );
+
+    // 切到 instance_alias 类型
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const iaOption = await screen.findByText(/实例别名.*具体一条记录/);
+    await user.click(iaOption);
+
+    // db_type 选择器存在
+    const dbTypeInputs = screen.getAllByLabelText("数据库类型");
+    expect(dbTypeInputs.length).toBeGreaterThan(0);
+  });
+
+  it("instance_alias 缺 db_type 提交触发校验 warning — 不调 createKnowledge", async () => {
+    const { createKnowledge } = await import("@/api");
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={() => {}}
+      />,
+    );
+
+    // 切到 instance_alias
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const iaOption = await screen.findByText(/实例别名.*具体一条记录/);
+    await user.click(iaOption);
+
+    // 只填别名和记录 ID, 不选库 (db_type 为空)
+    await user.type(await screen.findByPlaceholderText(/用户问题里的简称/), "黄金会员");
+    await user.type(screen.getByPlaceholderText("_id 或唯一键值"), "5f8a1b2c3d4e5f6a7b8c9d0e");
+
+    await user.click(screen.getByRole("button", { name: /确定|OK/ }));
+
+    expect(createKnowledge).not.toHaveBeenCalled();
+    expect(await screen.findByText(/db_type 必填/)).toBeInTheDocument();
+  });
+
+  it("instance_alias 提交 → payload 含 db_type (选库自动同步)", async () => {
+    const { createKnowledge } = await import("@/api");
+    (createKnowledge as any).mockResolvedValue({ entry: { id: 103 }, conflicts: [], overflow: false });
+    const onSubmitted = vi.fn();
+    const user = userEvent.setup();
+    const { fireEvent } = await import("@testing-library/dom");
+    render(
+      <CreateKnowledgeForm
+        open
+        defaultNamespaceId={1}
+        onClose={() => {}}
+        onSubmitted={onSubmitted}
+      />,
+    );
+
+    // 切到 instance_alias
+    const typeSelectors = document.querySelectorAll(".ant-select-selector");
+    fireEvent.mouseDown(typeSelectors[0]);
+    const iaOption = await screen.findByText(/实例别名.*具体一条记录/);
+    await user.click(iaOption);
+
+    // 填别名
+    await user.type(await screen.findByPlaceholderText(/用户问题里的简称/), "黄金会员");
+
+    // 选库 (onDbTypeChange 自动同步 db_type=mongodb) + 集合
+    const dbInputs = screen.getAllByLabelText("数据库");
+    const dbSelectEl = dbInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(dbSelectEl).toBeTruthy();
+    fireEvent.mouseDown(dbSelectEl!);
+    const dbOption = await screen.findByText(/shop_db \(mongodb\)/);
+    await user.click(dbOption);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const collInputs = screen.getAllByLabelText(/集合|表/);
+    const collSelectEl = collInputs[0].closest(".ant-select")?.querySelector(".ant-select-selector");
+    expect(collSelectEl).toBeTruthy();
+    fireEvent.mouseDown(collSelectEl!);
+    const collOption = await screen.findByText("orders");
+    await user.click(collOption);
+
+    // 填记录 ID
+    await user.type(screen.getByPlaceholderText("_id 或唯一键值"), "5f8a1b2c3d4e5f6a7b8c9d0e");
+
+    // 提交
+    await user.click(screen.getByRole("button", { name: /确定|OK/ }));
+
+    await waitFor(() => expect(createKnowledge).toHaveBeenCalledTimes(1));
+    const body = (createKnowledge as any).mock.calls[0][0];
+    expect(body.entry_type).toBe("instance_alias");
+    expect(body.payload.db_type).toBe("mongodb");
+    expect(body.payload.target_database).toBe("shop_db");
+    expect(body.payload.target_collection).toBe("orders");
+    expect(body.payload.target_id).toBe("5f8a1b2c3d4e5f6a7b8c9d0e");
+    expect(onSubmitted).toHaveBeenCalled();
+  });
+
 });
